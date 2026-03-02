@@ -1112,6 +1112,8 @@ def get_customers_using_product(product: str) -> list[dict]:
     ).group_by(
         ProductRevenueData.customer_name,
         ProductRevenueData.bucket
+    ).having(
+        db.func.sum(ProductRevenueData.revenue) > 0
     ).order_by(
         db.func.sum(ProductRevenueData.revenue).desc()
     ).all()
