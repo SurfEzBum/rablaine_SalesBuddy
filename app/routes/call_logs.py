@@ -163,27 +163,32 @@ def _handle_milestone_and_task(call_log, user_id):
             )
             
             if result.get('success'):
-                # Store task locally
-                task_category_info = next(
-                    (c for c in TASK_CATEGORIES if c['code'] == int(task_category)), 
-                    {'name': 'Unknown', 'is_hok': False}
-                )
-                
-                msx_task = MsxTask(
-                    msx_task_id=result.get('task_id'),
-                    msx_task_url=result.get('task_url'),
-                    subject=task_subject,
-                    description=task_description if task_description else None,
-                    task_category=int(task_category),
-                    task_category_name=task_category_info['name'],
-                    duration_minutes=duration_minutes,
-                    is_hok=task_category_info['is_hok'],
-                    due_date=task_due_date,
-                    call_log=call_log,
-                    milestone=milestone
-                )
-                db.session.add(msx_task)
-                logger.info(f"MSX task created successfully: {result.get('task_id')}")
+                task_id = result.get('task_id')
+                if not task_id:
+                    logger.warning("MSX task created but ID could not be extracted")
+                    flash('Call log saved, but the MSX task ID could not be confirmed. Check MSX to verify.', 'warning')
+                else:
+                    # Store task locally
+                    task_category_info = next(
+                        (c for c in TASK_CATEGORIES if c['code'] == int(task_category)), 
+                        {'name': 'Unknown', 'is_hok': False}
+                    )
+                    
+                    msx_task = MsxTask(
+                        msx_task_id=task_id,
+                        msx_task_url=result.get('task_url'),
+                        subject=task_subject,
+                        description=task_description if task_description else None,
+                        task_category=int(task_category),
+                        task_category_name=task_category_info['name'],
+                        duration_minutes=duration_minutes,
+                        is_hok=task_category_info['is_hok'],
+                        due_date=task_due_date,
+                        call_log=call_log,
+                        milestone=milestone
+                    )
+                    db.session.add(msx_task)
+                    logger.info(f"MSX task created successfully: {task_id}")
             else:
                 error_msg = result.get('error', 'Unknown error creating task')
                 logger.error(f"Failed to create MSX task: {error_msg}")
@@ -274,7 +279,11 @@ def call_log_create():
         db.session.add(call_log)
         
         # Handle milestone and optional task creation
-        _handle_milestone_and_task(call_log, g.user.id)
+        try:
+            _handle_milestone_and_task(call_log, g.user.id)
+        except Exception as e:
+            logger.exception("Error handling milestone/task during call log create")
+            flash(f'Call log will be saved, but milestone/task failed: {e}', 'warning')
         
         db.session.commit()
         
@@ -419,7 +428,11 @@ def call_log_edit(id):
             call_log.partners = partners
         
         # Handle milestone and optional task creation
-        _handle_milestone_and_task(call_log, g.user.id)
+        try:
+            _handle_milestone_and_task(call_log, g.user.id)
+        except Exception as e:
+            logger.exception("Error handling milestone/task during call log edit")
+            flash(f'Call log will be saved, but milestone/task failed: {e}', 'warning')
         
         db.session.commit()
         
