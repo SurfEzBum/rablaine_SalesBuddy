@@ -101,8 +101,8 @@ def _get_repo_root() -> str:
 
 def _check_loop(interval_seconds: int) -> None:
     """Background loop that checks for updates periodically."""
-    # Initial delay to let the app finish starting up
-    time.sleep(30)
+    # Small delay to let the app finish starting up, then check immediately
+    time.sleep(5)
     while True:
         try:
             check_for_updates()
@@ -111,12 +111,12 @@ def _check_loop(interval_seconds: int) -> None:
         time.sleep(interval_seconds)
 
 
-def start_update_checker(interval_seconds: int = 43200) -> None:
+def start_update_checker(interval_seconds: int = 3600) -> None:
     """
     Start the background update checker thread.
 
     Args:
-        interval_seconds: How often to check (default: 43200 = 12 hours)
+        interval_seconds: How often to check (default: 3600 = 1 hour)
     """
     thread = threading.Thread(
         target=_check_loop,
