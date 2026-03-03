@@ -7,7 +7,7 @@ from datetime import datetime
 import logging
 
 from app.models import db, CallLog, Customer, Seller, Territory, Topic, Partner, Milestone, MsxTask, UserPreference
-from app.services.msx_api import create_task, TASK_CATEGORIES
+from app.services.msx_api import TASK_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -125,75 +125,6 @@ def _handle_milestone_and_task(call_log, user_id):
         )
         db.session.add(msx_task)
         logger.info(f"Pre-created MSX task linked successfully: {created_task_id}")
-    else:
-        # Check if task creation is requested (create on save - fallback behavior)
-        task_subject = request.form.get('task_subject', '').strip()
-        task_category = request.form.get('task_category', '').strip()
-        
-        if task_subject and task_category:
-            # Create task in MSX
-            task_duration = request.form.get('task_duration', '60')
-            task_description = request.form.get('task_description', '').strip()
-            task_due_date_str = request.form.get('task_due_date', '').strip()
-            
-            try:
-                duration_minutes = int(task_duration)
-            except (ValueError, TypeError):
-                duration_minutes = 60
-            
-            # Build due date for MSX (ISO 8601)
-            msx_due_date = None
-            task_due_date = None
-            if task_due_date_str:
-                try:
-                    task_due_date = datetime.strptime(task_due_date_str, '%Y-%m-%d')
-                    msx_due_date = task_due_date.strftime('%Y-%m-%dT23:59:59Z')
-                except ValueError:
-                    pass
-            
-            logger.info(f"Creating MSX task on milestone {milestone_msx_id}: {task_subject}")
-            
-            result = create_task(
-                milestone_id=milestone_msx_id,
-                subject=task_subject,
-                task_category=int(task_category),
-                duration_minutes=duration_minutes,
-                description=task_description if task_description else None,
-                due_date=msx_due_date
-            )
-            
-            if result.get('success'):
-                task_id = result.get('task_id')
-                if not task_id:
-                    logger.warning("MSX task created but ID could not be extracted")
-                    flash('Call log saved, but the MSX task ID could not be confirmed. Check MSX to verify.', 'warning')
-                else:
-                    # Store task locally
-                    task_category_info = next(
-                        (c for c in TASK_CATEGORIES if c['code'] == int(task_category)), 
-                        {'name': 'Unknown', 'is_hok': False}
-                    )
-                    
-                    msx_task = MsxTask(
-                        msx_task_id=task_id,
-                        msx_task_url=result.get('task_url'),
-                        subject=task_subject,
-                        description=task_description if task_description else None,
-                        task_category=int(task_category),
-                        task_category_name=task_category_info['name'],
-                        duration_minutes=duration_minutes,
-                        is_hok=task_category_info['is_hok'],
-                        due_date=task_due_date,
-                        call_log=call_log,
-                        milestone=milestone
-                    )
-                    db.session.add(msx_task)
-                    logger.info(f"MSX task created successfully: {task_id}")
-            else:
-                error_msg = result.get('error', 'Unknown error creating task')
-                logger.error(f"Failed to create MSX task: {error_msg}")
-                # Don't fail the whole save, just log the error and flash a warning
-                flash(f'Call log saved, but task creation failed: {error_msg}', 'warning')
     
     return True, None
 

@@ -460,10 +460,10 @@ def create_msx_task():
                 result['joined_team'] = True  # Already on team
             else:
                 result['joined_team'] = False
-                logger.debug(f'Could not auto-join milestone team: {join_result.get("error")}')
+                logger.warning(f'Could not auto-join milestone team: {join_result.get("error")}')
         except Exception as e:
             result['joined_team'] = False
-            logger.debug(f'Auto-join milestone team failed (non-blocking): {e}')
+            logger.warning(f'Auto-join milestone team failed (non-blocking): {e}')
     
     return jsonify(result)
 
