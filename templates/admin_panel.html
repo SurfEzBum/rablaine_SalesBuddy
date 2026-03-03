@@ -1014,6 +1014,17 @@ function checkForUpdates(refresh) {
                 return;
             }
             
+            // Show or hide navbar badges based on update availability
+            const navBadge = document.getElementById('updateBadge');
+            const navBadgeText = document.getElementById('updateBadgeText');
+            if (data.show_badge) {
+                if (navBadge) navBadge.classList.remove('d-none');
+                if (navBadgeText) navBadgeText.classList.remove('d-none');
+            } else {
+                if (navBadge) navBadge.classList.add('d-none');
+                if (navBadgeText) navBadgeText.classList.add('d-none');
+            }
+            
             if (data.available) {
                 statusEl.innerHTML = `
                     <div class="d-flex align-items-center gap-2">
@@ -1049,9 +1060,11 @@ function dismissUpdate() {
     })
     .then(r => r.json())
     .then(() => {
-        // Remove the badge from the navbar if present
+        // Hide the badges from the navbar
         const badge = document.getElementById('updateBadge');
-        if (badge) badge.remove();
+        if (badge) badge.classList.add('d-none');
+        const badgeText = document.getElementById('updateBadgeText');
+        if (badgeText) badgeText.classList.add('d-none');
         // Refresh the update status display
         checkForUpdates(false);
     })

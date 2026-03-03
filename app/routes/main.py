@@ -734,6 +734,10 @@ def inject_preferences():
     try:
         from app.services.update_checker import get_update_state
         update_state = get_update_state()
+        # If the background checker hasn't run yet, the cache is empty
+        if update_state.get('last_checked') is None:
+            from app.services.update_checker import check_for_updates
+            update_state = check_for_updates()
         dismissed = pref.dismissed_update_commit if pref else None
         update_available = (
             update_state.get('available', False)
