@@ -11,7 +11,7 @@ Provides API endpoints for MSX (Dynamics 365) integration:
 
 import json
 import time
-from flask import Blueprint, jsonify, request, Response, g, current_app
+from flask import Blueprint, jsonify, request, Response, g, current_app, stream_with_context
 import logging
 
 from app.services.msx_auth import (
@@ -885,11 +885,6 @@ def import_stream():
     # --- Pre-flight checks (run in normal request context) ---
     # These return clear JSON errors BEFORE starting the SSE stream
     # so the frontend gets an HTTP error instead of a broken stream.
-    try:
-        app = current_app._get_current_object()
-    except Exception as e:
-        logger.exception("Failed to get app object for import-stream")
-        return jsonify({"error": f"Server error: {e}"}), 500
 
     # Check MSX auth is working (token available)
     token = get_msx_token()
@@ -912,13 +907,8 @@ def import_stream():
         return jsonify({"error": f"Database error: {e}"}), 500
     
     def generate():
-        ctx = None
         phase = "initializing"
         try:
-            # Push app context for database operations in SSE generator
-            ctx = app.app_context()
-            ctx.push()
-            
             # Get the user_id for single-user mode (user_id=1 hack for SSE context)
             # In SSE streams we don't have proper request context, so use user_id=1
             # This matches how the app handles single-user mode
@@ -1458,12 +1448,9 @@ def import_stream():
             yield "data: " + json.dumps({
                 "error": f"Import failed during '{phase}': {error_detail}"
             }) + "\n\n"
-        finally:
-            if ctx is not None:
-                ctx.pop()
     
     return Response(
-        generate(),
+        stream_with_context(generate()),
         mimetype='text/event-stream',
         headers={
             'Cache-Control': 'no-cache',
