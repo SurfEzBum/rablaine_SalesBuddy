@@ -720,11 +720,6 @@ def inject_preferences():
     milestones_sync_state = SyncStatus.get_status('milestones')['state']
     revenue_sync_state = SyncStatus.get_status('revenue_import')['state']
     
-    # Get pending link requests count
-    pending_link_requests_count = 0
-    if g.user.is_authenticated and not g.user.is_stub:
-        pending_link_requests_count = len(g.user.get_pending_link_requests())
-    
     # Create a wrapper function that always returns color classes (CSS will handle grey state)
     def get_seller_color_with_pref(seller_id: int) -> str:
         return get_seller_color(seller_id, use_colors=True)
@@ -759,7 +754,6 @@ def inject_preferences():
         milestones_sync_state=milestones_sync_state,
         revenue_sync_state=revenue_sync_state,
         get_seller_color=get_seller_color_with_pref,
-        pending_link_requests_count=pending_link_requests_count,
         update_available=update_available,
     )
 

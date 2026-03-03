@@ -69,6 +69,9 @@ def run_migrations(db):
     # Migration: Add dismissed_update_commit to user_preferences
     _migrate_dismissed_update_commit(db, inspector)
     
+    # Migration: Drop orphan tables from old auth/migration systems
+    _drop_orphan_tables(db, existing_tables)
+    
     # =========================================================================
     # End migrations
     # =========================================================================
@@ -476,3 +479,13 @@ def _migrate_dismissed_update_commit(db, inspector):
             db, inspector, 'user_preferences', 'dismissed_update_commit',
             'VARCHAR(7)'
         )
+
+
+def _drop_orphan_tables(db, existing_tables):
+    """Drop tables left over from old auth system and Alembic migrations."""
+    orphan_tables = ['account_linking_requests', 'ai_config', 'alembic_version']
+    for table in orphan_tables:
+        if table in existing_tables:
+            db.session.execute(text(f'DROP TABLE IF EXISTS {table}'))
+            db.session.commit()
+            print(f"  Dropped orphan table: {table}")

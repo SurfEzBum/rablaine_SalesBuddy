@@ -133,35 +133,8 @@ class User(db.Model):
             return 'external'
         return 'unknown'
     
-    def get_pending_link_requests(self):
-        """Get all pending linking requests targeting this user's email."""
-        return AccountLinkingRequest.query.filter_by(
-            target_email=self.email,
-            status='pending'
-        ).order_by(AccountLinkingRequest.created_at.desc()).all()
-    
     def __repr__(self) -> str:
         return f'<User {self.email}>'
-
-
-class AccountLinkingRequest(db.Model):
-    """Requests to link a stub account to an existing user account."""
-    __tablename__ = 'account_linking_requests'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    requesting_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)  # The stub account (NULL after merge)
-    target_email = db.Column(db.String(255), nullable=False)  # Email of the account to link to
-    status = db.Column(db.String(20), default='pending', nullable=False)  # 'pending', 'approved', 'denied'
-    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
-    resolved_at = db.Column(db.DateTime, nullable=True)
-    resolved_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    
-    # Relationships
-    requesting_user = db.relationship('User', foreign_keys=[requesting_user_id], backref='linking_requests_sent')
-    resolved_by_user = db.relationship('User', foreign_keys=[resolved_by_user_id])
-    
-    def __repr__(self) -> str:
-        return f'<AccountLinkingRequest from={self.requesting_user_id} to={self.target_email} status={self.status}>'
 
 
 # =============================================================================
