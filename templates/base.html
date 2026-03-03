@@ -1364,7 +1364,17 @@
 
                     try {
                         const resp = await fetch('/api/msx/import-stream');
-                        if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
+                        if (!resp.ok) {
+                            // Try to extract a useful error message from the response body
+                            let detail = '';
+                            try {
+                                const body = await resp.json();
+                                detail = body.error || body.message || '';
+                            } catch (_) {
+                                try { detail = (await resp.text()).slice(0, 200); } catch (_) {}
+                            }
+                            throw new Error(detail || ('HTTP ' + resp.status + ': ' + resp.statusText));
+                        }
                         const reader = resp.body.getReader();
                         const decoder = new TextDecoder();
                         let buffer = '';

@@ -882,15 +882,19 @@ def import_stream():
     Creates: PODs, Territories, Sellers, SEs, Verticals, Customers
     """
     # Capture app context before generator (SSE generators lose request context)
-    app = current_app._get_current_object()
+    try:
+        app = current_app._get_current_object()
+    except Exception as e:
+        logger.exception("Failed to get app object for import-stream")
+        return jsonify({"error": f"Server error: {e}"}), 500
     
     def generate():
-        # Push app context for database operations in SSE generator
-        # Using push() instead of with-block so we don't need to re-indent all the code
-        ctx = app.app_context()
-        ctx.push()
-        
+        ctx = None
         try:
+            # Push app context for database operations in SSE generator
+            ctx = app.app_context()
+            ctx.push()
+            
             # Get the user_id for single-user mode (user_id=1 hack for SSE context)
             # In SSE streams we don't have proper request context, so use user_id=1
             # This matches how the app handles single-user mode
@@ -1415,11 +1419,15 @@ def import_stream():
             )
             
         except Exception as e:
-            db.session.rollback()
+            try:
+                db.session.rollback()
+            except Exception:
+                pass  # Don't let rollback failure mask the real error
             logger.exception("Error during MSX import stream")
             yield "data: " + json.dumps({"error": str(e)}) + "\n\n"
         finally:
-            ctx.pop()
+            if ctx is not None:
+                ctx.pop()
     
     return Response(
         generate(),
