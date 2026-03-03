@@ -261,11 +261,9 @@
                     <div class="dropdown">
                         <button class="btn btn-light dropdown-toggle position-relative" type="button" id="userMenuDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-person-circle"></i>
-                            {% if update_available %}
-                            <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle" id="updateBadge" title="Update available">
+                            <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle{{ '' if update_available else ' d-none' }}" id="updateBadge" title="Update available">
                                 <span class="visually-hidden">Update available</span>
                             </span>
-                            {% endif %}
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenuDropdown">
                             <li><a class="dropdown-item" href="{{ url_for('main.preferences') }}"><i class="bi bi-sliders"></i> Settings</a></li>
@@ -273,9 +271,7 @@
                             <li>
                                 <a class="dropdown-item" href="{{ url_for('admin.admin_panel') }}">
                                     <i class="bi bi-shield-lock"></i> Admin Panel
-                                    {% if update_available %}
-                                    <span class="badge bg-danger ms-1">Update</span>
-                                    {% endif %}
+                                    <span class="badge bg-danger ms-1{{ '' if update_available else ' d-none' }}" id="updateBadgeText">Update</span>
                                 </a>
                             </li>
                         </ul>
