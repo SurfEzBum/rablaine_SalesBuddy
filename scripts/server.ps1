@@ -1,18 +1,18 @@
 # NoteHelper - Server Management Script
-# Handles first-run setup, starting the server, and deploying updates.
+# Handles first-run setup, starting the server, and pulling updates.
 #
 # Usage:
 #   .\scripts\server.ps1            Normal start (bootstrap if needed, update if available)
-#   .\scripts\server.ps1 -Force     Full deploy cycle (stop, backup, pull, install, migrate, restart)
+#   .\scripts\server.ps1 -Force     Full update cycle (stop, backup, pull, install, migrate, restart)
 #   .\scripts\server.ps1 -StopOnly  Stop the running server and exit (skips all prereq checks)
 #
 # Entry points:
 #   start.bat               Double-click launcher (calls this script)
-#   deploy.bat              Admin-elevated deploy (calls this script with -Force)
+#   update.bat              Admin-elevated update (calls this script with -Force)
 #   stop.bat                Stop the server (calls this script with -StopOnly)
 
 param(
-    [switch]$Force,    # Force full deploy cycle regardless of current state
+    [switch]$Force,    # Force full update cycle regardless of current state
     [switch]$StopOnly  # Stop the running server and exit
 )
 
@@ -27,7 +27,7 @@ Set-Location $RepoRoot
 $HasWinget = $false
 try { if (Get-Command winget -ErrorAction SilentlyContinue) { $HasWinget = $true } } catch {}
 
-# Pause for interactive use (skipped when -Force for non-interactive deploys)
+# Pause for interactive use (skipped when -Force for non-interactive updates)
 function Pause-WithMessage {
     param([string]$Message = "Press any key to close...", [string]$Color = "Gray")
     if ($Force) { return }
@@ -271,7 +271,7 @@ if ($hasGit) {
     Write-Host "  [OK] $gitVersion" -ForegroundColor Green
 } else {
     Write-Host "  [WARNING] Git not found." -ForegroundColor Yellow
-    Write-Host "            Required for deploying updates." -ForegroundColor Gray
+    Write-Host "            Required for pulling updates." -ForegroundColor Gray
     Write-Host ""
     Install-WithWinget -Name "Git" -PackageId "Git.Git" -ManualUrl "https://git-scm.com/downloads"
     # Re-check after potential install
@@ -396,14 +396,54 @@ if ($isGitRepo) {
     Write-Host "  [INFO] Git not available - update checking disabled." -ForegroundColor Gray
 }
 
+# -- Step 11: Check backup configuration --------------------------------------
+$backupConfigFile = Join-Path $RepoRoot 'data\backup_config.json'
+$backupConfigExists = Test-Path $backupConfigFile
+$backupEnabled = $false
+if ($backupConfigExists) {
+    try {
+        $backupConfig = Get-Content $backupConfigFile -Raw | ConvertFrom-Json
+        if ($backupConfig.enabled -eq $true -and $backupConfig.backup_dir) {
+            $backupEnabled = $true
+            Write-Host "  [OK] Backups enabled -> $($backupConfig.backup_dir)" -ForegroundColor Green
+        } else {
+            Write-Host "  [INFO] Backups disabled. Run backup.bat to set up." -ForegroundColor Gray
+        }
+    } catch {
+        Write-Host "  [INFO] Backups disabled. Run backup.bat to set up." -ForegroundColor Gray
+    }
+}
+
+# Only prompt if the config file doesn't exist at all (never been asked).
+# If the file exists with enabled=false, the user explicitly declined - don't nag.
+if (-not $backupConfigExists -and -not $Force) {
+    Write-Host ""
+    Write-Host "  Automatic backups are not configured." -ForegroundColor Yellow
+    Write-Host "  Backups copy your database to OneDrive daily." -ForegroundColor Gray
+    $setupBackup = Read-Host "         Set up automatic backups now? (Y/n)"
+    if ($setupBackup -eq '' -or $setupBackup -eq 'Y' -or $setupBackup -eq 'y') {
+        $backupScript = Join-Path $PSScriptRoot 'backup.ps1'
+        & $backupScript -Setup
+    } else {
+        # Create config with enabled=false so we don't ask again
+        $declinedConfig = @{ enabled = $false } | ConvertTo-Json
+        $dataDir = Join-Path $RepoRoot 'data'
+        if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
+        Set-Content -Path $backupConfigFile -Value $declinedConfig
+        Write-Host "  [SKIP] You can set up backups later with: backup.bat" -ForegroundColor Gray
+    }
+} elseif (-not $backupConfigExists -and $Force) {
+    Write-Host "  [INFO] Backups not configured. Run backup.bat to set up." -ForegroundColor Gray
+}
+
 # ==============================================================================
 # Decision Logic
 # ==============================================================================
 
-# -Force: Full deploy cycle (used by deploy.bat and admin panel button)
+# -Force: Full update cycle (used by update.bat)
 if ($Force) {
     Write-Host ""
-    Write-Host "  Deploying..." -ForegroundColor Cyan
+    Write-Host "  Updating..." -ForegroundColor Cyan
 
     if ($serverRunning) { Stop-Server -Port $Port }
     Backup-Database
@@ -412,7 +452,7 @@ if ($Force) {
         if (-not (Pull-Updates)) {
             Write-Host "  Restarting server with current code..." -ForegroundColor Yellow
             Start-Server -Port $Port
-            Pause-WithMessage "DEPLOY FAILED - press any key to close..." "Red"
+            Pause-WithMessage "UPDATE FAILED - press any key to close..." "Red"
             exit 1
         }
     }
@@ -420,20 +460,20 @@ if ($Force) {
     if (-not (Install-Dependencies)) {
         Write-Host "  [ERROR] pip install failed!" -ForegroundColor Red
         Start-Server -Port $Port
-        Pause-WithMessage "DEPLOY FAILED - press any key to close..." "Red"
+        Pause-WithMessage "UPDATE FAILED - press any key to close..." "Red"
         exit 1
     }
 
     if (-not (Run-Migrations)) {
         Write-Host "  [ERROR] Migrations failed!" -ForegroundColor Red
         Start-Server -Port $Port
-        Pause-WithMessage "DEPLOY FAILED - press any key to close..." "Red"
+        Pause-WithMessage "UPDATE FAILED - press any key to close..." "Red"
         exit 1
     }
 
     Start-Server -Port $Port
     Write-Host ""
-    Write-Host "  Deploy complete!" -ForegroundColor Green
+    Write-Host "  Update complete!" -ForegroundColor Green
     Pause-WithMessage "Press any key to close..."
     exit 0
 }

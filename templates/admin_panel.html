@@ -303,6 +303,72 @@
             </div>
         </div>
 
+        <!-- Backups -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-cloud-arrow-up"></i> Backups</h5>
+            </div>
+            <div class="card-body" id="backupSection">
+                <div id="backupLoading" class="text-center py-3">
+                    <div class="spinner-border spinner-border-sm text-muted" role="status"></div>
+                    <span class="text-muted ms-2">Loading backup status...</span>
+                </div>
+                <div id="backupContent" style="display: none;">
+                    <!-- Not configured state -->
+                    <div id="backupNotConfigured" style="display: none;">
+                        <div class="alert alert-warning mb-3">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            Automatic backups are not configured.
+                        </div>
+                        <p class="text-muted small mb-2">
+                            Run <code>backup.bat</code> to set up daily automatic backups to OneDrive.
+                        </p>
+                    </div>
+                    <!-- Configured state -->
+                    <div id="backupConfigured" style="display: none;">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <small class="text-muted d-block">Backup Folder</small>
+                                <span id="backupDir" class="text-break"></span>
+                            </div>
+                            <div class="col-md-3">
+                                <small class="text-muted d-block">Last Backup</small>
+                                <span id="backupLastTime">Never</span>
+                            </div>
+                            <div class="col-md-3">
+                                <small class="text-muted d-block">Scheduled Task</small>
+                                <span id="backupTaskStatus"></span>
+                            </div>
+                        </div>
+                        <!-- Recent backups table -->
+                        <div id="backupListSection" style="display: none;">
+                            <h6 class="mb-2">Recent Backups</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>File</th>
+                                            <th>Size</th>
+                                            <th>Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="backupListBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div id="backupNoFiles" style="display: none;">
+                            <p class="text-muted small mb-0">No backup files found yet.</p>
+                        </div>
+                        <div class="mt-3">
+                            <button class="btn btn-primary btn-sm" id="backupNowBtn" onclick="runBackupNow()">
+                                <i class="bi bi-cloud-arrow-up"></i> Backup Now
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Danger Zone (collapsed by default) -->
         <div class="card mb-4 border-danger">
             <div class="card-header bg-danger text-white collapsed" data-bs-toggle="collapse" data-bs-target="#dangerZoneCollapse" aria-expanded="false" role="button" style="cursor: pointer;">
@@ -1114,7 +1180,102 @@ function dismissUpdate() {
 // Check on page load (uses cached state, no git fetch)
 document.addEventListener('DOMContentLoaded', function() {
     checkForUpdates(false);
+    loadBackupStatus();
 });
+
+// ==============================================================================
+// Backup Status
+// ==============================================================================
+
+function loadBackupStatus() {
+    fetch('/api/admin/backup/status')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('backupLoading').style.display = 'none';
+            document.getElementById('backupContent').style.display = '';
+
+            if (!data.enabled) {
+                document.getElementById('backupNotConfigured').style.display = '';
+                document.getElementById('backupConfigured').style.display = 'none';
+                return;
+            }
+
+            document.getElementById('backupNotConfigured').style.display = 'none';
+            document.getElementById('backupConfigured').style.display = '';
+            document.getElementById('backupDir').textContent = data.backup_dir || 'Unknown';
+
+            if (data.last_backup) {
+                const dt = new Date(data.last_backup);
+                document.getElementById('backupLastTime').textContent = dt.toLocaleString();
+            } else {
+                document.getElementById('backupLastTime').textContent = 'Never';
+            }
+
+            const taskEl = document.getElementById('backupTaskStatus');
+            if (data.task_registered) {
+                taskEl.innerHTML = '<span class="badge bg-success">Active</span>';
+            } else {
+                taskEl.innerHTML = '<span class="badge bg-secondary">Not registered</span>';
+            }
+
+            const backups = data.recent_backups || [];
+            if (backups.length > 0) {
+                document.getElementById('backupListSection').style.display = '';
+                document.getElementById('backupNoFiles').style.display = 'none';
+                const tbody = document.getElementById('backupListBody');
+                tbody.innerHTML = '';
+                backups.forEach(b => {
+                    const dt = new Date(b.modified_iso);
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td class="text-break"><small>${b.name}</small></td>` +
+                        `<td><small>${b.size_display}</small></td>` +
+                        `<td><small>${dt.toLocaleString()}</small></td>`;
+                    tbody.appendChild(tr);
+                });
+            } else {
+                document.getElementById('backupListSection').style.display = 'none';
+                document.getElementById('backupNoFiles').style.display = '';
+            }
+        })
+        .catch(() => {
+            document.getElementById('backupLoading').innerHTML =
+                '<span class="text-muted">Could not load backup status.</span>';
+        });
+}
+
+function runBackupNow() {
+    const btn = document.getElementById('backupNowBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Backing up...';
+
+    fetch('/api/admin/backup/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-arrow-up"></i> Backup Now';
+        if (data.success) {
+            btn.innerHTML = '<i class="bi bi-check-circle"></i> Done!';
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-success');
+            setTimeout(() => {
+                btn.innerHTML = '<i class="bi bi-cloud-arrow-up"></i> Backup Now';
+                btn.classList.remove('btn-success');
+                btn.classList.add('btn-primary');
+            }, 3000);
+            loadBackupStatus();
+        } else {
+            alert('Backup failed: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-arrow-up"></i> Backup Now';
+        alert('Backup failed: ' + err.message);
+    });
+}
 </script>
 {% endblock %}
 
