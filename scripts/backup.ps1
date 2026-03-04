@@ -346,35 +346,55 @@ if ($Setup) {
     # Run daily at 2 AM
     $trigger = New-ScheduledTaskTrigger -Daily -At '11:00AM'
 
-    # Run as current user, whether logged in or not
-    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
-
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries `
         -DontStopIfGoingOnBatteries `
         -StartWhenAvailable `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
 
-    try {
-        # Remove existing task if present
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    # Remove existing task if present
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 
+    # Try S4U first (runs whether logged in or not, but requires admin)
+    # Fall back to Interactive (runs only when logged in, no admin needed)
+    $registered = $false
+    try {
+        $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
         Register-ScheduledTask `
             -TaskName $TaskName `
             -Action $action `
             -Trigger $trigger `
             -Principal $principal `
             -Settings $settings `
-            -Description 'Daily backup of NoteHelper database to OneDrive' | Out-Null
+            -Description 'Daily backup of NoteHelper database to OneDrive' `
+            -ErrorAction Stop | Out-Null
+        $registered = $true
+        Write-Host "  [OK] Scheduled task '$TaskName' registered." -ForegroundColor Green
+        Write-Host "       Runs daily at 11:00 AM (even when logged out)." -ForegroundColor Gray
+    } catch {
+        # S4U requires admin -- fall back to Interactive
+        try {
+            $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+            Register-ScheduledTask `
+                -TaskName $TaskName `
+                -Action $action `
+                -Trigger $trigger `
+                -Principal $principal `
+                -Settings $settings `
+                -Description 'Daily backup of NoteHelper database to OneDrive' `
+                -ErrorAction Stop | Out-Null
+            $registered = $true
+            Write-Host "  [OK] Scheduled task '$TaskName' registered." -ForegroundColor Green
+            Write-Host "       Runs daily at 11:00 AM (while you're logged in)." -ForegroundColor Gray
+        } catch {
+            Write-Host "  [WARNING] Could not register scheduled task: $_" -ForegroundColor Yellow
+            Write-Host "            You can still run backups manually with backup.bat" -ForegroundColor Gray
+        }
+    }
 
+    if ($registered) {
         $config.task_registered = $true
         Save-BackupConfig $config
-
-        Write-Host "  [OK] Scheduled task '$TaskName' registered." -ForegroundColor Green
-        Write-Host "       Runs daily at 11:00 AM." -ForegroundColor Gray
-    } catch {
-        Write-Host "  [WARNING] Could not register scheduled task: $_" -ForegroundColor Yellow
-        Write-Host "            You can still run backups manually with backup.bat" -ForegroundColor Gray
     }
 
     # Run first backup now
