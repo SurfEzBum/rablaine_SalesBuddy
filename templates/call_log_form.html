@@ -74,12 +74,6 @@
                     <span class="spinner-border spinner-border-sm me-2" style="display: none;"></span>
                     <i class="bi bi-check-circle-fill text-success me-2" style="display: none;"></i>
                     <i class="bi bi-circle me-2"></i>
-                    <span>Analyzing topics & generating task...</span>
-                </div>
-                <div id="afStep4" class="d-flex align-items-center mb-1 text-muted">
-                    <span class="spinner-border spinner-border-sm me-2" style="display: none;"></span>
-                    <i class="bi bi-check-circle-fill text-success me-2" style="display: none;"></i>
-                    <i class="bi bi-circle me-2"></i>
                     <span>Matching milestone...</span>
                 </div>
             </div>
@@ -2403,9 +2397,14 @@ function proceedWithMeeting(meeting, dateStr) {
                 };
             }
             
-            // Step 3: AI analysis (topic tagging)
+            // Tag topics from WorkIQ response (instant, no network call)
+            if (data.topics && data.topics.length > 0) {
+                autoSuggestTopics(data.topics);
+            }
+            
+            // Step 3: Match milestone
             setAutoFillStep(3, 'loading');
-            analyzeCallWithAI(data.summary, meeting.title);
+            matchMilestoneWithAI(data.summary);
         })
         .catch(error => {
             if (autoFillAborted) return;
@@ -2414,53 +2413,11 @@ function proceedWithMeeting(meeting, dateStr) {
         });
 }
 
-function analyzeCallWithAI(summary, meetingTitle) {
-    var callNotes = summary;
-    
-    fetch('/api/ai/analyze-call', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({call_notes: callNotes})
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (autoFillAborted) return;
-        
-        if (!data.success) {
-            console.warn('AI analysis failed:', data.error);
-            // Continue anyway - not a blocker
-        } else {
-            // Add topics (task fields are filled by selectMilestone from WorkIQ suggestion)
-            if (data.topics && data.topics.length > 0) {
-                data.topics.forEach(function(topic) {
-                    if (!isTopicSelected(topic.id)) {
-                        addTopic(topic.id, topic.name);
-                    }
-                });
-            }
-        }
-        
-        setAutoFillStep(3, 'done');
-        
-        // Step 4: Match milestone
-        setAutoFillStep(4, 'loading');
-        matchMilestoneWithAI(callNotes);
-    })
-    .catch(error => {
-        if (autoFillAborted) return;
-        console.warn('AI analysis error:', error);
-        // Continue anyway
-        setAutoFillStep(3, 'done');
-        setAutoFillStep(4, 'loading');
-        matchMilestoneWithAI(summary);
-    });
-}
-
 function matchMilestoneWithAI(callNotes) {
     // First check if milestones are loaded
     if (!allMilestones || allMilestones.length === 0) {
         console.log('No milestones loaded yet, skipping AI match');
-        setAutoFillStep(4, 'done');
+        setAutoFillStep(3, 'done');
         finishAutoFill();
         return;
     }
@@ -2488,7 +2445,7 @@ function matchMilestoneWithAI(callNotes) {
     .then(data => {
         if (autoFillAborted) return;
         
-        setAutoFillStep(4, 'done');
+        setAutoFillStep(3, 'done');
         
         if (data.success && data.matched_milestone_id) {
             // Find the matching milestone and select it
@@ -2504,7 +2461,7 @@ function matchMilestoneWithAI(callNotes) {
     .catch(error => {
         if (autoFillAborted) return;
         console.warn('Milestone matching error:', error);
-        setAutoFillStep(4, 'done');
+        setAutoFillStep(3, 'done');
         finishAutoFill();
     });
 }
@@ -2534,7 +2491,7 @@ function showAutoFillError(message) {
     document.getElementById('autoFillBtn').disabled = false;
     
     // Reset any loading steps
-    for (var i = 1; i <= 4; i++) {
+    for (var i = 1; i <= 3; i++) {
         var step = document.getElementById('afStep' + i);
         var spinner = step.querySelector('.spinner-border');
         if (spinner.style.display !== 'none') {
@@ -2545,7 +2502,7 @@ function showAutoFillError(message) {
 }
 
 function resetAutoFillSteps() {
-    for (var i = 1; i <= 4; i++) {
+    for (var i = 1; i <= 3; i++) {
         var step = document.getElementById('afStep' + i);
         step.classList.remove('text-muted');
         step.classList.add('text-muted');
