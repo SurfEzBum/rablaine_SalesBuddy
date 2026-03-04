@@ -216,6 +216,7 @@ def api_admin_ai_config_test():
 @admin_bp.route('/api/admin/update-check', methods=['GET'])
 def api_update_check():
     """Check for available updates and return current state."""
+    from flask import current_app
     from app.services.update_checker import get_update_state, check_for_updates
     
     # If force refresh requested, run the check now
@@ -224,6 +225,16 @@ def api_update_check():
     else:
         state = get_update_state()
     
+    # Include the boot-time commit (what the running server loaded)
+    boot_commit = current_app.config.get('BOOT_COMMIT')
+    state['boot_commit'] = boot_commit
+    disk_commit = state.get('local_commit')
+    state['restart_needed'] = (
+        boot_commit is not None
+        and disk_commit is not None
+        and boot_commit != disk_commit
+    )
+
     # Include dismissed commit from user prefs
     pref = UserPreference.query.first()
     dismissed = pref.dismissed_update_commit if pref else None

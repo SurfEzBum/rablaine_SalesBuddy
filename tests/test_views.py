@@ -411,3 +411,65 @@ def test_admin_ai_non_guid_ids_detected(client):
     # Non-GUID IDs should fail validation
     assert 'id="aiTestBtn"' not in html
     assert 'Setup guide' in html
+
+
+# =============================================================================
+# Admin Panel Update Check - Boot Commit Tracking
+# =============================================================================
+
+def test_update_check_includes_boot_commit(client, app):
+    """Update check API includes boot_commit from app config."""
+    app.config['BOOT_COMMIT'] = 'abc1234'
+    mock_state = {
+        'available': False,
+        'local_commit': 'abc1234',
+        'remote_commit': 'abc1234',
+        'commits_behind': 0,
+        'last_checked': '2026-03-04T12:00:00+00:00',
+        'error': None,
+    }
+    with patch('app.services.update_checker.get_update_state', return_value=mock_state):
+        response = client.get('/api/admin/update-check')
+        data = response.get_json()
+
+    assert data['boot_commit'] == 'abc1234'
+    assert data['restart_needed'] is False
+
+
+def test_update_check_restart_needed_when_commits_differ(client, app):
+    """Update check API signals restart_needed when boot != disk commit."""
+    app.config['BOOT_COMMIT'] = 'abc1234'
+    mock_state = {
+        'available': False,
+        'local_commit': 'def5678',
+        'remote_commit': 'def5678',
+        'commits_behind': 0,
+        'last_checked': '2026-03-04T12:00:00+00:00',
+        'error': None,
+    }
+    with patch('app.services.update_checker.get_update_state', return_value=mock_state):
+        response = client.get('/api/admin/update-check')
+        data = response.get_json()
+
+    assert data['boot_commit'] == 'abc1234'
+    assert data['local_commit'] == 'def5678'
+    assert data['restart_needed'] is True
+
+
+def test_update_check_no_restart_when_boot_commit_none(client, app):
+    """No restart_needed when boot commit could not be determined."""
+    app.config['BOOT_COMMIT'] = None
+    mock_state = {
+        'available': False,
+        'local_commit': 'abc1234',
+        'remote_commit': 'abc1234',
+        'commits_behind': 0,
+        'last_checked': '2026-03-04T12:00:00+00:00',
+        'error': None,
+    }
+    with patch('app.services.update_checker.get_update_state', return_value=mock_state):
+        response = client.get('/api/admin/update-check')
+        data = response.get_json()
+
+    assert data['boot_commit'] is None
+    assert data['restart_needed'] is False

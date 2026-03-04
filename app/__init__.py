@@ -128,6 +128,18 @@ def create_app():
     from app.services.scheduled_sync import start_scheduled_sync
     start_scheduled_sync(app)
     
+    # Capture the git commit hash at boot time (frozen in memory)
+    import subprocess
+    try:
+        boot_result = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            capture_output=True, text=True, timeout=5,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
+        app.config['BOOT_COMMIT'] = boot_result.stdout.strip() or None
+    except Exception:
+        app.config['BOOT_COMMIT'] = None
+
     # Start background update checker (checks GitHub every 12 hours)
     from app.services.update_checker import start_update_checker
     start_update_checker(interval_seconds=43200)
