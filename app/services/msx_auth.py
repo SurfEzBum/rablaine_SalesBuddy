@@ -387,7 +387,12 @@ _az_login_state: Dict[str, Any] = {
 
 
 def check_az_cli_installed() -> bool:
-    """Check if Azure CLI is installed and in PATH."""
+    """Check if Azure CLI is installed and in PATH.
+
+    Uses ``az --version`` but checks stdout for 'azure-cli' rather than
+    relying solely on the exit code, since ``az --version`` can return
+    non-zero when extensions have warnings or updates are available.
+    """
     try:
         result = subprocess.run(
             "az --version" if IS_WINDOWS else ["az", "--version"],
@@ -396,7 +401,12 @@ def check_az_cli_installed() -> bool:
             timeout=10,
             shell=IS_WINDOWS,
         )
-        return result.returncode == 0
+        # Check returncode first, but also accept non-zero if stdout
+        # contains version info (az --version sometimes exits non-zero
+        # due to extension warnings or update notices).
+        if result.returncode == 0:
+            return True
+        return "azure-cli" in (result.stdout or "").lower()
     except (subprocess.SubprocessError, FileNotFoundError):
         return False
 

@@ -585,6 +585,39 @@ class TestAzWrongTenantDetection:
         assert result['logged_in'] is True
         assert result['wrong_tenant'] is False
 
+    @patch('app.services.msx_auth.subprocess.run')
+    def test_check_az_cli_installed_nonzero_with_output(self, mock_run, app):
+        """check_az_cli_installed() returns True when az --version exits non-zero but outputs version info."""
+        mock_run.return_value = type('Result', (), {
+            'returncode': 2,
+            'stdout': 'azure-cli                         2.67.0\ncore                              2.67.0\n',
+            'stderr': 'WARNING: Extension update available\n',
+        })()
+        from app.services.msx_auth import check_az_cli_installed
+        assert check_az_cli_installed() is True
+
+    @patch('app.services.msx_auth.subprocess.run')
+    def test_check_az_cli_installed_nonzero_no_output(self, mock_run, app):
+        """check_az_cli_installed() returns False when az --version exits non-zero with no version output."""
+        mock_run.return_value = type('Result', (), {
+            'returncode': 1,
+            'stdout': '',
+            'stderr': 'az: command not found\n',
+        })()
+        from app.services.msx_auth import check_az_cli_installed
+        assert check_az_cli_installed() is False
+
+    @patch('app.services.msx_auth.subprocess.run')
+    def test_check_az_cli_installed_success(self, mock_run, app):
+        """check_az_cli_installed() returns True on returncode 0."""
+        mock_run.return_value = type('Result', (), {
+            'returncode': 0,
+            'stdout': 'azure-cli 2.67.0\n',
+            'stderr': '',
+        })()
+        from app.services.msx_auth import check_az_cli_installed
+        assert check_az_cli_installed() is True
+
 
 class TestImportUiConsistency:
     """Tests that wizard import steps have proper progress UI matching admin panel."""
