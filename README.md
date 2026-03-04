@@ -98,9 +98,9 @@ pytest
 pytest --cov=app tests/  # with coverage
 ```
 
-## Starting & Deploying
+## Starting & Updating
 
-NoteHelper uses a single smart script (`scripts/server.ps1`) that handles everything: first-run setup, starting the server, checking for updates, and deploying new versions.
+NoteHelper uses a single smart script (`scripts/server.ps1`) that handles everything: first-run setup, starting the server, checking for updates, and applying new versions.
 
 ### Quick start
 
@@ -112,9 +112,9 @@ Double-click `start.bat`. On first run it will:
 
 On subsequent runs, it checks for updates from GitHub and applies them automatically before starting.
 
-### Deploying updates
+### Updating
 
-Double-click `deploy.bat` to deploy. This runs the full deploy cycle:
+Double-click `update.bat` to update. This runs the full update cycle:
 
 1. Stops the running server
 2. **Backs up your database** to `data/notehelper_backup_YYYY-MM-DD_HHMMSS.db`
@@ -129,7 +129,7 @@ You can also run it from PowerShell:
 
 ```powershell
 .\scripts\server.ps1          # Smart mode: bootstrap, update, or start as needed
-.\scripts\server.ps1 -Force   # Full deploy cycle regardless of state
+.\scripts\server.ps1 -Force   # Full update cycle regardless of state
 ```
 
 ### Script files
@@ -138,10 +138,56 @@ You can also run it from PowerShell:
 |------|---------|  
 | `start.bat` | Double-click launcher (calls `scripts/server.ps1`) |
 | `stop.bat` | Double-click to stop the server |
-| `deploy.bat` | Deploy shortcut that runs `scripts/server.ps1 -Force` |
+| `update.bat` | Update shortcut that runs `scripts/server.ps1 -Force` |
+| `backup.bat` | Run a backup now or set up automatic backups |
+| `restore.bat` | Interactive restore from a backup |
 | `scripts/server.ps1` | The brain - handles setup, updates, and server management |
+| `scripts/backup.ps1` | Backup engine - copy, rotate, schedule |
+| `scripts/restore.ps1` | Restore engine - browse, compare, swap |
 
-> **Admin elevation:** Both batch files automatically request admin (UAC prompt) only when `PORT` in `.env` is below 1024 (e.g. port 80). For higher ports like 8080, they run without elevation.
+> **Admin elevation:** Batch files automatically request admin (UAC prompt) only when `PORT` in `.env` is below 1024 (e.g. port 80). For higher ports like 8080, they run without elevation.
+
+## Backups
+
+NoteHelper can automatically back up your database to OneDrive daily. Backups are simple file copies with daily/weekly/monthly retention rotation.
+
+### Setting Up Automatic Backups
+
+The first time you run `start.bat`, it will offer to configure automatic backups. You can also set them up manually:
+
+```powershell
+.\scripts\backup.ps1 -Setup    # Configure OneDrive path + register daily scheduled task
+.\scripts\backup.ps1 -Status   # Show backup status and recent backups
+.\scripts\backup.ps1 -Remove   # Remove the scheduled task
+.\scripts\backup.ps1            # Run a backup right now
+```
+
+Or just double-click `backup.bat` to run a backup.
+
+### Restoring from a Backup
+
+Double-click `restore.bat` for an interactive restore. It will:
+
+1. List all available backups (from OneDrive and local) with dates, sizes, and contents
+2. Show your current database stats for comparison
+3. Stop the server, create a safety backup of the current DB, swap in the selected backup, and restart
+
+### What Gets Backed Up
+
+- **Database only** (`data/notehelper.db`) - contains all your call logs, customers, sellers, revenue data, etc.
+- **Configuration** (`data/backup_config.json`) is NOT backed up (it stays local so restore doesn't break the backup setup)
+
+### Retention Policy (defaults)
+
+| Tier | Kept | Description |
+|------|------|-------------|
+| Daily | 7 | One backup per day for the last week |
+| Weekly | 4 | One backup per ISO week for the last month |
+| Monthly | 3 | One backup per month for the last quarter |
+
+### Admin Panel
+
+The **Admin Panel** shows backup status, recent backups, and a "Backup Now" button. No need to use the command line for quick backups.
 
 ## AI Features (Optional)
 

@@ -2,9 +2,13 @@
 Admin routes for NoteHelper.
 Handles admin panel, user management, and domain whitelisting.
 """
+import json
 import os
+import shutil
 import signal
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, g
 
@@ -235,4 +239,131 @@ def api_update_dismiss():
         db.session.commit()
     
     return jsonify({'dismissed': True, 'commit': remote_commit})
+
+
+# ==============================================================================
+# Backup API Endpoints
+# ==============================================================================
+
+def _get_backup_config() -> dict:
+    """Load backup configuration from data/backup_config.json.
+
+    Returns:
+        dict with backup config, or defaults if file missing/invalid.
+    """
+    config_path = Path(os.path.dirname(os.path.abspath(__file__))).parent.parent / 'data' / 'backup_config.json'
+    defaults = {
+        'enabled': False,
+        'onedrive_path': '',
+        'backup_dir': '',
+        'retention': {'daily': 7, 'weekly': 4, 'monthly': 3},
+        'last_backup': None,
+        'task_registered': False,
+    }
+    if config_path.exists():
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            # Merge with defaults for missing keys
+            for key, val in defaults.items():
+                if key not in config:
+                    config[key] = val
+            return config
+        except (json.JSONDecodeError, OSError):
+            pass
+    return defaults
+
+
+def _save_backup_config(config: dict) -> None:
+    """Save backup configuration to data/backup_config.json."""
+    config_path = Path(os.path.dirname(os.path.abspath(__file__))).parent.parent / 'data' / 'backup_config.json'
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+
+
+def _list_backup_files(backup_dir: str, limit: int = 10) -> list[dict]:
+    """List recent backup files from the backup directory.
+
+    Args:
+        backup_dir: Path to the backup directory.
+        limit: Maximum number of files to return.
+
+    Returns:
+        List of dicts with name, size_bytes, size_display, modified_iso.
+    """
+    backups = []
+    if not backup_dir or not os.path.isdir(backup_dir):
+        return backups
+
+    for f in sorted(Path(backup_dir).glob('notehelper_*.db'), reverse=True):
+        stat = f.stat()
+        size_mb = stat.st_size / (1024 * 1024)
+        backups.append({
+            'name': f.name,
+            'size_bytes': stat.st_size,
+            'size_display': f'{size_mb:.1f} MB',
+            'modified_iso': datetime.fromtimestamp(
+                stat.st_mtime, tz=timezone.utc
+            ).isoformat(),
+        })
+        if len(backups) >= limit:
+            break
+    return backups
+
+
+@admin_bp.route('/api/admin/backup/status', methods=['GET'])
+def api_backup_status():
+    """Return backup configuration and recent backup list."""
+    config = _get_backup_config()
+    backups = _list_backup_files(config.get('backup_dir', ''))
+    return jsonify({
+        'enabled': config.get('enabled', False),
+        'backup_dir': config.get('backup_dir', ''),
+        'onedrive_path': config.get('onedrive_path', ''),
+        'last_backup': config.get('last_backup'),
+        'task_registered': config.get('task_registered', False),
+        'retention': config.get('retention', {}),
+        'recent_backups': backups,
+    })
+
+
+@admin_bp.route('/api/admin/backup/run', methods=['POST'])
+def api_backup_run():
+    """Run a database backup now (copies DB to the configured backup dir).
+
+    This performs the copy directly in Python rather than shelling out to
+    PowerShell, so it works regardless of OS.
+    """
+    config = _get_backup_config()
+    backup_dir = config.get('backup_dir', '')
+
+    if not config.get('enabled') or not backup_dir:
+        return jsonify({
+            'success': False,
+            'error': 'Backups are not configured. Run backup.bat -Setup first.',
+        }), 400
+
+    db_path = Path(os.path.dirname(os.path.abspath(__file__))).parent.parent / 'data' / 'notehelper.db'
+    if not db_path.exists():
+        return jsonify({'success': False, 'error': 'Database file not found.'}), 404
+
+    try:
+        os.makedirs(backup_dir, exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d_%H%M%S')
+        dest = os.path.join(backup_dir, f'notehelper_{timestamp}.db')
+        shutil.copy2(str(db_path), dest)
+
+        # Update last_backup in config
+        config['last_backup'] = datetime.now(timezone.utc).isoformat()
+        _save_backup_config(config)
+
+        size_mb = os.path.getsize(dest) / (1024 * 1024)
+        return jsonify({
+            'success': True,
+            'message': f'Backup created: notehelper_{timestamp}.db ({size_mb:.1f} MB)',
+            'file': f'notehelper_{timestamp}.db',
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
