@@ -86,7 +86,7 @@ def create_app():
                 db.session.add(g.user_prefs)
                 db.session.commit()
     
-    # Register blueprints (skip auth blueprint - not needed in single-user mode)
+    # Register blueprints
     from app.routes.admin import admin_bp
     from app.routes.ai import ai_bp
     from app.routes.territories import territories_bp
