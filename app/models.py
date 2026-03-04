@@ -1063,3 +1063,20 @@ class SyncStatus(db.Model):
     
     def __repr__(self) -> str:
         return f'<SyncStatus {self.sync_type} success={self.success}>'
+
+
+class ConnectExport(db.Model):
+    """Record of a Connect self-evaluation export for tracking date ranges."""
+    __tablename__ = 'connect_exports'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    call_log_count = db.Column(db.Integer, nullable=False, default=0)
+    customer_count = db.Column(db.Integer, nullable=False, default=0)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+
+    def __repr__(self) -> str:
+        return f'<ConnectExport {self.name} ({self.start_date} to {self.end_date})>'

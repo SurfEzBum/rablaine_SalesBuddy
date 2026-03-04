@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+
+{% block title %}Connect Export - NoteHelper{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-file-earmark-text"></i> Connect Export</h1>
+    <a href="{{ url_for('admin.admin_panel') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> Back to Admin
+    </a>
+</div>
+
+<p class="text-muted mb-4">
+    Generate structured exports of your call log activity for writing Microsoft Connects (self-evaluations).
+    Choose a date range and get a summary with full call log content, grouped by customer.
+</p>
+
+<!-- Export Form -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-calendar-range"></i> Generate New Export</h5>
+    </div>
+    <div class="card-body">
+        <form id="exportForm" onsubmit="return generateExport(event)">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label for="exportName" class="form-label">Export Name</label>
+                    <input type="text" class="form-control" id="exportName" 
+                           placeholder="e.g., FY25 H2 Connect" required>
+                </div>
+                <div class="col-md-3">
+                    <label for="startDate" class="form-label">Start Date</label>
+                    <input type="date" class="form-control" id="startDate" 
+                           value="{{ default_start }}" required>
+                </div>
+                <div class="col-md-3">
+                    <label for="endDate" class="form-label">End Date</label>
+                    <input type="date" class="form-control" id="endDate" 
+                           value="{{ default_end }}" required>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100" id="generateBtn">
+                        <i class="bi bi-lightning-charge"></i> Generate
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Export Results (hidden until generated) -->
+<div id="exportResults" style="display: none;">
+    <!-- Summary Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Export Summary</h5>
+        </div>
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-3">
+                    <div class="text-center">
+                        <h3 class="text-primary mb-0" id="summaryCallLogs">0</h3>
+                        <small class="text-muted">Call Logs</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="text-center">
+                        <h3 class="text-success mb-0" id="summaryCustomers">0</h3>
+                        <small class="text-muted">Customers</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="text-center">
+                        <h3 class="text-info mb-0" id="summaryTopics">0</h3>
+                        <small class="text-muted">Topics</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="text-center">
+                        <h3 class="text-warning mb-0" id="summaryRevenue">$0</h3>
+                        <small class="text-muted">Milestone Revenue</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Topic Breakdown -->
+            <div id="topicBreakdown" style="display: none;">
+                <h6 class="text-muted mt-3 mb-2">Topics</h6>
+                <div id="topicBadges" class="mb-3"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Text Export (copy-pastable) -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-text-left"></i> Text Export</h5>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard()">
+                    <i class="bi bi-clipboard"></i> Copy to Clipboard
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="downloadMarkdown()">
+                    <i class="bi bi-markdown"></i> Download Markdown
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="downloadJson()">
+                    <i class="bi bi-download"></i> Download JSON
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <pre id="textExportContent" class="mb-0" style="white-space: pre-wrap; font-size: 0.85rem; max-height: 600px; overflow-y: auto;"></pre>
+        </div>
+    </div>
+</div>
+
+<!-- Previous Exports -->
+{% if previous_exports %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Previous Exports</h5>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Date Range</th>
+                    <th>Call Logs</th>
+                    <th>Customers</th>
+                    <th>Created</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for export in previous_exports %}
+                <tr id="exportRow{{ export.id }}">
+                    <td>{{ export.name }}</td>
+                    <td>{{ export.start_date.strftime('%Y-%m-%d') }} to {{ export.end_date.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ export.call_log_count }}</td>
+                    <td>{{ export.customer_count }}</td>
+                    <td>{{ export.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td class="text-end">
+                        <button class="btn btn-outline-primary btn-sm" 
+                                onclick="viewExport({{ export.id }})">
+                            <i class="bi bi-eye"></i> View
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" 
+                                onclick="deleteExport({{ export.id }})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentExportId = null;
+let currentJsonExport = null;
+let currentMarkdownExport = null;
+
+function formatCurrency(amount) {
+    if (amount >= 1000000) return '$' + (amount / 1000000).toFixed(1) + 'M';
+    if (amount >= 1000) return '$' + (amount / 1000).toFixed(1) + 'K';
+    return '$' + Math.round(amount).toLocaleString();
+}
+
+function renderExportResults(data) {
+    currentExportId = data.export_id;
+    currentJsonExport = data.json_export;
+    currentMarkdownExport = data.markdown_export;
+    
+    // Update summary
+    const summary = data.summary;
+    document.getElementById('summaryCallLogs').textContent = summary.total_call_logs;
+    document.getElementById('summaryCustomers').textContent = summary.unique_customers;
+    document.getElementById('summaryTopics').textContent = summary.unique_topics;
+    document.getElementById('summaryRevenue').textContent = formatCurrency(summary.total_milestone_revenue);
+    
+    // Topic badges
+    const topicBadges = document.getElementById('topicBadges');
+    if (summary.topics && summary.topics.length > 0) {
+        const MAX_TOPICS = 10;
+        const topTopics = summary.topics.slice(0, MAX_TOPICS);
+        const remaining = summary.topics.length - MAX_TOPICS;
+        let badgesHtml = topTopics.map(t => 
+            `<span class="badge bg-warning text-dark me-1 mb-1">` +
+            `<i class="bi bi-tag"></i> ${t.name} (${t.call_count})</span>`
+        ).join('');
+        if (remaining > 0) {
+            badgesHtml += `<span class="badge bg-secondary me-1 mb-1">+${remaining} more</span>`;
+        }
+        topicBadges.innerHTML = badgesHtml;
+        document.getElementById('topicBreakdown').style.display = 'block';
+    } else {
+        document.getElementById('topicBreakdown').style.display = 'none';
+    }
+    
+    // Text export
+    document.getElementById('textExportContent').textContent = data.text_export;
+    
+    // Show results
+    document.getElementById('exportResults').style.display = 'block';
+    document.getElementById('exportResults').scrollIntoView({behavior: 'smooth'});
+}
+
+async function generateExport(event) {
+    event.preventDefault();
+    
+    const btn = document.getElementById('generateBtn');
+    const originalContent = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Generating...';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch('{{ url_for("connect_export.generate_connect_export") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                name: document.getElementById('exportName').value,
+                start_date: document.getElementById('startDate').value,
+                end_date: document.getElementById('endDate').value,
+            }),
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            alert(data.error || 'Failed to generate export');
+            return;
+        }
+        
+        renderExportResults(data);
+        
+    } catch (err) {
+        alert('Error generating export: ' + err.message);
+    } finally {
+        btn.innerHTML = originalContent;
+        btn.disabled = false;
+    }
+}
+
+async function viewExport(exportId) {
+    try {
+        const response = await fetch(`/api/connect-export/${exportId}/view`);
+        const data = await response.json();
+        
+        if (!data.success) {
+            alert(data.error || 'Failed to load export');
+            return;
+        }
+        
+        renderExportResults(data);
+        
+    } catch (err) {
+        alert('Error loading export: ' + err.message);
+    }
+}
+
+function copyToClipboard() {
+    const text = document.getElementById('textExportContent').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        // Brief visual feedback
+        const buttons = document.querySelectorAll('[onclick="copyToClipboard()"]');
+        buttons.forEach(btn => {
+            const original = btn.innerHTML;
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Copied!';
+            btn.classList.remove('btn-outline-primary');
+            btn.classList.add('btn-success');
+            setTimeout(() => {
+                btn.innerHTML = original;
+                btn.classList.remove('btn-success');
+                btn.classList.add('btn-outline-primary');
+            }, 2000);
+        });
+    }).catch(() => {
+        // Fallback: select text
+        const pre = document.getElementById('textExportContent');
+        const range = document.createRange();
+        range.selectNodeContents(pre);
+        window.getSelection().removeAllRanges();
+        window.getSelection().addRange(range);
+    });
+}
+
+function downloadMarkdown() {
+    if (!currentMarkdownExport) return;
+    
+    const summary = currentJsonExport ? currentJsonExport.summary || {} : {};
+    const start = summary.start_date || 'export';
+    const end = summary.end_date || 'data';
+    
+    const blob = new Blob([currentMarkdownExport], {type: 'text/markdown'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `connect_export_${start}_${end}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function downloadJson() {
+    if (!currentJsonExport) return;
+    
+    const summary = currentJsonExport.summary || {};
+    const start = summary.start_date || 'export';
+    const end = summary.end_date || 'data';
+    
+    const blob = new Blob([JSON.stringify(currentJsonExport, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `connect_export_${start}_${end}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+async function deleteExport(exportId) {
+    if (!confirm('Delete this export record?')) return;
+    
+    try {
+        const response = await fetch(`/api/connect-export/${exportId}`, {
+            method: 'DELETE',
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            const row = document.getElementById('exportRow' + exportId);
+            if (row) row.remove();
+        } else {
+            alert(data.error || 'Failed to delete export');
+        }
+    } catch (err) {
+        alert('Error deleting export: ' + err.message);
+    }
+}
+</script>
+{% endblock %}

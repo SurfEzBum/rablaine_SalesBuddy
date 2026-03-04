@@ -71,7 +71,10 @@ def run_migrations(db):
     
     # Migration: Drop orphan tables from old auth/migration systems
     _drop_orphan_tables(db, existing_tables)
-    
+
+    # Migration: Create connect_exports table for Connect self-evaluation tracking
+    _migrate_connect_exports_table(db, inspector)
+
     # =========================================================================
     # End migrations
     # =========================================================================
@@ -489,3 +492,22 @@ def _drop_orphan_tables(db, existing_tables):
             db.session.execute(text(f'DROP TABLE IF EXISTS {table}'))
             db.session.commit()
             print(f"  Dropped orphan table: {table}")
+
+
+def _migrate_connect_exports_table(db, inspector):
+    """Create connect_exports table for tracking Connect self-evaluation exports."""
+    if 'connect_exports' not in inspector.get_table_names():
+        db.session.execute(text("""
+            CREATE TABLE connect_exports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(200) NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                call_log_count INTEGER NOT NULL DEFAULT 0,
+                customer_count INTEGER NOT NULL DEFAULT 0,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        db.session.commit()
+        print("  Created table: connect_exports")
