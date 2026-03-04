@@ -384,6 +384,19 @@
             </div>
         </div>
 
+        <!-- Connect Export -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> Connect Export</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Generate structured exports of your call log activity for writing Microsoft Connects (self-evaluations). Includes customer summaries, topic breakdowns, and milestone revenue impact.</p>
+                <a href="{{ url_for('connect_export.connect_export_page') }}" class="btn btn-primary btn-sm">
+                    <i class="bi bi-box-arrow-up-right"></i> Go to Connect Export
+                </a>
+            </div>
+        </div>
+
         <!-- Setup Wizard -->
         {% set setup_complete = has_customers and has_milestones and has_revenue %}
         <div class="card mb-4">
