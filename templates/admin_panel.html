@@ -102,72 +102,72 @@
                     </div>
                     <div class="card-body">
                         <!-- Config checklist -->
-                        <table class="table table-sm table-borderless mb-2">
+                        <table class="table-sm mb-2 w-100" style="border-collapse: collapse;">
                             <tbody>
                                 <tr>
-                                    <td class="ps-0" style="width: 24px;">
+                                    <td class="ps-0 py-1" style="width: 24px;">
                                         <i class="bi bi-{{ 'check-circle-fill text-success' if ai_config.endpoint_ok else 'x-circle-fill text-danger' }}"></i>
                                     </td>
-                                    <td><code>AZURE_OPENAI_ENDPOINT</code></td>
-                                    <td class="text-end text-muted small">
+                                    <td class="py-1"><small class="text-muted">AZURE_OPENAI_ENDPOINT</small></td>
+                                    <td class="text-end text-muted small py-1">
                                         {% if ai_config.endpoint_ok %}
                                             {{ ai_config.endpoint | truncate(35, True) }}
                                         {% elif ai_config.endpoint %}
                                             <span class="text-danger">placeholder</span>
                                         {% else %}
-                                            <span class="text-muted">not set</span>
+                                            not set
                                         {% endif %}
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td class="ps-0">
+                                    <td class="ps-0 py-1">
                                         <i class="bi bi-{{ 'check-circle-fill text-success' if ai_config.deployment_ok else 'x-circle-fill text-danger' }}"></i>
                                     </td>
-                                    <td><code>AZURE_OPENAI_DEPLOYMENT</code></td>
-                                    <td class="text-end text-muted small">
+                                    <td class="py-1"><small class="text-muted">AZURE_OPENAI_DEPLOYMENT</small></td>
+                                    <td class="text-end text-muted small py-1">
                                         {% if ai_config.deployment_ok %}
                                             {{ ai_config.deployment }}
                                         {% elif ai_config.deployment %}
                                             <span class="text-danger">placeholder</span>
                                         {% else %}
-                                            <span class="text-muted">not set</span>
+                                            not set
                                         {% endif %}
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td class="ps-0">
+                                    <td class="ps-0 py-1">
                                         <i class="bi bi-{{ 'check-circle-fill text-success' if ai_config.client_id_ok else 'x-circle-fill text-danger' }}"></i>
                                     </td>
-                                    <td><code>AZURE_CLIENT_ID</code></td>
-                                    <td class="text-end text-muted small">
+                                    <td class="py-1"><small class="text-muted">AZURE_CLIENT_ID</small></td>
+                                    <td class="text-end text-muted small py-1">
                                         {% if ai_config.client_id_ok %}
-                                            <span class="text-success">set</span>
+                                            set
                                         {% else %}
                                             <span class="text-danger">{{ 'invalid' if ai_config.endpoint else 'not set' }}</span>
                                         {% endif %}
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td class="ps-0">
+                                    <td class="ps-0 py-1">
                                         <i class="bi bi-{{ 'check-circle-fill text-success' if ai_config.client_secret_ok else 'x-circle-fill text-danger' }}"></i>
                                     </td>
-                                    <td><code>AZURE_CLIENT_SECRET</code></td>
-                                    <td class="text-end text-muted small">
+                                    <td class="py-1"><small class="text-muted">AZURE_CLIENT_SECRET</small></td>
+                                    <td class="text-end text-muted small py-1">
                                         {% if ai_config.client_secret_ok %}
-                                            <span class="text-success">set</span>
+                                            set
                                         {% else %}
                                             <span class="text-danger">{{ 'invalid' if ai_config.endpoint else 'not set' }}</span>
                                         {% endif %}
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td class="ps-0">
+                                    <td class="ps-0 py-1">
                                         <i class="bi bi-{{ 'check-circle-fill text-success' if ai_config.tenant_id_ok else 'x-circle-fill text-danger' }}"></i>
                                     </td>
-                                    <td><code>AZURE_TENANT_ID</code></td>
-                                    <td class="text-end text-muted small">
+                                    <td class="py-1"><small class="text-muted">AZURE_TENANT_ID</small></td>
+                                    <td class="text-end text-muted small py-1">
                                         {% if ai_config.tenant_id_ok %}
-                                            <span class="text-success">set</span>
+                                            set
                                         {% else %}
                                             <span class="text-danger">{{ 'invalid' if ai_config.endpoint else 'not set' }}</span>
                                         {% endif %}
@@ -1185,23 +1185,41 @@ function checkForUpdates(refresh) {
             }
             
             if (data.available) {
+                let restartHtml = '';
+                if (data.restart_needed) {
+                    restartHtml = `
+                        <div class="mt-2 alert alert-warning mb-0 py-2">
+                            <i class="bi bi-arrow-repeat"></i> New code is on disk but the server is still running <code>${data.boot_commit}</code>. Restart to apply.
+                        </div>`;
+                }
                 statusEl.innerHTML = `
                     <div class="d-flex align-items-center gap-2">
                         <span class="badge bg-success"><i class="bi bi-cloud-download"></i> Update Available</span>
                         <span>${data.commits_behind} new commit${data.commits_behind !== 1 ? 's' : ''} available</span>
                     </div>
                     <div class="mt-2 small text-muted">
-                        Current: <code>${data.local_commit}</code> &rarr; Latest: <code>${data.remote_commit}</code>
+                        ${data.restart_needed ? 'Running' : 'Current'}: <code>${data.boot_commit || data.local_commit}</code> &rarr; Latest: <code>${data.remote_commit}</code>
                     </div>
                     <div class="mt-3 alert alert-info mb-0 py-2">
-                        <i class="bi bi-terminal"></i> To update, double-click <strong>deploy.bat</strong> in the NoteHelper folder. If the server runs on a low port, you may see a UAC prompt.
+                        <i class="bi bi-terminal"></i> To update, double-click <strong>update.bat</strong> in the NoteHelper folder. If the server runs on a low port, you may see a UAC prompt.
                         ${!data.dismissed ? '<button class="btn btn-outline-secondary btn-sm ms-2" onclick="dismissUpdate()"><i class="bi bi-bell-slash"></i> Dismiss</button>' : ''}
+                    </div>
+                    ${restartHtml}
+                `;
+            } else if (data.restart_needed) {
+                statusEl.innerHTML = `
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="text-success"><i class="bi bi-check-circle"></i> Code is up to date</span>
+                        <span class="text-muted small">(${data.local_commit})</span>
+                    </div>
+                    <div class="mt-2 alert alert-warning mb-0 py-2">
+                        <i class="bi bi-arrow-repeat"></i> Server is running <code>${data.boot_commit}</code> but disk has <code>${data.local_commit}</code>. Restart to apply the update.
                     </div>
                 `;
             } else {
                 statusEl.innerHTML = `
                     <span class="text-success"><i class="bi bi-check-circle"></i> You're on the latest version</span>
-                    <span class="text-muted small ms-2">(${data.local_commit})</span>
+                    <span class="text-muted small ms-2">(${data.boot_commit || data.local_commit})</span>
                 `;
             }
         })

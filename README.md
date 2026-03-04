@@ -343,6 +343,12 @@ This application stores customer account data locally. The SQLite database is **
 
 MIT License - see LICENSE file for details
 
+## Credits
+
+Built by **Alex Blaine** ([@rablaine](https://github.com/rablaine)).
+
+Thanks to **Ben Magazino** ([@SurfEzBum](https://github.com/SurfEzBum)) for testing, feedback, and helping shape the final product.
+
 ## Contact
 
 For questions or suggestions, please open an issue on GitHub.
