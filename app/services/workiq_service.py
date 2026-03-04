@@ -31,6 +31,13 @@ _TASK_PROMPT_SUFFIX = (
     'Format the task suggestion on separate lines starting with TASK_TITLE: and TASK_DESCRIPTION:'
 )
 
+# Topic suggestion suffix - always appended server-side to get structured topic tags.
+_TOPIC_SUGGESTION_SUFFIX = (
+    ' Also list up to 6 short topic tags (1-3 words each) that describe the key '
+    'technologies, products, services, or themes discussed in this meeting. '
+    'Format them as a comma-separated list on a single line starting with SUGGESTED_TOPICS:'
+)
+
 # Connect impact extraction suffix - appended when user has the preference enabled.
 # Asks WorkIQ to identify customer impact signals useful for Connect self-evaluations.
 _CONNECT_IMPACT_SUFFIX = (
@@ -571,6 +578,9 @@ def get_meeting_summary(meeting_title: str, date_str: str = None,
     # Always append task suggestion instructions (not user-editable)
     question += _TASK_PROMPT_SUFFIX
     
+    # Always append topic suggestion instructions
+    question += _TOPIC_SUGGESTION_SUFFIX
+    
     # Conditionally append Connect impact extraction
     if extract_impact:
         question += _CONNECT_IMPACT_SUFFIX
@@ -636,6 +646,24 @@ def _parse_summary_response(response: str) -> Dict[str, Any]:
         '', response, flags=re.IGNORECASE
     ).strip()
     
+    # Extract SUGGESTED_TOPICS from response
+    topics_match = re.search(
+        r'SUGGESTED[_\s]TOPICS:\s*(.+?)(?:\n|$)', response, re.IGNORECASE
+    )
+    if topics_match:
+        raw_topics = topics_match.group(1).strip()
+        # Parse comma-separated list, clean up each tag
+        parsed_topics = [
+            t.strip().strip('"\'-*#') for t in raw_topics.split(',')
+            if t.strip() and t.strip().strip('"\'-*#')
+        ]
+        result['topics'] = parsed_topics[:6]
+    
+    # Remove SUGGESTED_TOPICS line from response before further parsing
+    response = re.sub(
+        r'SUGGESTED[_\s]TOPICS:\s*.+?(?:\n|$)', '', response, flags=re.IGNORECASE
+    ).strip()
+    
     # Extract TASK_TITLE and TASK_DESCRIPTION from response (works for both formats)
     task_title_match = re.search(
         r'TASK[_\s]TITLE:\s*(.+?)(?:\n|$)', response, re.IGNORECASE
@@ -675,19 +703,21 @@ def _parse_summary_response(response: str) -> Dict[str, Any]:
         # The whole response is the summary  
         result['summary'] = clean_response.strip()
         
-        # Try to extract technologies mentioned (common Azure terms)
-        azure_terms = re.findall(
-            r'\b(Azure[A-Za-z\s]*|Microsoft Fabric|Power BI|SQL Server|Cosmos DB|'
-            r'Synapse|Databricks|Data Factory|Logic Apps|Functions|'
-            r'App Service|AKS|Kubernetes|Storage|Machine Learning|'
-            r'Cognitive Services|OpenAI|AI|ML|ETL|Data Lake|'
-            r'DevOps|GitHub|Event Hub|Service Bus|API Management)\b',
-            cleaned_response, re.IGNORECASE
-        )
-        if azure_terms:
-            # Dedupe while preserving order
-            seen = set()
-            result['topics'] = [t for t in azure_terms if not (t.lower() in seen or seen.add(t.lower()))][:10]
+        # Use regex-based topic extraction as fallback only if SUGGESTED_TOPICS
+        # was not found in the response (the explicit suffix approach is preferred)
+        if not result['topics']:
+            azure_terms = re.findall(
+                r'\b(Azure[A-Za-z\s]*|Microsoft Fabric|Power BI|SQL Server|Cosmos DB|'
+                r'Synapse|Databricks|Data Factory|Logic Apps|Functions|'
+                r'App Service|AKS|Kubernetes|Storage|Machine Learning|'
+                r'Cognitive Services|OpenAI|AI|ML|ETL|Data Lake|'
+                r'DevOps|GitHub|Event Hub|Service Bus|API Management)\b',
+                cleaned_response, re.IGNORECASE
+            )
+            if azure_terms:
+                # Dedupe while preserving order
+                seen = set()
+                result['topics'] = [t for t in azure_terms if not (t.lower() in seen or seen.add(t.lower()))][:10]
         
         # Try to extract action items (look for "next steps" patterns)
         action_pattern = r'(?:next steps?|action items?|follow[- ]?ups?|to[- ]?do)[:\s]*(?:\n|$)((?:[-•*\d\.]+\s*.+\n?)+)'
