@@ -685,9 +685,14 @@ def _migrate_customer_tpid_unique(db, inspector):
 def _drop_user_id_columns(db, inspector):
     """Drop user_id columns from all tables.
 
-    This is a single-user system. The user_id FK was vestigial from a
+    This is a single-user system.  The user_id FK was vestigial from a
     multi-user era and is no longer referenced anywhere in the codebase.
-    SQLite 3.35+ supports ALTER TABLE ... DROP COLUMN.
+
+    SQLite cannot ALTER TABLE DROP COLUMN when the column participates
+    in a FOREIGN KEY constraint, so we use the standard table-rebuild
+    pattern: rename the old table, create a fresh copy from the current
+    SQLAlchemy model (which no longer defines user_id), copy data over,
+    and drop the old copy.
     """
     tables_with_user_id = [
         'pods', 'solution_engineers', 'verticals', 'territories',
@@ -697,19 +702,69 @@ def _drop_user_id_columns(db, inspector):
         'revenue_config', 'connect_exports',
     ]
 
-    dropped_any = False
+    # Determine which tables still carry user_id
+    tables_to_migrate = []
     for table in tables_with_user_id:
         if not _table_exists(inspector, table):
             continue
         columns = [col['name'] for col in inspector.get_columns(table)]
         if 'user_id' in columns:
+            tables_to_migrate.append(
+                (table, [c for c in columns if c != 'user_id'])
+            )
+
+    if not tables_to_migrate:
+        return  # Already migrated
+
+    # Disable FK enforcement for the rebuild
+    db.session.commit()
+    db.session.execute(text('PRAGMA foreign_keys=OFF'))
+
+    for table, keep_cols in tables_to_migrate:
+        tmp = f'_old_{table}'
+
+        # 1. Rename original -> temp
+        db.session.execute(text(f'ALTER TABLE "{table}" RENAME TO "{tmp}"'))
+        db.session.commit()
+
+        # 2. Drop indexes that carried over to the temp table so the
+        #    new table can recreate them with the same names.
+        idx_rows = db.session.execute(text(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='index' AND tbl_name=:t "
+            "AND name NOT LIKE 'sqlite_%'"
+        ), {'t': tmp}).fetchall()
+        for row in idx_rows:
+            db.session.execute(text(f'DROP INDEX IF EXISTS "{row[0]}"'))
+        db.session.commit()
+
+        # 3. Create the table fresh from current model metadata
+        model_table = db.metadata.tables.get(table)
+        if model_table is None:
+            # No model found -- undo rename and skip
             db.session.execute(text(
-                f'ALTER TABLE {table} DROP COLUMN user_id'
+                f'ALTER TABLE "{tmp}" RENAME TO "{table}"'
             ))
             db.session.commit()
-            print(f"  Dropped column: {table}.user_id")
-            dropped_any = True
+            continue
+        model_table.create(db.engine)
 
-    if not dropped_any:
-        return  # Already migrated
+        # 4. Copy data (only columns present in both old and new schema)
+        new_col_names = {col.name for col in model_table.columns}
+        copy_cols = [c for c in keep_cols if c in new_col_names]
+        cols_csv = ', '.join(f'"{c}"' for c in copy_cols)
+        db.session.execute(text(
+            f'INSERT INTO "{table}" ({cols_csv}) '
+            f'SELECT {cols_csv} FROM "{tmp}"'
+        ))
+        db.session.commit()
+
+        # 5. Drop the old copy
+        db.session.execute(text(f'DROP TABLE "{tmp}"'))
+        db.session.commit()
+        print(f"  Dropped column: {table}.user_id")
+
+    # Re-enable FK enforcement
+    db.session.execute(text('PRAGMA foreign_keys=ON'))
+    db.session.commit()
 
