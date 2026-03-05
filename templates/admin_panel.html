@@ -327,21 +327,16 @@
             </div>
         </div>
 
-        <!-- Setup Wizard -->
+        <!-- Setup Wizard (shown here when incomplete, moves to bottom when done) -->
         {% set setup_complete = has_customers and has_milestones and has_revenue %}
+        {% if not setup_complete %}
         <div class="card mb-4">
-            <div class="card-header {% if setup_complete %}collapsed{% endif %}" {% if setup_complete %}data-bs-toggle="collapse" data-bs-target="#setupWizardCollapse" aria-expanded="false" role="button" style="cursor: pointer;"{% endif %}>
+            <div class="card-header">
                 <h5 class="mb-0 d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-rocket-takeoff"></i> Setup Wizard</span>
-                    <span class="d-flex align-items-center gap-2">
-                        {% if setup_complete %}
-                        <span class="badge bg-success"><i class="bi bi-check-circle-fill"></i> Complete</span>
-                        <i class="bi bi-chevron-down"></i>
-                        {% endif %}
-                    </span>
                 </h5>
             </div>
-            <div {% if setup_complete %}class="collapse" id="setupWizardCollapse"{% endif %}>
+            <div>
                 <div class="card-body">
                     <p class="text-muted small mb-3">Re-run the initial setup wizard to check your progress or complete any remaining steps.</p>
                     <div class="row text-center mb-3">
@@ -359,11 +354,12 @@
                         </div>
                     </div>
                     <button class="btn btn-warning" id="adminRerunWizardBtn">
-                        <i class="bi bi-rocket-takeoff"></i> {% if setup_complete %}Re-run Setup Wizard{% else %}Launch Setup Wizard{% endif %}
+                        <i class="bi bi-rocket-takeoff"></i> Launch Setup Wizard
                     </button>
                 </div>
             </div>
         </div>
+        {% endif %}
 
         <!-- Connect Export -->
         <div class="card mb-4">
@@ -477,6 +473,43 @@
                 </div>
             </div>
         </div>
+
+        <!-- Setup Wizard (collapsed at bottom when complete) -->
+        {% if setup_complete %}
+        <div class="card mb-4">
+            <div class="card-header collapsed" data-bs-toggle="collapse" data-bs-target="#setupWizardCollapse" aria-expanded="false" role="button" style="cursor: pointer;">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-rocket-takeoff"></i> Setup Wizard</span>
+                    <span class="d-flex align-items-center gap-2">
+                        <span class="badge bg-success"><i class="bi bi-check-circle-fill"></i> Complete</span>
+                        <i class="bi bi-chevron-down"></i>
+                    </span>
+                </h5>
+            </div>
+            <div class="collapse" id="setupWizardCollapse">
+                <div class="card-body">
+                    <p class="text-muted small mb-3">Re-run the initial setup wizard to check your progress or complete any remaining steps.</p>
+                    <div class="row text-center mb-3">
+                        <div class="col">
+                            <i class="bi bi-check-circle-fill text-success fs-4"></i>
+                            <div class="small mt-1">Accounts</div>
+                        </div>
+                        <div class="col">
+                            <i class="bi bi-check-circle-fill text-success fs-4"></i>
+                            <div class="small mt-1">Milestones</div>
+                        </div>
+                        <div class="col">
+                            <i class="bi bi-check-circle-fill text-success fs-4"></i>
+                            <div class="small mt-1">Revenue</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-warning" id="adminRerunWizardBtn">
+                        <i class="bi bi-rocket-takeoff"></i> Re-run Setup Wizard
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endif %}
 
         <!-- Danger Zone (collapsed by default) -->
         <div class="card mb-4 border-danger">
