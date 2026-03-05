@@ -9,7 +9,16 @@
 </style>
 <div class="row">
     <div class="col-12">
-        <h1 class="mb-4"><i class="bi bi-shield-lock"></i> Admin Panel</h1>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="mb-0"><i class="bi bi-shield-lock"></i> Admin Panel</h1>
+            <div class="d-flex align-items-center gap-2">
+                <span class="small text-nowrap" style="cursor: pointer;" onclick="document.getElementById('adminDarkModeSwitch').click()"><i class="bi bi-sun-fill text-warning"></i> Light</span>
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="adminDarkModeSwitch" style="width: 3em; height: 1.5em;" {{ 'checked' if dark_mode else '' }}>
+                </div>
+                <span class="small text-nowrap" style="cursor: pointer;" onclick="document.getElementById('adminDarkModeSwitch').click()"><i class="bi bi-moon-fill"></i> Dark</span>
+            </div>
+        </div>
         
         <!-- System Statistics -->
         <div class="card mb-4">
@@ -76,9 +85,9 @@
         <div class="row mb-4">
             <div class="col-md-6 mb-4 mb-md-0">
                 <!-- Update Check -->
-                <div class="card h-100" id="updateCheckCard">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-cloud-download"></i> Updates</h5>
+                <div class="card h-100{{ ' border-danger' if update_available else '' }}" id="updateCheckCard">
+                    <div class="card-header{{ ' bg-danger text-white' if update_available else '' }}">
+                        <h5 class="mb-0"><i class="bi bi-cloud-download"></i> Updates{{ ' <span class="badge bg-light text-danger">New</span>' | safe if update_available else '' }}</h5>
                     </div>
                     <div class="card-body">
                         <div id="updateCheckContent">
@@ -318,6 +327,91 @@
             </div>
         </div>
 
+        <!-- Setup Wizard -->
+        {% set setup_complete = has_customers and has_milestones and has_revenue %}
+        <div class="card mb-4">
+            <div class="card-header {% if setup_complete %}collapsed{% endif %}" {% if setup_complete %}data-bs-toggle="collapse" data-bs-target="#setupWizardCollapse" aria-expanded="false" role="button" style="cursor: pointer;"{% endif %}>
+                <h5 class="mb-0 d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-rocket-takeoff"></i> Setup Wizard</span>
+                    <span class="d-flex align-items-center gap-2">
+                        {% if setup_complete %}
+                        <span class="badge bg-success"><i class="bi bi-check-circle-fill"></i> Complete</span>
+                        <i class="bi bi-chevron-down"></i>
+                        {% endif %}
+                    </span>
+                </h5>
+            </div>
+            <div {% if setup_complete %}class="collapse" id="setupWizardCollapse"{% endif %}>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">Re-run the initial setup wizard to check your progress or complete any remaining steps.</p>
+                    <div class="row text-center mb-3">
+                        <div class="col">
+                            <i class="bi bi-{% if has_customers %}check-circle-fill text-success{% else %}circle text-muted{% endif %} fs-4"></i>
+                            <div class="small mt-1">Accounts</div>
+                        </div>
+                        <div class="col">
+                            <i class="bi bi-{% if has_milestones %}check-circle-fill text-success{% else %}circle text-muted{% endif %} fs-4"></i>
+                            <div class="small mt-1">Milestones</div>
+                        </div>
+                        <div class="col">
+                            <i class="bi bi-{% if has_revenue %}check-circle-fill text-success{% else %}circle text-muted{% endif %} fs-4"></i>
+                            <div class="small mt-1">Revenue</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-warning" id="adminRerunWizardBtn">
+                        <i class="bi bi-rocket-takeoff"></i> {% if setup_complete %}Re-run Setup Wizard{% else %}Launch Setup Wizard{% endif %}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connect Export -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> Connect Export</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Generate structured exports of your call log activity for writing Microsoft Connects (self-evaluations). Includes customer summaries, topic breakdowns, and milestone revenue impact.</p>
+                <a href="{{ url_for('connect_export.connect_export_page') }}" class="btn btn-primary btn-sm">
+                    <i class="bi bi-box-arrow-up-right"></i> Go to Connect Export
+                </a>
+            </div>
+        </div>
+
+        <!-- WorkIQ Settings -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-robot"></i> WorkIQ Settings</h5>
+            </div>
+            <div class="card-body">
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="connectImpactSwitch" {{ 'checked' if workiq_connect_impact else '' }}>
+                    <label class="form-check-label" for="connectImpactSwitch">
+                        <strong>Extract Connect Impact Signals</strong>
+                    </label>
+                    <div><small class="text-muted">When enabled, WorkIQ summaries include customer impact signals useful for Connect self-evaluations.</small></div>
+                </div>
+                <div>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <h6 class="mb-1">Meeting Summary Prompt</h6>
+                            <small class="text-muted">Customize how WorkIQ summarizes your meetings. Use <code>{title}</code> and <code>{date}</code> as placeholders.</small>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="resetPromptBtn" title="Reset to default prompt">
+                            <i class="bi bi-arrow-counterclockwise"></i> Reset
+                        </button>
+                    </div>
+                    <textarea class="form-control" id="workiqPrompt" rows="4" placeholder="Enter your custom meeting summary prompt...">{{ workiq_summary_prompt or default_workiq_prompt }}</textarea>
+                    <div class="d-flex justify-content-between align-items-center mt-2">
+                        <small class="text-muted" id="promptStatus"></small>
+                        <button type="button" class="btn btn-sm btn-primary" id="savePromptBtn">
+                            <i class="bi bi-check-lg"></i> Save Prompt
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Backups -->
         <div class="card mb-4">
             <div class="card-header">
@@ -384,57 +478,6 @@
             </div>
         </div>
 
-        <!-- Connect Export -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> Connect Export</h5>
-            </div>
-            <div class="card-body">
-                <p class="text-muted small mb-3">Generate structured exports of your call log activity for writing Microsoft Connects (self-evaluations). Includes customer summaries, topic breakdowns, and milestone revenue impact.</p>
-                <a href="{{ url_for('connect_export.connect_export_page') }}" class="btn btn-primary btn-sm">
-                    <i class="bi bi-box-arrow-up-right"></i> Go to Connect Export
-                </a>
-            </div>
-        </div>
-
-        <!-- Setup Wizard -->
-        {% set setup_complete = has_customers and has_milestones and has_revenue %}
-        <div class="card mb-4">
-            <div class="card-header {% if setup_complete %}collapsed{% endif %}" {% if setup_complete %}data-bs-toggle="collapse" data-bs-target="#setupWizardCollapse" aria-expanded="false" role="button" style="cursor: pointer;"{% endif %}>
-                <h5 class="mb-0 d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-rocket-takeoff"></i> Setup Wizard</span>
-                    <span class="d-flex align-items-center gap-2">
-                        {% if setup_complete %}
-                        <span class="badge bg-success"><i class="bi bi-check-circle-fill"></i> Complete</span>
-                        <i class="bi bi-chevron-down"></i>
-                        {% endif %}
-                    </span>
-                </h5>
-            </div>
-            <div {% if setup_complete %}class="collapse" id="setupWizardCollapse"{% endif %}>
-                <div class="card-body">
-                    <p class="text-muted small mb-3">Re-run the initial setup wizard to check your progress or complete any remaining steps.</p>
-                    <div class="row text-center mb-3">
-                        <div class="col">
-                            <i class="bi bi-{% if has_customers %}check-circle-fill text-success{% else %}circle text-muted{% endif %} fs-4"></i>
-                            <div class="small mt-1">Accounts</div>
-                        </div>
-                        <div class="col">
-                            <i class="bi bi-{% if has_milestones %}check-circle-fill text-success{% else %}circle text-muted{% endif %} fs-4"></i>
-                            <div class="small mt-1">Milestones</div>
-                        </div>
-                        <div class="col">
-                            <i class="bi bi-{% if has_revenue %}check-circle-fill text-success{% else %}circle text-muted{% endif %} fs-4"></i>
-                            <div class="small mt-1">Revenue</div>
-                        </div>
-                    </div>
-                    <button class="btn btn-warning" id="adminRerunWizardBtn">
-                        <i class="bi bi-rocket-takeoff"></i> {% if setup_complete %}Re-run Setup Wizard{% else %}Launch Setup Wizard{% endif %}
-                    </button>
-                </div>
-            </div>
-        </div>
-
         <!-- Danger Zone (collapsed by default) -->
         <div class="card mb-4 border-danger">
             <div class="card-header bg-danger text-white collapsed" data-bs-toggle="collapse" data-bs-target="#dangerZoneCollapse" aria-expanded="false" role="button" style="cursor: pointer;">
@@ -491,6 +534,84 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+
+// Dark Mode Toggle
+const adminDarkModeSwitch = document.getElementById('adminDarkModeSwitch');
+if (adminDarkModeSwitch) {
+    adminDarkModeSwitch.addEventListener('change', function() {
+        const darkMode = this.checked;
+        document.documentElement.setAttribute('data-bs-theme', darkMode ? 'dark' : 'light');
+        fetch('/api/preferences/dark-mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dark_mode: darkMode })
+        }).catch(err => console.error('Error saving dark mode:', err));
+    });
+}
+
+// WorkIQ Connect Impact Toggle
+const connectImpactSwitch = document.getElementById('connectImpactSwitch');
+if (connectImpactSwitch) {
+    connectImpactSwitch.addEventListener('change', function() {
+        fetch('/api/preferences/workiq-connect-impact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workiq_connect_impact: this.checked })
+        }).catch(err => console.error('Error saving Connect impact preference:', err));
+    });
+}
+
+// WorkIQ Prompt Save/Reset
+const savePromptBtn = document.getElementById('savePromptBtn');
+const resetPromptBtn = document.getElementById('resetPromptBtn');
+const workiqPrompt = document.getElementById('workiqPrompt');
+const promptStatus = document.getElementById('promptStatus');
+const defaultPrompt = {{ default_workiq_prompt|tojson }};
+
+if (savePromptBtn) {
+    savePromptBtn.addEventListener('click', function() {
+        fetch('/api/preferences/workiq-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workiq_summary_prompt: workiqPrompt.value.trim() })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                promptStatus.textContent = 'Saved!';
+                promptStatus.className = 'text-success small';
+                setTimeout(() => { promptStatus.textContent = ''; }, 3000);
+            }
+        })
+        .catch(() => {
+            promptStatus.textContent = 'Error saving prompt';
+            promptStatus.className = 'text-danger small';
+        });
+    });
+}
+
+if (resetPromptBtn) {
+    resetPromptBtn.addEventListener('click', function() {
+        workiqPrompt.value = defaultPrompt;
+        fetch('/api/preferences/workiq-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workiq_summary_prompt: '' })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                promptStatus.textContent = 'Reset to default';
+                promptStatus.className = 'text-muted small';
+                setTimeout(() => { promptStatus.textContent = ''; }, 3000);
+            }
+        })
+        .catch(() => {
+            promptStatus.textContent = 'Error resetting prompt';
+            promptStatus.className = 'text-danger small';
+        });
+    });
+}
 
 // Shut Down Server
 document.getElementById('shutdownServerBtn').addEventListener('click', function() {

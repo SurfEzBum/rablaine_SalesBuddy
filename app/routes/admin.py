@@ -90,7 +90,18 @@ def admin_panel():
         'all_configured': all_configured,
     }
     
-    return render_template('admin_panel.html', stats=stats, ai_config=ai_config)
+    # WorkIQ preferences for settings card
+    from app.services.workiq_service import DEFAULT_SUMMARY_PROMPT
+    user_id = g.user.id if g.user.is_authenticated else 1
+    pref = UserPreference.query.filter_by(user_id=user_id).first()
+    workiq_connect_impact = pref.workiq_connect_impact if pref else True
+    workiq_summary_prompt = pref.workiq_summary_prompt if pref else None
+    default_workiq_prompt = DEFAULT_SUMMARY_PROMPT
+    
+    return render_template('admin_panel.html', stats=stats, ai_config=ai_config,
+                         workiq_connect_impact=workiq_connect_impact,
+                         workiq_summary_prompt=workiq_summary_prompt,
+                         default_workiq_prompt=default_workiq_prompt)
 
 
 @admin_bp.route('/admin/ai-logs')

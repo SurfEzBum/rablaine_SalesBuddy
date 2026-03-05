@@ -221,11 +221,11 @@ def test_search_with_query(client, sample_data):
     assert b'Discussed VM migration' in response.data or b'Search Results' in response.data
 
 
-def test_preferences_page_loads(client):
-    """Test preferences page loads."""
+def test_preferences_redirects_to_admin(client):
+    """Test preferences page redirects to admin panel."""
     response = client.get('/preferences')
-    assert response.status_code == 200
-    assert b'Settings' in response.data
+    assert response.status_code == 302
+    assert '/admin' in response.headers['Location']
 
 
 def test_customers_list_filters_without_calls(client, sample_data):
@@ -260,7 +260,6 @@ def test_customers_list_filters_without_calls(client, sample_data):
     response = client.get('/customers')
     assert response.status_code == 200
     assert b'Empty Customer' in response.data
-    assert b'Dark Mode' in response.data
 
 
 def test_admin_shutdown_returns_success(client):

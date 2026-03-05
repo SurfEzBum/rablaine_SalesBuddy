@@ -78,6 +78,9 @@ def run_migrations(db):
     # Migration: Add workiq_connect_impact to user_preferences
     _migrate_workiq_connect_impact(db, inspector)
 
+    # Migration: Drop colored_sellers column from user_preferences (feature removed)
+    _drop_colored_sellers_column(db, inspector)
+
     # =========================================================================
     # End migrations
     # =========================================================================
@@ -523,3 +526,19 @@ def _migrate_workiq_connect_impact(db, inspector):
             db, inspector, 'user_preferences', 'workiq_connect_impact',
             'BOOLEAN NOT NULL DEFAULT 1'
         )
+
+
+def _drop_colored_sellers_column(db, inspector):
+    """Drop colored_sellers column from user_preferences (feature removed).
+    
+    SQLite doesn't support DROP COLUMN directly in older versions, but Python 3.13
+    uses SQLite 3.39+ which supports it. We check if the column exists first.
+    """
+    if 'user_preferences' in inspector.get_table_names():
+        columns = [col['name'] for col in inspector.get_columns('user_preferences')]
+        if 'colored_sellers' in columns:
+            db.session.execute(text(
+                'ALTER TABLE user_preferences DROP COLUMN colored_sellers'
+            ))
+            db.session.commit()
+            print("  Dropped column: user_preferences.colored_sellers")
