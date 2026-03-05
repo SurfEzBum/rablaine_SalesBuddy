@@ -48,14 +48,11 @@ def health_check():
 # Helper Functions
 # =============================================================================
 
-def get_seller_color(seller_id: int, use_colors: bool = True) -> str:
+def get_seller_color(seller_id: int) -> str:
     """
     Generate a consistent, visually distinct color for a seller based on their ID.
-    Returns a CSS color class name. If use_colors is False, returns 'bg-secondary'.
+    Returns a CSS color class name.
     """
-    if not use_colors:
-        return 'bg-secondary'
-    
     # Define a palette of distinct, accessible colors
     color_classes = [
         'seller-color-1',   # Purple
@@ -275,35 +272,8 @@ def search():
 
 @main_bp.route('/preferences')
 def preferences():
-    """User preferences page."""
-    from app.services.workiq_service import DEFAULT_SUMMARY_PROMPT
-    
-    user_id = g.user.id if g.user.is_authenticated else 1
-    pref = UserPreference.query.filter_by(user_id=user_id).first()
-    if not pref:
-        pref = UserPreference(user_id=user_id)
-        db.session.add(pref)
-        db.session.commit()
-    
-    # Get user statistics
-    stats = {
-        'call_logs': CallLog.query.count(),
-        'customers': Customer.query.count(),
-        'topics': Topic.query.count()
-    }
-    
-    return render_template('preferences.html', 
-                         dark_mode=pref.dark_mode,
-                         customer_view_grouped=pref.customer_view_grouped,
-                         customer_sort_by=pref.customer_sort_by,
-                         topic_sort_by_calls=pref.topic_sort_by_calls,
-                         territory_view_accounts=pref.territory_view_accounts,
-                         colored_sellers=pref.colored_sellers,
-                         show_customers_without_calls=pref.show_customers_without_calls,
-                         workiq_summary_prompt=pref.workiq_summary_prompt,
-                         default_workiq_prompt=DEFAULT_SUMMARY_PROMPT,
-                         workiq_connect_impact=pref.workiq_connect_impact,
-                         stats=stats)
+    """Redirect to admin panel (settings moved there)."""
+    return redirect(url_for('admin.admin_panel'))
 
 
 @main_bp.route('/analytics')
@@ -533,36 +503,6 @@ def territory_view_preference():
     return jsonify({'territory_view_accounts': pref.territory_view_accounts}), 200
 
 
-@main_bp.route('/api/preferences/colored-sellers', methods=['GET', 'POST'])
-def colored_sellers_preference():
-    """Get or set colored sellers preference (grey vs colored badges)."""
-    user_id = g.user.id if g.user.is_authenticated else 1
-    
-    if request.method == 'POST':
-        data = request.get_json()
-        colored_sellers = data.get('colored_sellers', True)
-        
-        # Get or create user preference
-        pref = UserPreference.query.filter_by(user_id=user_id).first()
-        if not pref:
-            pref = UserPreference(user_id=user_id, colored_sellers=colored_sellers)
-            db.session.add(pref)
-        else:
-            pref.colored_sellers = colored_sellers
-        
-        db.session.commit()
-        return jsonify({'colored_sellers': pref.colored_sellers}), 200
-    
-    # GET request
-    pref = UserPreference.query.filter_by(user_id=user_id).first()
-    if not pref:
-        pref = UserPreference(user_id=user_id, colored_sellers=True)
-        db.session.add(pref)
-        db.session.commit()
-    
-    return jsonify({'colored_sellers': pref.colored_sellers}), 200
-
-
 @main_bp.route('/api/preferences/customer-sort-by', methods=['GET', 'POST'])
 def customer_sort_by_preference():
     """Get or set customer sorting preference (alphabetical, grouped, or by_calls)."""
@@ -724,7 +664,6 @@ def inject_preferences():
     dark_mode = pref.dark_mode if pref else False
     customer_view_grouped = pref.customer_view_grouped if pref else False
     topic_sort_by_calls = pref.topic_sort_by_calls if pref else False
-    colored_sellers = pref.colored_sellers if pref else True
     first_run_modal_dismissed = pref.first_run_modal_dismissed if pref else False
     guided_tour_completed = pref.guided_tour_completed if pref else False
     has_customers = Customer.query.first() is not None
@@ -732,10 +671,6 @@ def inject_preferences():
     has_revenue = SyncStatus.is_complete('revenue_import')
     milestones_sync_state = SyncStatus.get_status('milestones')['state']
     revenue_sync_state = SyncStatus.get_status('revenue_import')['state']
-    
-    # Create a wrapper function that always returns color classes (CSS will handle grey state)
-    def get_seller_color_with_pref(seller_id: int) -> str:
-        return get_seller_color(seller_id, use_colors=True)
     
     # Check for available updates (lightweight -- reads cached state, no git calls)
     update_available = False
@@ -758,7 +693,6 @@ def inject_preferences():
         dark_mode=dark_mode, 
         customer_view_grouped=customer_view_grouped, 
         topic_sort_by_calls=topic_sort_by_calls,
-        colored_sellers=colored_sellers,
         first_run_modal_dismissed=first_run_modal_dismissed,
         guided_tour_completed=guided_tour_completed,
         has_customers=has_customers,
@@ -766,7 +700,7 @@ def inject_preferences():
         has_revenue=has_revenue,
         milestones_sync_state=milestones_sync_state,
         revenue_sync_state=revenue_sync_state,
-        get_seller_color=get_seller_color_with_pref,
+        get_seller_color=get_seller_color,
         update_available=update_available,
     )
 
