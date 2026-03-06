@@ -488,9 +488,10 @@ Guidelines:
 # System prompt for customer engagement summary generation
 ENGAGEMENT_SUMMARY_PROMPT = (
     "You are a Microsoft technical seller's assistant. Analyze the provided call log notes "
-    "for a customer and generate a structured engagement summary. Fill in each field based "
-    "on what you can extract from the call logs. If a field cannot be determined from the "
-    "notes, write 'Not identified in call logs' for that field.\n\n"
+    "and any existing customer notes for a customer and generate a structured engagement summary. "
+    "Fill in each field based on what you can extract from the call logs and notes. If a field "
+    "cannot be determined from the available information, write 'Not identified in call logs' "
+    "for that field.\n\n"
     "Return your response in EXACTLY this format (keep the field labels exactly as shown, "
     "fill in the values after the colon):\n\n"
     "Key Individuals & Titles: [names and titles of key people mentioned]\n"
@@ -500,8 +501,8 @@ ENGAGEMENT_SUMMARY_PROMPT = (
     "Business Outcome in Estimated $$ACR: [expected revenue impact or business value]\n"
     "Future Date/Timeline: [any deadlines, milestones, or target dates mentioned]\n"
     "Risks/Blockers: [any risks, blockers, or concerns raised]\n\n"
-    "Be concise but specific. Use actual details from the call logs, not generic statements. "
-    "If multiple topics or workstreams exist, cover the most significant ones."
+    "Be concise but specific. Use actual details from the call logs and notes, not generic "
+    "statements. If multiple topics or workstreams exist, cover the most significant ones."
 )
 
 
@@ -563,9 +564,16 @@ def api_ai_generate_engagement_summary():
     if len(call_text) > MAX_CHARS:
         call_text = call_text[:MAX_CHARS] + '\n\n[... additional call logs truncated ...]'
 
+    # Include existing customer notes as additional context if present
+    notes_section = ''
+    if customer.notes:
+        notes_text = _re.sub(r'<[^>]+>', '', customer.notes)
+        notes_section = f"\nExisting Customer Notes:\n{notes_text}\n"
+
     user_message = (
         f"Customer: {customer.name} (TPID: {customer.tpid})\n"
-        f"Total call logs: {len(call_logs)}\n\n"
+        f"Total call logs: {len(call_logs)}\n"
+        f"{notes_section}\n"
         f"Call Log Notes:\n\n{call_text}"
     )
 
