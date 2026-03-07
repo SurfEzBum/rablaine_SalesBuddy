@@ -52,7 +52,7 @@ def get_meetings_for_date(date_str: str) -> str:
     return query_workiq(question)
 
 
-def get_meeting_for_call_log(meeting_title: str, date_str: str = None) -> dict:
+def get_meeting_for_note(meeting_title: str, date_str: str = None) -> dict:
     """
     Get detailed meeting information formatted for NoteHelper call log.
     
@@ -127,7 +127,7 @@ def format_for_notehelper(meeting_data: dict) -> dict:
     """
     Format meeting data for NoteHelper API.
     
-    This would be used to POST to /call-log/new with form data.
+    This would be used to POST to /note/new with form data.
     """
     # Map WorkIQ topics to likely NoteHelper topic matches
     topic_mapping = {
@@ -172,7 +172,7 @@ if __name__ == "__main__":
     if args.meeting:
         print("Fetching meeting details for call log import...")
         print("=" * 60)
-        data = get_meeting_for_call_log(args.meeting, args.date)
+        data = get_meeting_for_note(args.meeting, args.date)
         print("\n[RAW WORKIQ RESPONSE]")
         print(data['raw_response'])
         print("\n[PARSED FOR NOTEHELPER]")

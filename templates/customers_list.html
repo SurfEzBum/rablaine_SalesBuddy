@@ -131,9 +131,9 @@
                                     {% endif %}
                                 </h5>
                                 <div class="d-flex align-items-center gap-2">
-                                    <small class="text-muted text-nowrap">{{ customer.call_logs|length }} calls</small>
-                                    <a href="{{ url_for('call_logs.call_log_create', customer_id=customer.id) }}" class="btn btn-sm btn-success text-white" onclick="event.stopPropagation();">
-                                        <i class="bi bi-plus-circle"></i> New Call Log
+                                    <small class="text-muted text-nowrap">{{ customer.notes|length }} calls</small>
+                                    <a href="{{ url_for('notes.note_create', customer_id=customer.id) }}" class="btn btn-sm btn-success text-white" onclick="event.stopPropagation();">
+                                        <i class="bi bi-plus-circle"></i> New Note
                                     </a>
                                 </div>
                             </div>
@@ -174,9 +174,9 @@
                                     {% endif %}
                                 </h5>
                                 <div class="d-flex align-items-center gap-2">
-                                    <small class="text-muted text-nowrap">{{ customer.call_logs|length }} calls</small>
-                                    <a href="{{ url_for('call_logs.call_log_create', customer_id=customer.id) }}" class="btn btn-sm btn-success text-white" onclick="event.stopPropagation();">
-                                        <i class="bi bi-plus-circle"></i> New Call Log
+                                    <small class="text-muted text-nowrap">{{ customer.notes|length }} calls</small>
+                                    <a href="{{ url_for('notes.note_create', customer_id=customer.id) }}" class="btn btn-sm btn-success text-white" onclick="event.stopPropagation();">
+                                        <i class="bi bi-plus-circle"></i> New Note
                                     </a>
                                 </div>
                             </div>
@@ -212,9 +212,9 @@
                             {% endif %}
                         </h5>
                         <div class="d-flex align-items-center gap-2">
-                            <small class="text-muted text-nowrap">{{ customer.call_logs|length }} calls</small>
-                            <a href="{{ url_for('call_logs.call_log_create', customer_id=customer.id) }}" class="btn btn-sm btn-success text-white" onclick="event.stopPropagation();">
-                                <i class="bi bi-plus-circle"></i> New Call Log
+                            <small class="text-muted text-nowrap">{{ customer.notes|length }} calls</small>
+                            <a href="{{ url_for('notes.note_create', customer_id=customer.id) }}" class="btn btn-sm btn-success text-white" onclick="event.stopPropagation();">
+                                <i class="bi bi-plus-circle"></i> New Note
                             </a>
                         </div>
                     </div>
@@ -328,7 +328,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             const draftBadge = document.createElement('span');
                             draftBadge.className = 'badge bg-warning text-dark ms-2 draft-indicator';
                             draftBadge.innerHTML = '<i class="bi bi-pencil"></i> Draft';
-                            draftBadge.title = 'This customer has an unsaved draft call log';
+                            draftBadge.title = 'This customer has an unsaved draft note';
                             heading.appendChild(draftBadge);
                         }
                     }

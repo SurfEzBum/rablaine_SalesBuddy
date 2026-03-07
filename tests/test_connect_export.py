@@ -57,7 +57,7 @@ class TestConnectExportPage:
                 name='Test Export',
                 start_date=date(2025, 1, 1),
                 end_date=date(2025, 6, 30),
-                call_log_count=5,
+                note_count=5,
                 customer_count=2,
             )
             db.session.add(export)
@@ -76,7 +76,7 @@ class TestConnectExportPage:
                 name='Previous Export',
                 start_date=date(2025, 1, 1),
                 end_date=date(2025, 6, 30),
-                call_log_count=3,
+                note_count=3,
                 customer_count=1,
             )
             db.session.add(export)
@@ -145,10 +145,10 @@ class TestGenerateExport:
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
-        assert data['summary']['total_call_logs'] == 0
+        assert data['summary']['total_notes'] == 0
         assert data['summary']['unique_customers'] == 0
 
-    def test_export_with_call_logs(self, client, app, sample_data):
+    def test_export_with_notes(self, client, app, sample_data):
         """Should include call logs in the export when they exist in range."""
         response = client.post('/api/connect-export/generate',
                                json={'name': 'H2 Connect',
@@ -157,7 +157,7 @@ class TestGenerateExport:
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
-        assert data['summary']['total_call_logs'] == 2
+        assert data['summary']['total_notes'] == 2
         assert data['summary']['unique_customers'] == 2
 
     def test_export_returns_text(self, client, app, sample_data):
@@ -227,10 +227,10 @@ class TestGenerateExport:
         data = response.get_json()
         customers = data['json_export']['customers']
         assert len(customers) == 2
-        # Each customer should have call_logs list
+        # Each customer should have notes list
         for cust in customers:
-            assert 'call_logs' in cust
-            assert len(cust['call_logs']) > 0
+            assert 'notes' in cust
+            assert len(cust['notes']) > 0
             assert 'name' in cust
 
 
@@ -241,7 +241,7 @@ class TestExportWithMilestones:
         """Should include completed milestone revenue for customer."""
         with app.app_context():
             from app.models import (
-                CallLog, Customer, Milestone, Seller, Territory,
+                Note, Customer, Milestone, Seller, Territory,
                 Topic, User, db,
             )
             user = User.query.first()
@@ -269,7 +269,7 @@ class TestExportWithMilestones:
             db.session.flush()
 
             # Create a call log in the period
-            call = CallLog(
+            call = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 3, 1, tzinfo=timezone.utc),
                 content='Discussed deployment',
@@ -295,7 +295,7 @@ class TestExportWithMilestones:
         """Should not count milestones that aren't Completed."""
         with app.app_context():
             from app.models import (
-                CallLog, Customer, Milestone, Seller, Territory,
+                Note, Customer, Milestone, Seller, Territory,
                 User, db,
             )
             user = User.query.first()
@@ -322,7 +322,7 @@ class TestExportWithMilestones:
             db.session.add(milestone)
             db.session.flush()
 
-            call = CallLog(
+            call = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 3, 1, tzinfo=timezone.utc),
                 content='Check-in',
@@ -342,7 +342,7 @@ class TestExportWithMilestones:
         """Should not count milestones where on_my_team is False."""
         with app.app_context():
             from app.models import (
-                CallLog, Customer, Milestone, Seller, Territory,
+                Note, Customer, Milestone, Seller, Territory,
                 User, db,
             )
             user = User.query.first()
@@ -369,7 +369,7 @@ class TestExportWithMilestones:
             db.session.add(milestone)
             db.session.flush()
 
-            call = CallLog(
+            call = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 3, 1, tzinfo=timezone.utc),
                 content='Update',
@@ -416,7 +416,7 @@ class TestExportTextFormat:
         """Text export should mention milestone revenue when there is some."""
         with app.app_context():
             from app.models import (
-                CallLog, Customer, Milestone, Seller, Territory,
+                Note, Customer, Milestone, Seller, Territory,
                 User, db,
             )
             user = User.query.first()
@@ -443,7 +443,7 @@ class TestExportTextFormat:
             db.session.add(milestone)
             db.session.flush()
 
-            call = CallLog(
+            call = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 4, 1, tzinfo=timezone.utc),
                 content='Revenue discussion',
@@ -483,7 +483,7 @@ class TestExportMarkdownFormat:
                 name='MD View',
                 start_date=date(2025, 1, 1),
                 end_date=date(2025, 6, 30),
-                call_log_count=0,
+                note_count=0,
                 customer_count=0,
             )
             db.session.add(export)
@@ -549,7 +549,7 @@ class TestExportView:
                 name='View Test',
                 start_date=date(2025, 1, 1),
                 end_date=date(2025, 6, 30),
-                call_log_count=0,
+                note_count=0,
                 customer_count=0,
             )
             db.session.add(export)
@@ -583,7 +583,7 @@ class TestExportDelete:
                 name='Delete Test',
                 start_date=date(2025, 1, 1),
                 end_date=date(2025, 6, 30),
-                call_log_count=0,
+                note_count=0,
                 customer_count=0,
             )
             db.session.add(export)
@@ -659,7 +659,7 @@ class TestHelperFunctions:
             'summary': {
                 'start_date': '2025-01-01',
                 'end_date': '2025-06-30',
-                'total_call_logs': 10,
+                'total_notes': 10,
                 'unique_customers': 3,
                 'unique_topics': 5,
                 'total_milestone_revenue': 500000.0,
@@ -689,7 +689,7 @@ class TestHelperFunctions:
             'topics': ['Azure AI', 'Cosmos DB'],
             'milestone_revenue': 100000.0,
             'milestone_count': 1,
-            'call_logs': [
+            'notes': [
                 {
                     'date': '2025-03-01',
                     'topics': ['Azure AI'],
@@ -712,7 +712,7 @@ class TestHelperFunctions:
             'summary': {
                 'start_date': '2025-01-01',
                 'end_date': '2025-06-30',
-                'total_call_logs': 2,
+                'total_notes': 2,
                 'unique_customers': 1,
                 'unique_topics': 1,
                 'total_milestone_revenue': 0,
@@ -727,7 +727,7 @@ class TestHelperFunctions:
                     'topics': ['Azure'],
                     'milestone_revenue': 0,
                     'milestone_count': 0,
-                    'call_logs': [
+                    'notes': [
                         {'date': '2025-03-01', 'topics': [], 'content_text': 'Short call.'},
                     ],
                 },
@@ -751,7 +751,7 @@ class TestHelperFunctions:
                 'topics': [],
                 'milestone_revenue': 0,
                 'milestone_count': 0,
-                'call_logs': [
+                'notes': [
                     {'date': '2025-03-01', 'topics': [], 'content_text': big_content},
                 ],
             })
@@ -759,7 +759,7 @@ class TestHelperFunctions:
             'summary': {
                 'start_date': '2025-01-01',
                 'end_date': '2025-06-30',
-                'total_call_logs': 10,
+                'total_notes': 10,
                 'unique_customers': 10,
                 'unique_topics': 0,
                 'total_milestone_revenue': 0,
@@ -791,7 +791,7 @@ class TestAiSummaryEndpoint:
                 name='AI Test',
                 start_date=date(2025, 1, 1),
                 end_date=date(2025, 6, 30),
-                call_log_count=0,
+                note_count=0,
                 customer_count=0,
             )
             db.session.add(export)
@@ -822,7 +822,7 @@ class TestAiSummaryEndpoint:
                 name='Empty AI Test',
                 start_date=date(2020, 1, 1),
                 end_date=date(2020, 1, 31),
-                call_log_count=0,
+                note_count=0,
                 customer_count=0,
             )
             db.session.add(export)
@@ -833,7 +833,7 @@ class TestAiSummaryEndpoint:
                                content_type='application/json')
         assert response.status_code == 400
         data = response.get_json()
-        assert 'No call log data' in data['error']
+        assert 'No note data' in data['error']
 
     def test_ai_summary_success(self, client, app, sample_data, monkeypatch):
         """Should generate and cache AI summary successfully."""
@@ -867,7 +867,7 @@ class TestAiSummaryEndpoint:
                 name='AI Success Test',
                 start_date=date(2020, 1, 1),
                 end_date=date(2030, 12, 31),
-                call_log_count=2,
+                note_count=2,
                 customer_count=2,
             )
             db.session.add(export)
@@ -900,7 +900,7 @@ class TestAiSummaryEndpoint:
                 name='Cached AI Test',
                 start_date=date(2025, 1, 1),
                 end_date=date(2025, 6, 30),
-                call_log_count=0,
+                note_count=0,
                 customer_count=0,
                 ai_summary='## Cached Summary\n- This was cached',
             )
@@ -930,7 +930,7 @@ class TestAiSummaryEndpoint:
                 name='AI Error Test',
                 start_date=date(2020, 1, 1),
                 end_date=date(2030, 12, 31),
-                call_log_count=2,
+                note_count=2,
                 customer_count=2,
             )
             db.session.add(export)
@@ -973,7 +973,7 @@ class TestAiSummaryEndpoint:
                 name='AI Log Test',
                 start_date=date(2020, 1, 1),
                 end_date=date(2030, 12, 31),
-                call_log_count=2,
+                note_count=2,
                 customer_count=2,
             )
             db.session.add(export)

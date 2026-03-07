@@ -24,7 +24,7 @@ def test_home_page_with_data(client, sample_data):
 
 def test_calendar_api_returns_json(client, sample_data):
     """Test calendar API returns proper JSON with call log data."""
-    response = client.get('/api/call-logs/calendar')
+    response = client.get('/api/notes/calendar')
     assert response.status_code == 200
     
     data = response.get_json()
@@ -42,7 +42,7 @@ def test_calendar_api_returns_json(client, sample_data):
 
 def test_calendar_api_with_params(client, sample_data):
     """Test calendar API accepts year and month parameters."""
-    response = client.get('/api/call-logs/calendar?year=2025&month=6')
+    response = client.get('/api/notes/calendar?year=2025&month=6')
     assert response.status_code == 200
     
     data = response.get_json()
@@ -56,13 +56,13 @@ def test_calendar_api_with_params(client, sample_data):
 def test_calendar_api_month_boundaries(client, sample_data):
     """Test calendar API handles month boundary navigation."""
     # Test December -> January
-    response = client.get('/api/call-logs/calendar?year=2025&month=12')
+    response = client.get('/api/notes/calendar?year=2025&month=12')
     data = response.get_json()
     assert data['next_year'] == 2026
     assert data['next_month'] == 1
     
     # Test January -> December
-    response = client.get('/api/call-logs/calendar?year=2025&month=1')
+    response = client.get('/api/notes/calendar?year=2025&month=1')
     data = response.get_json()
     assert data['prev_year'] == 2024
     assert data['prev_month'] == 12
@@ -190,18 +190,18 @@ def test_sellers_list_loads(client, sample_data):
     assert b'Bob Jones' in response.data
 
 
-def test_call_logs_list_loads(client, sample_data):
+def test_notes_list_loads(client, sample_data):
     """Test call logs list page."""
-    response = client.get('/call-logs')
+    response = client.get('/notes')
     assert response.status_code == 200
     assert b'Acme Corp' in response.data
     assert b'Discussed VM migration' in response.data
 
 
-def test_call_log_view_loads(client, sample_data):
+def test_note_view_loads(client, sample_data):
     """Test individual call log page."""
     call_id = sample_data['call1_id']
-    response = client.get(f'/call-log/{call_id}')
+    response = client.get(f'/note/{call_id}')
     assert response.status_code == 200
     assert b'Acme Corp' in response.data
     assert b'Azure VM' in response.data
@@ -211,7 +211,7 @@ def test_search_page_loads(client):
     """Test search page loads."""
     response = client.get('/search')
     assert response.status_code == 200
-    assert b'Search Call Logs' in response.data
+    assert b'Search' in response.data and b'Notes' in response.data
 
 
 def test_search_with_query(client, sample_data):

@@ -6,17 +6,17 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from datetime import datetime
 import logging
 
-from app.models import db, CallLog, Customer, Seller, Territory, Topic, Partner, Milestone, MsxTask, UserPreference
+from app.models import db, Note, Customer, Seller, Territory, Topic, Partner, Milestone, MsxTask, UserPreference
 from app.services.msx_api import TASK_CATEGORIES
 from app.services.backup import backup_customer as _backup_customer
 
 logger = logging.getLogger(__name__)
 
 # Create blueprint
-call_logs_bp = Blueprint('call_logs', __name__)
+notes_bp = Blueprint('notes', __name__)
 
 
-def _handle_milestone_and_task(call_log):
+def _handle_milestone_and_task(note):
     """
     Handle MSX milestone selection and optional task creation.
     
@@ -32,7 +32,7 @@ def _handle_milestone_and_task(call_log):
     
     if not milestone_msx_id:
         # No milestone selected - clear any existing
-        call_log.milestones = []
+        note.milestones = []
         return True, None
     
     # Get additional milestone metadata
@@ -74,7 +74,7 @@ def _handle_milestone_and_task(call_log):
             milestone.opportunity_name = milestone_opp_name
     
     # Associate milestone with call log
-    call_log.milestones = [milestone]
+    note.milestones = [milestone]
     
     # Check if a task was already created (via the "Create Task in MSX" button)
     created_task_id = request.form.get('created_task_id', '').strip()
@@ -120,7 +120,7 @@ def _handle_milestone_and_task(call_log):
             duration_minutes=duration_minutes,
             is_hok=created_task_is_hok,
             due_date=task_due_date,
-            call_log=call_log,
+            note=note,
             milestone=milestone
         )
         db.session.add(msx_task)
@@ -129,20 +129,29 @@ def _handle_milestone_and_task(call_log):
     return True, None
 
 
-@call_logs_bp.route('/call-logs')
-def call_logs_list():
+@notes_bp.route('/notes')
+def notes_list():
     """List all call logs (FR010)."""
-    call_logs = CallLog.query.options(
-        db.joinedload(CallLog.customer).joinedload(Customer.seller),
-        db.joinedload(CallLog.customer).joinedload(Customer.territory),
-        db.joinedload(CallLog.topics),
-        db.joinedload(CallLog.partners)
-    ).order_by(CallLog.call_date.desc()).all()
-    return render_template('call_logs_list.html', call_logs=call_logs)
+    filter_type = request.args.get('filter', '')
+    
+    query = Note.query.options(
+        db.joinedload(Note.customer).joinedload(Customer.seller),
+        db.joinedload(Note.customer).joinedload(Customer.territory),
+        db.joinedload(Note.topics),
+        db.joinedload(Note.partners)
+    )
+    
+    if filter_type == 'customer':
+        query = query.filter(Note.customer_id.isnot(None))
+    elif filter_type == 'general':
+        query = query.filter(Note.customer_id.is_(None))
+    
+    notes = query.order_by(Note.call_date.desc()).all()
+    return render_template('notes_list.html', notes=notes, filter_type=filter_type)
 
 
-@call_logs_bp.route('/call-log/new', methods=['GET', 'POST'])
-def call_log_create():
+@notes_bp.route('/note/new', methods=['GET', 'POST'])
+def note_create():
     """Create a new call log (FR005)."""
     if request.method == 'POST':
         customer_id = request.form.get('customer_id')
@@ -153,18 +162,14 @@ def call_log_create():
         partner_ids = request.form.getlist('partner_ids')
         referrer = request.form.get('referrer', '')
         
-        # Validation
-        if not customer_id:
-            flash('Customer is required.', 'danger')
-            return redirect(url_for('call_logs.call_log_create'))
-        
+        # Validation -- customer is optional for general notes
         if not call_date_str:
             flash('Call date is required.', 'danger')
-            return redirect(url_for('call_logs.call_log_create'))
+            return redirect(url_for('notes.note_create'))
         
         if not content:
-            flash('Call log content is required.', 'danger')
-            return redirect(url_for('call_logs.call_log_create'))
+            flash('Note content is required.', 'danger')
+            return redirect(url_for('notes.note_create'))
         
         # Parse call date and time
         call_time_str = request.form.get('call_time', '')
@@ -175,76 +180,80 @@ def call_log_create():
                 call_date = datetime.strptime(call_date_str, '%Y-%m-%d')
         except ValueError:
             flash('Invalid date/time format.', 'danger')
-            return redirect(url_for('call_logs.call_log_create'))
+            return redirect(url_for('notes.note_create'))
         
-        # Get customer and auto-fill territory
-        customer = Customer.query.filter_by(id=int(customer_id)).first()
-        territory_id = customer.territory_id if customer else None
-        
-        # If customer doesn't have a seller but one is selected, associate it
-        if customer and not customer.seller_id and seller_id:
-            customer.seller_id = int(seller_id)
-            # Also update customer's territory if seller has one
-            seller = Seller.query.filter_by(id=int(seller_id)).first()
-            if seller and seller.territory_id:
-                customer.territory_id = seller.territory_id
-                territory_id = seller.territory_id
+        # Get customer and auto-fill territory (customer is optional)
+        customer = None
+        territory_id = None
+        if customer_id:
+            customer = Customer.query.filter_by(id=int(customer_id)).first()
+            territory_id = customer.territory_id if customer else None
+            
+            # If customer doesn't have a seller but one is selected, associate it
+            if customer and not customer.seller_id and seller_id:
+                customer.seller_id = int(seller_id)
+                # Also update customer's territory if seller has one
+                seller = Seller.query.filter_by(id=int(seller_id)).first()
+                if seller and seller.territory_id:
+                    customer.territory_id = seller.territory_id
+                    territory_id = seller.territory_id
         
         # Create call log
-        call_log = CallLog(
-            customer_id=int(customer_id),
+        note = Note(
+            customer_id=int(customer_id) if customer_id else None,
             call_date=call_date,
             content=content)
         
         # Add topics
         if topic_ids:
             topics = Topic.query.filter(Topic.id.in_([int(tid) for tid in topic_ids])).all()
-            call_log.topics.extend(topics)
+            note.topics.extend(topics)
         
         # Add partners
         if partner_ids:
             partners = Partner.query.filter(Partner.id.in_([int(pid) for pid in partner_ids])).all()
-            call_log.partners.extend(partners)
+            note.partners.extend(partners)
         
-        db.session.add(call_log)
+        db.session.add(note)
         
-        # Handle milestone and optional task creation
-        try:
-            _handle_milestone_and_task(call_log)
-        except Exception as e:
-            logger.exception("Error handling milestone/task during call log create")
-            flash(f'Call log will be saved, but milestone/task failed: {e}', 'warning')
+        # Handle milestone and optional task creation (only for customer-linked notes)
+        if customer_id:
+            try:
+                _handle_milestone_and_task(note)
+            except Exception as e:
+                logger.exception("Error handling milestone/task during call log create")
+                flash(f'Note will be saved, but milestone/task failed: {e}', 'warning')
         
         db.session.commit()
 
         # Back up this customer's call logs
-        try:
-            _backup_customer(call_log.customer_id)
-        except Exception:
-            logger.debug("Backup skipped", exc_info=True)
+        if note.customer_id:
+            try:
+                _backup_customer(note.customer_id)
+            except Exception:
+                logger.debug("Backup skipped", exc_info=True)
         
-        flash('Call log created successfully!', 'success')
+        flash('Note created successfully!', 'success')
         
         # Redirect back to referrer if provided
         if referrer:
             return redirect(referrer)
         
-        return redirect(url_for('call_logs.call_log_view', id=call_log.id))
+        return redirect(url_for('notes.note_view', id=note.id))
     
     # GET request - load form
-    # Require customer_id to be specified
+    # customer_id is optional: if not provided, it's a general (non-customer) note
     preselect_customer_id = request.args.get('customer_id', type=int)
     
-    if not preselect_customer_id:
-        # Redirect to customers list to select a customer first
-        flash('Please select a customer before creating a call log.', 'info')
-        return redirect(url_for('customers.customers_list'))
+    preselect_customer = None
+    previous_calls = []
     
-    # Load customer and their previous call logs
-    preselect_customer = Customer.query.filter_by(id=preselect_customer_id).first_or_404()
-    previous_calls = CallLog.query.filter_by(customer_id=preselect_customer_id).options(
-        db.joinedload(CallLog.topics)
-    ).order_by(CallLog.call_date.desc()).all()
+    if preselect_customer_id:
+        # Load customer and their previous call logs
+        preselect_customer = Customer.query.filter_by(id=preselect_customer_id).first_or_404()
+        previous_calls = Note.query.filter_by(customer_id=preselect_customer_id).options(
+            db.joinedload(Note.topics)
+        ).order_by(Note.call_date.desc()).all()
     
     customers = Customer.query.order_by(Customer.name).all()
     sellers = Seller.query.order_by(Seller.name).all()
@@ -273,9 +282,9 @@ def call_log_create():
     # Current time for new call logs (default to now)
     now_time = datetime.now().strftime('%H:%M')
     
-    # Check if AI features are enabled
+    # Check if AI features are enabled (only for customer-linked notes)
     from app.routes.ai import is_ai_enabled
-    ai_enabled = is_ai_enabled()
+    ai_enabled = is_ai_enabled() if preselect_customer_id else False
     
     # Get user's custom WorkIQ prompt (for meeting import modal)
     from app.services.workiq_service import DEFAULT_SUMMARY_PROMPT
@@ -283,8 +292,8 @@ def call_log_create():
     user_prompt = pref.workiq_summary_prompt if pref and pref.workiq_summary_prompt else DEFAULT_SUMMARY_PROMPT
     connect_impact_enabled = pref.workiq_connect_impact if pref else True
     
-    return render_template('call_log_form.html', 
-                         call_log=None, 
+    return render_template('note_form.html', 
+                         note=None, 
                          customers=customers,
                          sellers=sellers,
                          topics=topics,
@@ -302,17 +311,17 @@ def call_log_create():
                          workiq_connect_impact=connect_impact_enabled)
 
 
-@call_logs_bp.route('/call-log/<int:id>')
-def call_log_view(id):
+@notes_bp.route('/note/<int:id>')
+def note_view(id):
     """View call log details (FR010)."""
-    call_log = CallLog.query.filter_by(id=id).first_or_404()
-    return render_template('call_log_view.html', call_log=call_log)
+    note = Note.query.filter_by(id=id).first_or_404()
+    return render_template('note_view.html', note=note)
 
 
-@call_logs_bp.route('/call-log/<int:id>/edit', methods=['GET', 'POST'])
-def call_log_edit(id):
+@notes_bp.route('/note/<int:id>/edit', methods=['GET', 'POST'])
+def note_edit(id):
     """Edit call log (FR010)."""
-    call_log = CallLog.query.filter_by(id=id).first_or_404()
+    note = Note.query.filter_by(id=id).first_or_404()
     
     if request.method == 'POST':
         customer_id = request.form.get('customer_id')
@@ -322,18 +331,14 @@ def call_log_edit(id):
         topic_ids = request.form.getlist('topic_ids')
         partner_ids = request.form.getlist('partner_ids')
         
-        # Validation
-        if not customer_id:
-            flash('Customer is required.', 'danger')
-            return redirect(url_for('call_logs.call_log_edit', id=id))
-        
+        # Validation -- customer is optional for general notes
         if not call_date_str:
             flash('Call date is required.', 'danger')
-            return redirect(url_for('call_logs.call_log_edit', id=id))
+            return redirect(url_for('notes.note_edit', id=id))
         
         if not content:
-            flash('Call log content is required.', 'danger')
-            return redirect(url_for('call_logs.call_log_edit', id=id))
+            flash('Note content is required.', 'danger')
+            return redirect(url_for('notes.note_edit', id=id))
         
         # Parse call date and time
         call_time_str = request.form.get('call_time', '')
@@ -344,43 +349,45 @@ def call_log_edit(id):
                 call_date = datetime.strptime(call_date_str, '%Y-%m-%d')
         except ValueError:
             flash('Invalid date/time format.', 'danger')
-            return redirect(url_for('call_logs.call_log_edit', id=id))
+            return redirect(url_for('notes.note_edit', id=id))
         
         # Update call log
-        call_log.customer_id = int(customer_id)
+        note.customer_id = int(customer_id) if customer_id else None
         # Seller and territory are now derived from customer
-        call_log.call_date = call_date
-        call_log.content = content
+        note.call_date = call_date
+        note.content = content
         
         # Update topics - remove all existing associations first
-        call_log.topics = []
+        note.topics = []
         if topic_ids:
             topics = Topic.query.filter(Topic.id.in_([int(tid) for tid in topic_ids])).all()
-            call_log.topics = topics
+            note.topics = topics
         
         # Update partners - remove all existing associations first
-        call_log.partners = []
+        note.partners = []
         if partner_ids:
             partners = Partner.query.filter(Partner.id.in_([int(pid) for pid in partner_ids])).all()
-            call_log.partners = partners
+            note.partners = partners
         
-        # Handle milestone and optional task creation
-        try:
-            _handle_milestone_and_task(call_log)
-        except Exception as e:
-            logger.exception("Error handling milestone/task during call log edit")
-            flash(f'Call log will be saved, but milestone/task failed: {e}', 'warning')
+        # Handle milestone and optional task creation (only for customer-linked notes)
+        if customer_id:
+            try:
+                _handle_milestone_and_task(note)
+            except Exception as e:
+                logger.exception("Error handling milestone/task during call log edit")
+                flash(f'Note will be saved, but milestone/task failed: {e}', 'warning')
         
         db.session.commit()
 
         # Back up this customer's call logs
-        try:
-            _backup_customer(call_log.customer_id)
-        except Exception:
-            logger.debug("Backup skipped", exc_info=True)
+        if note.customer_id:
+            try:
+                _backup_customer(note.customer_id)
+            except Exception:
+                logger.debug("Backup skipped", exc_info=True)
         
-        flash('Call log updated successfully!', 'success')
-        return redirect(url_for('call_logs.call_log_view', id=call_log.id))
+        flash('Note updated successfully!', 'success')
+        return redirect(url_for('notes.note_view', id=note.id))
     
     # GET request - load form
     customers = Customer.query.order_by(Customer.name).all()
@@ -392,9 +399,9 @@ def call_log_edit(id):
     from app.routes.ai import is_ai_enabled
     ai_enabled = is_ai_enabled()
     
-    return render_template('call_log_form.html',
+    return render_template('note_form.html',
                          ai_enabled=ai_enabled,
-                         call_log=call_log,
+                         note=note,
                          customers=customers,
                          sellers=sellers,
                          topics=topics,
@@ -404,20 +411,20 @@ def call_log_edit(id):
                          workiq_connect_impact=True)
 
 
-@call_logs_bp.route('/call-log/<int:id>/delete', methods=['POST'])
-def call_log_delete(id):
+@notes_bp.route('/note/<int:id>/delete', methods=['POST'])
+def note_delete(id):
     """Delete a call log."""
-    call_log = db.session.get(CallLog, id)
+    note = db.session.get(Note, id)
     
-    if not call_log:
-        flash('Call log not found.', 'danger')
-        return redirect(url_for('call_logs.call_logs_list'))
+    if not note:
+        flash('Note not found.', 'danger')
+        return redirect(url_for('notes.notes_list'))
     
     # Store customer for redirect
-    customer_id = call_log.customer_id
+    customer_id = note.customer_id
     
     # Delete the call log
-    db.session.delete(call_log)
+    db.session.delete(note)
     db.session.commit()
 
     # Back up this customer's call logs (reflects the deletion)
@@ -426,20 +433,20 @@ def call_log_delete(id):
     except Exception:
         logger.debug("Backup skipped", exc_info=True)
     
-    flash('Call log deleted successfully.', 'success')
+    flash('Note deleted successfully.', 'success')
     
     # Redirect to customer view if we have a customer, otherwise call logs list
     if customer_id:
         return redirect(url_for('customers.customer_view', id=customer_id))
     else:
-        return redirect(url_for('call_logs.call_logs_list'))
+        return redirect(url_for('notes.notes_list'))
 
 
 # =============================================================================
 # Meeting Import API (WorkIQ Integration)
 # =============================================================================
 
-@call_logs_bp.route('/api/meetings')
+@notes_bp.route('/api/meetings')
 def api_get_meetings():
     """
     Get meetings for a specific date with optional fuzzy matching.
@@ -507,7 +514,7 @@ def api_get_meetings():
     })
 
 
-@call_logs_bp.route('/api/meetings/summary')
+@notes_bp.route('/api/meetings/summary')
 def api_get_meeting_summary():
     """
     Get a 250-word summary for a specific meeting.
@@ -558,7 +565,7 @@ def api_get_meeting_summary():
 # Fill My Day (Bulk Meeting Import)
 # =============================================================================
 
-@call_logs_bp.route('/fill-my-day')
+@notes_bp.route('/fill-my-day')
 def fill_my_day():
     """Fill My Day page - bulk import meetings for a date into call logs."""
     from datetime import date as date_type
@@ -574,7 +581,7 @@ def fill_my_day():
     return render_template('fill_my_day.html', prefill_date=date_param)
 
 
-@call_logs_bp.route('/api/fill-my-day/process', methods=['POST'])
+@notes_bp.route('/api/fill-my-day/process', methods=['POST'])
 def api_fill_my_day_process():
     """
     Process a single meeting for Fill My Day.
@@ -787,7 +794,7 @@ Return JSON:
     return jsonify(result)
 
 
-@call_logs_bp.route('/api/fill-my-day/save', methods=['POST'])
+@notes_bp.route('/api/fill-my-day/save', methods=['POST'])
 def api_fill_my_day_save():
     """
     Save a single call log from Fill My Day.
@@ -804,7 +811,7 @@ def api_fill_my_day_save():
         
     Returns JSON:
         - success: bool
-        - call_log_id: int
+        - note_id: int
         - view_url: str
     """
     data = request.get_json()
@@ -849,19 +856,19 @@ def api_fill_my_day_save():
     
     try:
         # Create call log
-        call_log = CallLog(
+        note = Note(
             customer_id=int(customer_id),
             call_date=call_date,
             content=content
         )
-        db.session.add(call_log)
+        db.session.add(note)
         
         # Add topics
         if topic_ids:
             topics = Topic.query.filter(
                 Topic.id.in_([int(tid) for tid in topic_ids])
             ).all()
-            call_log.topics.extend(topics)
+            note.topics.extend(topics)
         
         # Link milestone if provided
         if milestone_data and milestone_data.get('msx_milestone_id'):
@@ -888,7 +895,7 @@ def api_fill_my_day_save():
                 if milestone_data.get('opportunity_name'):
                     milestone.opportunity_name = milestone_data['opportunity_name']
             
-            call_log.milestones = [milestone]
+            note.milestones = [milestone]
         
         # Link pre-created MSX task if provided
         if created_task_id and milestone_data and milestone_data.get('msx_milestone_id'):
@@ -912,7 +919,7 @@ def api_fill_my_day_save():
                     duration_minutes=60,
                     is_hok=created_task_is_hok,
                     due_date=task_due_date,
-                    call_log=call_log,
+                    note=note,
                     milestone=milestone
                 )
                 db.session.add(msx_task)
@@ -922,8 +929,8 @@ def api_fill_my_day_save():
         
         return jsonify({
             'success': True,
-            'call_log_id': call_log.id,
-            'view_url': url_for('call_logs.call_log_view', id=call_log.id)
+            'note_id': note.id,
+            'view_url': url_for('notes.note_view', id=note.id)
         })
     except Exception as e:
         db.session.rollback()

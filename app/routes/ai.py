@@ -487,10 +487,10 @@ Guidelines:
 
 # System prompt for customer engagement summary generation
 ENGAGEMENT_SUMMARY_PROMPT = (
-    "You are a Microsoft technical seller's assistant. Analyze the provided call log notes "
-    "and any existing customer notes for a customer and generate a structured engagement summary. "
-    "Fill in each field based on what you can extract from the call logs and notes. If a field "
-    "cannot be determined from the available information, write 'Not identified in call logs' "
+    "You are a Microsoft technical seller's assistant. Analyze the provided notes "
+    "and any existing customer overview for a customer and generate a structured engagement summary. "
+    "Fill in each field based on what you can extract from the notes. If a field "
+    "cannot be determined from the available information, write 'Not identified in notes' "
     "for that field.\n\n"
     "Return your response in EXACTLY this format (keep the field labels exactly as shown, "
     "fill in the values after the colon):\n\n"
@@ -501,7 +501,7 @@ ENGAGEMENT_SUMMARY_PROMPT = (
     "Business Outcome in Estimated $$ACR: [expected revenue impact or business value]\n"
     "Future Date/Timeline: [any deadlines, milestones, or target dates mentioned]\n"
     "Risks/Blockers: [any risks, blockers, or concerns raised]\n\n"
-    "Be concise but specific. Use actual details from the call logs and notes, not generic "
+    "Be concise but specific. Use actual details from the notes, not generic "
     "statements. If multiple topics or workstreams exist, cover the most significant ones."
 )
 
@@ -527,26 +527,26 @@ def api_ai_generate_engagement_summary():
     if not customer_id:
         return jsonify({'success': False, 'error': 'customer_id is required'}), 400
 
-    from app.models import Customer, CallLog
+    from app.models import Customer, Note
     customer = Customer.query.get(customer_id)
     if not customer:
         return jsonify({'success': False, 'error': 'Customer not found'}), 404
 
     # Get all call logs sorted by date
-    call_logs = (
-        CallLog.query
+    notes = (
+        Note.query
         .filter_by(customer_id=customer_id)
-        .order_by(CallLog.call_date.asc())
+        .order_by(Note.call_date.asc())
         .all()
     )
 
-    if not call_logs:
-        return jsonify({'success': False, 'error': 'No call logs found for this customer'}), 400
+    if not notes:
+        return jsonify({'success': False, 'error': 'No notes found for this customer'}), 400
 
     # Build the call log text for the prompt
     import re as _re
     call_text_parts = []
-    for cl in call_logs:
+    for cl in notes:
         date_str = cl.call_date.strftime('%Y-%m-%d')
         # Strip HTML tags for cleaner AI input
         content = _re.sub(r'<[^>]+>', '', cl.content or '')
@@ -562,19 +562,19 @@ def api_ai_generate_engagement_summary():
     # Cap the input to avoid token limits (roughly 30k chars)
     MAX_CHARS = 30000
     if len(call_text) > MAX_CHARS:
-        call_text = call_text[:MAX_CHARS] + '\n\n[... additional call logs truncated ...]'
+        call_text = call_text[:MAX_CHARS] + '\n\n[... additional notes truncated ...]'
 
-    # Include existing customer notes as additional context if present
+    # Include existing customer overview as additional context if present
     notes_section = ''
-    if customer.notes:
-        notes_text = _re.sub(r'<[^>]+>', '', customer.notes)
+    if customer.overview:
+        notes_text = _re.sub(r'<[^>]+>', '', customer.overview)
         notes_section = f"\nExisting Customer Notes:\n{notes_text}\n"
 
     user_message = (
         f"Customer: {customer.name} (TPID: {customer.tpid})\n"
-        f"Total call logs: {len(call_logs)}\n"
+        f"Total notes: {len(notes)}\n"
         f"{notes_section}\n"
-        f"Call Log Notes:\n\n{call_text}"
+        f"Notes:\n\n{call_text}"
     )
 
     try:
@@ -597,7 +597,7 @@ def api_ai_generate_engagement_summary():
 
         # Log success
         log_entry = AIQueryLog(
-            request_text=f"Engagement summary for {customer.name} ({len(call_logs)} logs)",
+            request_text=f"Engagement summary for {customer.name} ({len(notes)} logs)",
             response_text=response_text[:500],
             success=True,
             error_message=None
@@ -608,14 +608,14 @@ def api_ai_generate_engagement_summary():
         return jsonify({
             'success': True,
             'summary': response_text,
-            'call_log_count': len(call_logs)
+            'note_count': len(notes)
         })
 
     except Exception as e:
         error_msg = str(e)
 
         log_entry = AIQueryLog(
-            request_text=f"Engagement summary for {customer.name} ({len(call_logs)} logs)",
+            request_text=f"Engagement summary for {customer.name} ({len(notes)} logs)",
             response_text=None,
             success=False,
             error_message=error_msg[:500]

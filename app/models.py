@@ -24,24 +24,24 @@ def get_single_user():
 # Association Tables
 # =============================================================================
 
-# Association table for many-to-many relationship between CallLog and Topic
-call_logs_topics = db.Table(
-    'call_logs_topics',
-    db.Column('call_log_id', db.Integer, db.ForeignKey('call_logs.id'), primary_key=True),
+# Association table for many-to-many relationship between Note and Topic
+notes_topics = db.Table(
+    'notes_topics',
+    db.Column('note_id', db.Integer, db.ForeignKey('notes.id'), primary_key=True),
     db.Column('topic_id', db.Integer, db.ForeignKey('topics.id'), primary_key=True)
 )
 
-# Association table for many-to-many relationship between CallLog and Partner
-call_logs_partners = db.Table(
-    'call_logs_partners',
-    db.Column('call_log_id', db.Integer, db.ForeignKey('call_logs.id'), primary_key=True),
+# Association table for many-to-many relationship between Note and Partner
+notes_partners = db.Table(
+    'notes_partners',
+    db.Column('note_id', db.Integer, db.ForeignKey('notes.id'), primary_key=True),
     db.Column('partner_id', db.Integer, db.ForeignKey('partners.id'), primary_key=True)
 )
 
-# Association table for many-to-many relationship between CallLog and Milestone
-call_logs_milestones = db.Table(
-    'call_logs_milestones',
-    db.Column('call_log_id', db.Integer, db.ForeignKey('call_logs.id'), primary_key=True),
+# Association table for many-to-many relationship between Note and Milestone
+notes_milestones = db.Table(
+    'notes_milestones',
+    db.Column('note_id', db.Integer, db.ForeignKey('notes.id'), primary_key=True),
     db.Column('milestone_id', db.Integer, db.ForeignKey('milestones.id'), primary_key=True)
 )
 
@@ -280,7 +280,7 @@ class Customer(db.Model):
     tpid_url = db.Column(db.String(500), nullable=True)
     website = db.Column(db.String(500), nullable=True)  # Domain extracted from MSX websiteurl
     favicon_b64 = db.Column(db.Text, nullable=True)  # Base64-encoded 32x32 PNG favicon
-    notes = db.Column(db.Text, nullable=True)  # General notes for tracking opportunities/milestones
+    overview = db.Column(db.Text, nullable=True)  # General overview for tracking opportunities/milestones
     territory_id = db.Column(db.Integer, db.ForeignKey('territories.id'), nullable=True)
     seller_id = db.Column(db.Integer, db.ForeignKey('sellers.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
@@ -288,7 +288,7 @@ class Customer(db.Model):
     # Relationships
     seller = db.relationship('Seller', back_populates='customers')
     territory = db.relationship('Territory', back_populates='customers')
-    call_logs = db.relationship('CallLog', back_populates='customer', lazy='select')
+    notes = db.relationship('Note', back_populates='customer', lazy='select')
     verticals = db.relationship(
         'Vertical',
         secondary=customers_verticals,
@@ -301,9 +301,9 @@ class Customer(db.Model):
     
     def get_most_recent_call_date(self) -> Optional[datetime]:
         """Get the date of the most recent call log for this customer."""
-        if not self.call_logs:
+        if not self.notes:
             return None
-        most_recent = max(self.call_logs, key=lambda x: x.call_date)
+        most_recent = max(self.notes, key=lambda x: x.call_date)
         return most_recent.call_date
     
     def get_display_name_with_tpid(self) -> str:
@@ -331,9 +331,9 @@ class Topic(db.Model):
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
     
     # Relationships
-    call_logs = db.relationship(
-        'CallLog',
-        secondary=call_logs_topics,
+    notes = db.relationship(
+        'Note',
+        secondary=notes_topics,
         back_populates='topics',
         lazy='select'
     )
@@ -382,9 +382,9 @@ class Partner(db.Model):
         back_populates='partners',
         lazy='select'
     )
-    call_logs = db.relationship(
-        'CallLog',
-        secondary=call_logs_partners,
+    notes = db.relationship(
+        'Note',
+        secondary=notes_partners,
         back_populates='partners',
         lazy='select'
     )
@@ -418,12 +418,12 @@ class PartnerContact(db.Model):
         return f'<PartnerContact {self.name} at {self.partner.name if self.partner else "Unknown"}>'
 
 
-class CallLog(db.Model):
+class Note(db.Model):
     """Call log entry with rich text content and associated metadata."""
-    __tablename__ = 'call_logs'
+    __tablename__ = 'notes'
     
     id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=True)
     # DateTime for full timestamp - date portion for display, time for meeting imports
     call_date = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now())
     content = db.Column(db.Text, nullable=False)
@@ -431,23 +431,23 @@ class CallLog(db.Model):
     updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
     
     # Relationships
-    customer = db.relationship('Customer', back_populates='call_logs')
+    customer = db.relationship('Customer', back_populates='notes')
     topics = db.relationship(
         'Topic',
-        secondary=call_logs_topics,
-        back_populates='call_logs',
+        secondary=notes_topics,
+        back_populates='notes',
         lazy='select'
     )
     partners = db.relationship(
         'Partner',
-        secondary=call_logs_partners,
-        back_populates='call_logs',
+        secondary=notes_partners,
+        back_populates='notes',
         lazy='select'
     )
     milestones = db.relationship(
         'Milestone',
-        secondary=call_logs_milestones,
-        back_populates='call_logs',
+        secondary=notes_milestones,
+        back_populates='notes',
         lazy='select'
     )
     
@@ -462,7 +462,8 @@ class CallLog(db.Model):
         return self.customer.territory if self.customer else None
     
     def __repr__(self) -> str:
-        return f'<CallLog {self.id} for {self.customer.name}>'
+        name = self.customer.name if self.customer else 'General'
+        return f'<Note {self.id} for {name}>'
 
 
 class Opportunity(db.Model):
@@ -526,9 +527,9 @@ class Milestone(db.Model):
     # Relationships
     customer = db.relationship('Customer', backref=db.backref('milestones', lazy='dynamic'))
     opportunity = db.relationship('Opportunity', back_populates='milestones')
-    call_logs = db.relationship(
-        'CallLog',
-        secondary=call_logs_milestones,
+    notes = db.relationship(
+        'Note',
+        secondary=notes_milestones,
         back_populates='milestones',
         lazy='select'
     )
@@ -605,12 +606,12 @@ class MsxTask(db.Model):
     due_date = db.Column(db.DateTime, nullable=True)  # scheduledend from MSX
     
     # Relationships
-    call_log_id = db.Column(db.Integer, db.ForeignKey('call_logs.id'), nullable=True)
+    note_id = db.Column(db.Integer, db.ForeignKey('notes.id'), nullable=True)
     milestone_id = db.Column(db.Integer, db.ForeignKey('milestones.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
     
     # Relationships
-    call_log = db.relationship('CallLog', backref=db.backref('msx_tasks', lazy='dynamic'))
+    note = db.relationship('Note', backref=db.backref('msx_tasks', lazy='dynamic'))
     milestone = db.relationship('Milestone', back_populates='tasks')
     
     def __repr__(self) -> str:
@@ -916,11 +917,11 @@ class RevenueEngagement(db.Model):
     resolved_at = db.Column(db.DateTime, nullable=True)
     
     # Optional link to a call log if one was created from this engagement
-    call_log_id = db.Column(db.Integer, db.ForeignKey('call_logs.id'), nullable=True)
+    note_id = db.Column(db.Integer, db.ForeignKey('notes.id'), nullable=True)
     
     # Relationships
     analysis = db.relationship('RevenueAnalysis', back_populates='engagements')
-    call_log = db.relationship('CallLog', backref='revenue_engagement')
+    note = db.relationship('Note', backref='revenue_engagement')
     
     def __repr__(self) -> str:
         return f'<RevenueEngagement {self.id} for analysis {self.analysis_id}: {self.status}>'
@@ -1051,7 +1052,7 @@ class ConnectExport(db.Model):
     name = db.Column(db.String(200), nullable=False)
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
-    call_log_count = db.Column(db.Integer, nullable=False, default=0)
+    note_count = db.Column(db.Integer, nullable=False, default=0)
     customer_count = db.Column(db.Integer, nullable=False, default=0)
     ai_summary = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)

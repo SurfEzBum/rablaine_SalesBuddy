@@ -96,6 +96,10 @@
         width: 14.28%;
         overflow: hidden;
     }
+    #calendarTable th.text-muted {
+        color: var(--bs-secondary-color) !important;
+        opacity: 0.65;
+    }
     #calendarTable td {
         transition: background-color 0.15s;
     }
@@ -148,7 +152,11 @@
     .cal-customer-14.cal-highlight { background-color: rgba(75, 0, 130, 0.7) !important; box-shadow: 0 0 0 2px rgba(75, 0, 130, 0.8); }
     .cal-customer-15.cal-highlight { background-color: rgba(184, 134, 11, 0.75) !important; box-shadow: 0 0 0 2px rgba(184, 134, 11, 0.9); }
     
+    /* General note (no customer) style */
+    .cal-general-note { background-color: rgba(108, 117, 125, 0.2) !important; border-left: 2px solid rgba(108, 117, 125, 0.6); }
+    .cal-general-note.cal-highlight { background-color: rgba(108, 117, 125, 0.45) !important; box-shadow: 0 0 0 2px rgba(108, 117, 125, 0.6); }
     [data-customer-id] { cursor: pointer; transition: all 0.15s ease; }
+    .cal-general-note { cursor: pointer; transition: all 0.15s ease; }
     .cal-add-btn { opacity: 0.3; transition: opacity 0.15s; font-size: 0.85rem; }
     .cal-add-btn:hover { opacity: 1; color: var(--bs-primary) !important; }
     .cal-fill-btn { opacity: 0.3; transition: opacity 0.15s; font-size: 0.85rem; }
@@ -201,7 +209,7 @@
     <div class="col-md-12">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h3 class="mb-0">Activity</h3>
-            <ul class="nav nav-pills" id="callLogViewTabs" role="tablist">
+            <ul class="nav nav-pills" id="noteViewTabs" role="tablist">
                 {% if has_milestones %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="calendar-tab" data-bs-toggle="pill" data-bs-target="#calendar-view" type="button" role="tab" aria-controls="calendar-view" aria-selected="true">
@@ -217,7 +225,7 @@
             </ul>
         </div>
         
-        <div class="tab-content" id="callLogViewTabContent">
+        <div class="tab-content" id="noteViewTabContent">
             <!-- Calendar View Tab -->
             <div class="tab-pane fade show active" id="calendar-view" role="tabpanel" aria-labelledby="calendar-tab">
                 <div class="card">
@@ -234,11 +242,13 @@
                         <table class="table table-bordered mb-0" id="calendarTable">
                             <thead>
                                 <tr class="text-center">
+                                    <th class="text-muted">Sun</th>
                                     <th>Mon</th>
                                     <th>Tue</th>
                                     <th>Wed</th>
                                     <th>Thu</th>
                                     <th>Fri</th>
+                                    <th class="text-muted">Sat</th>
                                 </tr>
                             </thead>
                                 <tbody id="calendarBody">
@@ -305,12 +315,12 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="quickCreateModalLabel">
-                    <i class="bi bi-plus-circle"></i> New Call Log for <span id="quickCreateDate"></span>
+                    <i class="bi bi-plus-circle"></i> New Note for <span id="quickCreateDate"></span>
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted">Select a customer to create a call log:</p>
+                <p class="text-muted">Select a customer to create a note:</p>
                 <input type="text" class="form-control mb-3" id="quickCreateSearch" placeholder="Search customers...">
                 <div class="list-group" id="quickCreateCustomerList" style="max-height: 400px; overflow-y: auto;">
                     <!-- Customer list will be populated here -->
@@ -379,7 +389,7 @@
         
         filtered.forEach(customer => {
             const item = document.createElement('a');
-            item.href = `/call-log/new?customer_id=${customer.id}&date=${quickCreateDate}`;
+            item.href = `/note/new?customer_id=${customer.id}&date=${quickCreateDate}`;
             item.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
             item.innerHTML = `
                 <div>
@@ -454,7 +464,7 @@
                 const topicCount = draft.data.topics ? draft.data.topics.length : 0;
                 
                 return `
-                    <a href="{{ url_for('call_logs.call_log_create') }}?customer_id=${draft.customerId}" class="list-group-item list-group-item-action">
+                    <a href="{{ url_for('notes.note_create') }}?customer_id=${draft.customerId}" class="list-group-item list-group-item-action">
                         <div class="d-flex w-100 justify-content-between align-items-start">
                             <div>
                                 <h6 class="mb-1">
@@ -608,9 +618,9 @@
         const calendarTitle = document.getElementById('calendarTitle');
         
         // Show loading state
-        calendarBody.innerHTML = '<tr><td colspan="5" class="text-center py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Loading...</td></tr>';
+        calendarBody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Loading...</td></tr>';
         
-        fetch(`/api/call-logs/calendar?year=${year}&month=${month}`)
+        fetch(`/api/notes/calendar?year=${year}&month=${month}`)
             .then(response => response.json())
             .then(data => {
                 calendarTitle.textContent = `${data.month_name} ${data.year}`;
@@ -618,7 +628,7 @@
             })
             .catch(error => {
                 console.error('Error loading calendar:', error);
-                calendarBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-danger">Error loading calendar</td></tr>';
+                calendarBody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-danger">Error loading calendar</td></tr>';
             });
     }
     
@@ -642,41 +652,48 @@
         const customerColorMap = {};
         const allCustomerIds = new Set();
         Object.values(days).forEach(logs => {
-            logs.forEach(log => allCustomerIds.add(log.customer_id));
+            logs.forEach(log => {
+                if (log.customer_id) allCustomerIds.add(log.customer_id);
+            });
         });
         const customerList = Array.from(allCustomerIds);
         customerList.forEach((id, index) => {
             customerColorMap[id] = (index % 15) + 1;
         });
         
-        // Build array of weekday info for the month
-        // firstWeekday: 0=Sun, 1=Mon, ..., 6=Sat
-        // We want Mon-Fri only (columns 0-4 = Mon-Fri)
-        const weekdayDays = []; // Array of {dayNum, column} for weekdays only
+        // Build array of day info for the month (all 7 days)
+        // Column layout: 0=Sun, 1=Mon, ..., 6=Sat
+        const allDays = [];
         for (let d = 1; d <= daysInMonth; d++) {
-            // Calculate day of week for this date
             const dateObj = new Date(data.year, data.month - 1, d);
             const dow = dateObj.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-            if (dow >= 1 && dow <= 5) { // Mon-Fri
-                weekdayDays.push({ dayNum: d, column: dow - 1 }); // column 0-4
-            }
+            allDays.push({ dayNum: d, column: dow });
         }
         
-        // Build calendar rows (each row = Mon-Fri)
+        // Build calendar rows (each row = Sun-Sat)
         let dayIndex = 0;
-        while (dayIndex < weekdayDays.length) {
+        while (dayIndex < allDays.length) {
             const row = document.createElement('tr');
             
-            for (let col = 0; col < 5; col++) {
+            for (let col = 0; col < 7; col++) {
                 const cell = document.createElement('td');
                 cell.className = 'p-1';
                 cell.style.verticalAlign = 'top';
                 cell.style.height = '100px';
+                const isWeekend = (col === 0 || col === 6);
+                if (isWeekend) {
+                    cell.style.height = '60px';
+                    if (document.documentElement.getAttribute('data-bs-theme') === 'dark') {
+                        cell.style.backgroundColor = 'rgba(255,255,255,0.02)';
+                    } else {
+                        cell.style.backgroundColor = 'rgba(0,0,0,0.02)';
+                    }
+                }
                 
                 // Check if we have a day for this column in this week
-                if (dayIndex < weekdayDays.length && weekdayDays[dayIndex].column === col) {
+                if (dayIndex < allDays.length && allDays[dayIndex].column === col) {
                     // This cell has content
-                    const dayNum = weekdayDays[dayIndex].dayNum;
+                    const dayNum = allDays[dayIndex].dayNum;
                     
                     // Day number header
                     const dayHeader = document.createElement('div');
@@ -703,7 +720,7 @@
                     addBtn.href = '#';
                     addBtn.className = 'text-muted text-decoration-none cal-add-btn';
                     addBtn.innerHTML = '<i class="bi bi-plus-circle"></i>';
-                    addBtn.title = 'New call log';
+                    addBtn.title = 'New note';
                     addBtn.setAttribute('data-date', dateStr);
                     addBtn.addEventListener('click', function(e) {
                         e.preventDefault();
@@ -716,23 +733,35 @@
                     cell.appendChild(dayHeader);
                     
                     // Call log entries for this day
-                    const callLogs = days[dayNum] || [];
-                    if (callLogs.length > 0) {
+                    const noteEntries = days[dayNum] || [];
+                    if (noteEntries.length > 0) {
                         const entriesContainer = document.createElement('div');
                         entriesContainer.className = 'calendar-entries';
                         entriesContainer.style.fontSize = '0.75rem';
                         entriesContainer.style.maxHeight = '70px';
                         entriesContainer.style.overflowY = 'auto';
                         
-                        callLogs.forEach(log => {
+                        noteEntries.forEach(log => {
                             const entry = document.createElement('a');
-                            entry.href = `/call-log/${log.id}`;
-                            const colorIndex = customerColorMap[log.customer_id];
-                            entry.className = `d-block text-decoration-none text-truncate mb-1 px-1 rounded cal-customer-${colorIndex}`;
+                            entry.href = `/note/${log.id}`;
+                            
+                            if (log.is_general) {
+                                // General note: distinct muted style with sticky-note icon
+                                entry.className = 'd-block text-decoration-none text-truncate mb-1 px-1 rounded cal-general-note';
+                                entry.setAttribute('data-general-note', 'true');
+                            } else {
+                                // Customer note: color-coded by customer
+                                const colorIndex = customerColorMap[log.customer_id];
+                                entry.className = `d-block text-decoration-none text-truncate mb-1 px-1 rounded cal-customer-${colorIndex}`;
+                                entry.setAttribute('data-customer-id', log.customer_id);
+                            }
                             entry.style.color = 'inherit';
                             
                             // Build entry content with indicators
                             let indicators = '';
+                            if (log.is_general) {
+                                indicators += '<i class="bi bi-sticky text-secondary" title="General note"></i> ';
+                            }
                             if (log.has_milestone) {
                                 indicators += '<i class="bi bi-flag-fill text-success" title="Has milestone"></i> ';
                             }
@@ -745,19 +774,20 @@
                             let timePrefix = log.time ? `<small class="text-muted">${escapeHtml(log.time)}</small> ` : '';
                             entry.innerHTML = indicators + timePrefix + escapeHtml(log.customer_name);
                             entry.title = (log.time ? log.time + ' - ' : '') + log.customer_name + (log.has_milestone ? ' (Milestone)' : '') + (log.has_task ? ' (Task)' : '') + (log.has_hok ? ' (HOK)' : '');
-                            entry.setAttribute('data-customer-id', log.customer_id);
                             
-                            // Hover: highlight all entries for this customer
-                            entry.addEventListener('mouseenter', function() {
-                                document.querySelectorAll(`[data-customer-id="${log.customer_id}"]`).forEach(el => {
-                                    el.classList.add('cal-highlight');
+                            // Hover: highlight all entries for this customer (skip for general notes)
+                            if (!log.is_general) {
+                                entry.addEventListener('mouseenter', function() {
+                                    document.querySelectorAll(`[data-customer-id="${log.customer_id}"]`).forEach(el => {
+                                        el.classList.add('cal-highlight');
+                                    });
                                 });
-                            });
-                            entry.addEventListener('mouseleave', function() {
-                                document.querySelectorAll(`[data-customer-id="${log.customer_id}"]`).forEach(el => {
-                                    el.classList.remove('cal-highlight');
+                                entry.addEventListener('mouseleave', function() {
+                                    document.querySelectorAll(`[data-customer-id="${log.customer_id}"]`).forEach(el => {
+                                        el.classList.remove('cal-highlight');
+                                    });
                                 });
-                            });
+                            }
                             
                             entriesContainer.appendChild(entry);
                         });

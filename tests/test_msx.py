@@ -6,7 +6,7 @@ Note: These tests mock the actual MSX API calls to avoid external dependencies.
 """
 import pytest
 from unittest.mock import patch, MagicMock
-from app.models import db, Milestone, MsxTask, CallLog, Customer
+from app.models import db, Milestone, MsxTask, Note, Customer
 from app.services.msx_api import (
     extract_account_id_from_url,
     build_milestone_url,
@@ -110,12 +110,12 @@ class TestMsxTaskModel:
             
             # Create call log
             from datetime import date
-            call_log = CallLog(
+            note = Note(
                 customer_id=customer.id,
                 call_date=date.today(),
                 content='<p>Test content</p>'
             )
-            db.session.add(call_log)
+            db.session.add(note)
             db.session.commit()
             
             # Create task
@@ -128,7 +128,7 @@ class TestMsxTaskModel:
                 task_category_name='Azure Workshop',
                 duration_minutes=60,
                 is_hok=True,
-                call_log_id=call_log.id,
+                note_id=note.id,
                 milestone_id=milestone.id
             )
             db.session.add(task)
@@ -138,10 +138,10 @@ class TestMsxTaskModel:
             assert task.msx_task_id == 'task-456'
             assert task.is_hok is True
             assert task.milestone == milestone
-            assert task.call_log == call_log
+            assert task.note == note
     
     def test_msx_task_relationships(self, app, db_session, sample_user, sample_customer):
-        """Test MsxTask relationships to milestone and call_log."""
+        """Test MsxTask relationships to milestone and note."""
         with app.app_context():
             from app.models import User, Customer
             from datetime import date
@@ -155,13 +155,13 @@ class TestMsxTaskModel:
             )
             db.session.add(milestone)
             
-            call_log = CallLog(
+            note = Note(
                 customer_id=customer.id,
                 call_date=date.today(),
                 content='<p>Content</p>'
             )
-            call_log.milestones.append(milestone)
-            db.session.add(call_log)
+            note.milestones.append(milestone)
+            db.session.add(note)
             db.session.commit()
             
             task = MsxTask(
@@ -170,7 +170,7 @@ class TestMsxTaskModel:
                 subject='Relationship Test',
                 task_category=1,
                 task_category_name='Test',
-                call_log_id=call_log.id,
+                note_id=note.id,
                 milestone_id=milestone.id
             )
             db.session.add(task)
@@ -178,7 +178,7 @@ class TestMsxTaskModel:
             
             # Test relationships work both ways
             assert task in milestone.tasks
-            assert task in call_log.msx_tasks
+            assert task in note.msx_tasks
 
 
 class TestMsxRoutes:
@@ -404,16 +404,16 @@ class TestMilestoneStatusSorting:
             assert milestone.status_sort_order >= 99
 
 
-class TestCallLogMilestoneTaskFlow:
+class TestNoteMilestoneTaskFlow:
     """Tests for the full call log -> milestone -> task flow."""
     
-    def test_call_log_save_with_milestone_and_task_fields(self, client, app, db_session, sample_customer):
+    def test_note_save_with_milestone_and_task_fields(self, client, app, db_session, sample_customer):
         """Test saving call log with milestone and task creation fields."""
         msx_milestone_id = 'flow-test-milestone'
         
         # Note: Task creation won't succeed without MSX auth, 
         # but the milestone should still be linked
-        response = client.post(f'/call-log/new?customer_id={sample_customer.id}', data={
+        response = client.post(f'/note/new?customer_id={sample_customer.id}', data={
             'customer_id': sample_customer.id,
             'call_date': '2026-02-19',
             'content': '<p>Test call with milestone and task</p>',
@@ -436,6 +436,6 @@ class TestCallLogMilestoneTaskFlow:
             assert milestone is not None
             assert milestone.msx_status == 'On Track'
             
-            call_log = CallLog.query.filter_by(customer_id=sample_customer.id).first()
-            assert call_log is not None
-            assert milestone in call_log.milestones
+            note = Note.query.filter_by(customer_id=sample_customer.id).first()
+            assert note is not None
+            assert milestone in note.milestones

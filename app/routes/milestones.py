@@ -11,7 +11,7 @@ from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, g, jsonify, Response, stream_with_context,
 )
-from app.models import db, Milestone, MsxTask, CallLog, Customer
+from app.models import db, Milestone, MsxTask, Note, Customer
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ def milestone_create_task(id):
         except (ValueError, TypeError):
             pass
     
-    # Store local record (no call_log_id)
+    # Store local record (no note_id)
     msx_task = MsxTask(
         msx_task_id=result["task_id"],
         msx_task_url=result.get("task_url", ""),
@@ -135,7 +135,7 @@ def milestone_create_task(id):
         duration_minutes=int(duration_minutes),
         is_hok=int(task_category) in HOK_TASK_CATEGORIES,
         due_date=task_due_date,
-        call_log_id=None,
+        note_id=None,
         milestone_id=milestone.id,
     )
     db.session.add(msx_task)
@@ -189,8 +189,8 @@ def milestone_delete(id):
     milestone = Milestone.query.get_or_404(id)
     
     # Protect milestones that are linked to call logs
-    if milestone.call_logs:
-        flash('Cannot delete this milestone — it is linked to call logs. '
+    if milestone.notes:
+        flash('Cannot delete this milestone — it is linked to notes. '
               'Remove the milestone from those call logs first.', 'danger')
         return redirect(url_for('milestones.milestone_view', id=milestone.id))
     

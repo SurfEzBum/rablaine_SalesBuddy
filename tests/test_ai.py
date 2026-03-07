@@ -306,7 +306,7 @@ class TestGenerateEngagementSummary:
 
     def _create_customer_with_logs(self, app):
         """Helper to create a customer with call logs for testing."""
-        from app.models import Customer, CallLog, Seller, Territory
+        from app.models import Customer, Note, Seller, Territory
         with app.app_context():
             territory = Territory(name="Test Territory")
             seller = Seller(name="Test Seller", alias="tseller", seller_type="Growth")
@@ -322,12 +322,12 @@ class TestGenerateEngagementSummary:
             db.session.add(customer)
             db.session.flush()
 
-            cl1 = CallLog(
+            cl1 = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 6, 15, 12, 0, 0),
                 content="Discussed migrating their monolith to AKS. Key contact: Jane Smith, CTO.",
             )
-            cl2 = CallLog(
+            cl2 = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 7, 1, 14, 0, 0),
                 content="Follow-up on AKS migration. Targeting Q3 go-live. Estimated $50K ACR.",
@@ -369,7 +369,7 @@ class TestGenerateEngagementSummary:
             )
         assert resp.status_code == 404
 
-    def test_returns_400_when_no_call_logs(self, app, client):
+    def test_returns_400_when_no_notes(self, app, client):
         """Should return 400 when customer has no call logs."""
         from app.models import Customer
         with app.app_context():
@@ -385,7 +385,7 @@ class TestGenerateEngagementSummary:
                 content_type='application/json',
             )
         assert resp.status_code == 400
-        assert 'No call logs' in resp.get_json()['error']
+        assert 'No notes' in resp.get_json()['error']
 
     @patch('app.routes.ai.get_azure_openai_client')
     def test_success_returns_summary(self, mock_get_client, app, client):
@@ -416,7 +416,7 @@ class TestGenerateEngagementSummary:
         data = resp.get_json()
         assert data['success'] is True
         assert 'Jane Smith' in data['summary']
-        assert data['call_log_count'] == 2
+        assert data['note_count'] == 2
 
     @patch('app.routes.ai.get_azure_openai_client')
     def test_logs_success_to_ai_query_log(self, mock_get_client, app, client):
@@ -467,14 +467,14 @@ class TestGenerateEngagementSummary:
 
     @patch('app.routes.ai.get_azure_openai_client')
     def test_includes_customer_notes_in_prompt(self, mock_get_client, app, client):
-        """Should include existing customer notes in the user message sent to AI."""
+        """Should include existing customer overview in the user message sent to AI."""
         customer_id = self._create_customer_with_logs(app)
 
         # Add notes to the customer
         from app.models import Customer
         with app.app_context():
             customer = db.session.get(Customer, customer_id)
-            customer.notes = "Key contact is Jane Smith (CTO). Budget approved for Q3."
+            customer.overview = "Key contact is Jane Smith (CTO). Budget approved for Q3."
             db.session.commit()
 
         mock_client = MagicMock()
@@ -489,7 +489,7 @@ class TestGenerateEngagementSummary:
             )
 
         assert resp.status_code == 200
-        # Verify the user message sent to OpenAI includes the customer notes
+        # Verify the user message sent to OpenAI includes the customer overview
         call_args = mock_client.chat.completions.create.call_args
         user_message = call_args[1]['messages'][1]['content'] if 'messages' in call_args[1] else call_args[0][0][1]['content']
         assert 'Existing Customer Notes' in user_message
@@ -502,12 +502,12 @@ class TestGenerateButtonVisibility:
 
     def test_generate_button_visible_when_ai_enabled(self, app, client):
         """Generate button should appear when AI is enabled and customer has call logs."""
-        from app.models import Customer, CallLog
+        from app.models import Customer, Note
         with app.app_context():
             customer = Customer(name="Button Test", tpid=33333)
             db.session.add(customer)
             db.session.flush()
-            cl = CallLog(
+            cl = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 6, 1),
                 content="Test call",
@@ -523,12 +523,12 @@ class TestGenerateButtonVisibility:
 
     def test_generate_button_hidden_when_ai_disabled(self, app, client):
         """Generate button should not appear when AI is disabled."""
-        from app.models import Customer, CallLog
+        from app.models import Customer, Note
         with app.app_context():
             customer = Customer(name="No AI Test", tpid=44444)
             db.session.add(customer)
             db.session.flush()
-            cl = CallLog(
+            cl = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 6, 1),
                 content="Test call",
@@ -542,7 +542,7 @@ class TestGenerateButtonVisibility:
         assert resp.status_code == 200
         assert b'id="generateNotesBtn"' not in resp.data
 
-    def test_generate_button_hidden_when_no_call_logs(self, app, client):
+    def test_generate_button_hidden_when_no_notes(self, app, client):
         """Generate button should not appear when customer has no call logs."""
         from app.models import Customer
         with app.app_context():

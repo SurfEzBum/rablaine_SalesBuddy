@@ -28,9 +28,9 @@
             <div class="card-body">
                 <div class="row text-center">
                     <div class="col-6 col-md-3 col-lg mb-3">
-                        <a href="{{ url_for('call_logs.call_logs_list') }}" class="text-decoration-none">
-                            <h3 class="text-success">{{ stats.total_call_logs }}</h3>
-                            <small class="text-muted">Call Logs</small>
+                        <a href="{{ url_for('notes.notes_list') }}" class="text-decoration-none">
+                            <h3 class="text-success">{{ stats.total_notes }}</h3>
+                            <small class="text-muted">Notes</small>
                         </a>
                     </div>
                     <div class="col-6 col-md-3 col-lg mb-3">
@@ -508,14 +508,14 @@
                         <!-- Call Logs column -->
                         <div class="col-md-6">
                             <div class="border rounded p-3 h-100">
-                                <h6 class="mb-3"><i class="bi bi-file-earmark-code"></i> Call Logs (JSON)</h6>
+                                <h6 class="mb-3"><i class="bi bi-file-earmark-code"></i> Notes (JSON)</h6>
                                 <div class="mb-2">
                                     <small class="text-muted d-block">Backed Up Files</small>
-                                    <span><span id="callLogFileCount" class="fw-bold">0</span> customer files</span>
+                                    <span><span id="noteFileCount" class="fw-bold">0</span> customer files</span>
                                 </div>
-                                <p class="text-muted small mb-3">Each customer's call logs are automatically exported to JSON when created or edited.</p>
+                                <p class="text-muted small mb-3">Each customer's notes are automatically exported to JSON when created or edited.</p>
                                 <div class="mb-3">
-                                    <button class="btn btn-primary btn-sm" onclick="backupAllCallLogs()">
+                                    <button class="btn btn-primary btn-sm" onclick="backupAllNotes()">
                                         <i class="bi bi-arrow-repeat"></i> Backup All Now
                                     </button>
                                 </div>
@@ -526,13 +526,13 @@
                                         <i class="bi bi-cloud-upload"></i> Disaster Recovery Restore
                                     </summary>
                                     <div class="mt-2">
-                                        <p class="small text-muted mb-2">Restore all call logs from your OneDrive backup folder. Requires accounts to be synced first.</p>
+                                        <p class="small text-muted mb-2">Restore all notes from your OneDrive backup folder. Requires accounts to be synced first.</p>
                                         <button id="fullRestoreBtn" class="btn btn-warning btn-sm mb-2" onclick="restoreAllFromBackup()"
                                             {% if accounts_sync_state != 'complete' %}disabled{% endif %}>
                                             <i class="bi bi-cloud-download"></i> Full Restore from Backup
                                         </button>
                                         {% if accounts_sync_state != 'complete' %}
-                                        <div class="small text-muted mb-2"><i class="bi bi-info-circle"></i> Sync accounts (MSX import) before restoring call logs.</div>
+                                        <div class="small text-muted mb-2"><i class="bi bi-info-circle"></i> Sync accounts (MSX import) before restoring notes.</div>
                                         {% endif %}
                                         <div id="fullRestoreResult" class="mt-1 mb-2 small"></div>
 
@@ -2046,7 +2046,7 @@ function loadBackupStatus() {
 
         // Call log details
         if (clEnabled) {
-            document.getElementById('callLogFileCount').textContent = clData.file_count || 0;
+            document.getElementById('noteFileCount').textContent = clData.file_count || 0;
         }
     });
 }
@@ -2089,7 +2089,7 @@ function runDbBackupNow() {
 // Call Log Backup
 // =============================================================================
 
-function backupAllCallLogs() {
+function backupAllNotes() {
     const btn = event.target.closest('button');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Backing up...';
@@ -2113,7 +2113,7 @@ function backupAllCallLogs() {
 }
 
 function restoreAllFromBackup() {
-    if (!confirm('Restore all call logs from your OneDrive backup folder? This will import any call logs not already in the database.')) return;
+    if (!confirm('Restore all notes from your OneDrive backup folder? This will import any notes not already in the database.')) return;
 
     const btn = document.getElementById('fullRestoreBtn');
     const resultEl = document.getElementById('fullRestoreResult');
@@ -2132,7 +2132,7 @@ function restoreAllFromBackup() {
         if (data.success) {
             let msg = '<span class="text-success"><i class="bi bi-check-circle"></i> ';
             msg += 'Processed ' + data.files_processed + ' files. ';
-            msg += data.total_logs_created + ' call logs created, ';
+            msg += data.total_logs_created + ' notes created, ';
             msg += data.total_logs_skipped + ' skipped (already exist).';
             if (data.files_failed > 0) {
                 msg += ' <span class="text-warning">' + data.files_failed + ' files failed.</span>';
@@ -2179,7 +2179,7 @@ function restoreFromBackup() {
     .then(data => {
         if (data.success) {
             resultEl.innerHTML =
-                '<span class="text-success">Restored ' + data.logs_created + ' call logs ' +
+                '<span class="text-success">Restored ' + data.logs_created + ' notes ' +
                 'for ' + data.customer_name + ' (' + data.logs_skipped + ' skipped/duplicates).</span>';
         } else {
             resultEl.innerHTML = '<span class="text-danger">' + data.error + '</span>';

@@ -64,14 +64,14 @@ def seller_create():
 def seller_view(id):
     """View seller details (FR007)."""
     seller = Seller.query.options(
-        db.joinedload(Seller.customers).joinedload(Customer.call_logs)
+        db.joinedload(Seller.customers).joinedload(Customer.notes)
     ).filter_by(id=id).first_or_404()
     
     # Get customers with their most recent call log
     customers_data = []
     for customer in sorted(seller.customers, key=lambda c: c.name):
         # Get most recent call log (sort in-memory since already loaded)
-        sorted_calls = sorted(customer.call_logs, key=lambda c: c.call_date, reverse=True)
+        sorted_calls = sorted(customer.notes, key=lambda c: c.call_date, reverse=True)
         most_recent_call = sorted_calls[0] if sorted_calls else None
         customers_data.append({
             'customer': customer,

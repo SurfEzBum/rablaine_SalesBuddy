@@ -29,14 +29,14 @@
                     {{ milestone.url }}
                 </small>
             </div>
-            <span class="badge bg-secondary">{{ milestone.call_logs|length }} call{{ 's' if milestone.call_logs|length != 1 else '' }}</span>
+            <span class="badge bg-secondary">{{ milestone.notes|length }} call{{ 's' if milestone.notes|length != 1 else '' }}</span>
         </a>
         {% endfor %}
     </div>
 </div>
 {% else %}
 <div class="alert alert-info">
-    <i class="bi bi-info-circle"></i> No milestones yet. Milestones are created automatically when you add a milestone URL to a call log, 
+    <i class="bi bi-info-circle"></i> No milestones yet. Milestones are created automatically when you add a milestone URL to a note, 
     or you can <a href="{{ url_for('milestones.milestone_create') }}" class="alert-link">create one manually</a>.
 </div>
 {% endif %}

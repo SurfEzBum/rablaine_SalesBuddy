@@ -5,7 +5,7 @@ Covers:
 - backup.py service functions (_sanitize_folder_name, _customer_to_dict,
   backup_customer, backup_all_customers, restore_from_backup)
 - backup routes (status, backup-all, restore)
-- call_logs.py integration hooks
+- notes.py integration hooks
 """
 
 import json
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from app.models import (
-    CallLog,
+    Note,
     Customer,
     Partner,
     Seller,
@@ -89,7 +89,7 @@ def customer_with_logs(app):
         db.session.add_all([topic, partner])
         db.session.flush()
 
-        cl = CallLog(
+        cl = Note(
             customer_id=customer.id,
             call_date=datetime(2025, 6, 15, 12, 0, 0, tzinfo=timezone.utc),
             content="Test call log for backup",
@@ -105,16 +105,16 @@ def customer_with_logs(app):
             "territory_id": territory.id,
             "topic_id": topic.id,
             "partner_id": partner.id,
-            "call_log_id": cl.id,
+            "note_id": cl.id,
         }
         yield ids
 
         # Cleanup
-        for cl_obj in CallLog.query.filter_by(customer_id=ids["customer_id"]).all():
+        for cl_obj in Note.query.filter_by(customer_id=ids["customer_id"]).all():
             cl_obj.topics.clear()
             cl_obj.partners.clear()
         db.session.flush()
-        CallLog.query.filter_by(customer_id=ids["customer_id"]).delete()
+        Note.query.filter_by(customer_id=ids["customer_id"]).delete()
         Customer.query.filter_by(id=ids["customer_id"]).delete()
         Topic.query.filter_by(id=ids["topic_id"]).delete()
         Partner.query.filter_by(id=ids["partner_id"]).delete()
@@ -190,7 +190,7 @@ class TestGetBackupRoot:
 class TestCustomerToDict:
     """Tests for customer serialization."""
 
-    def test_serializes_customer_and_call_logs(self, app, customer_with_logs):
+    def test_serializes_customer_and_notes(self, app, customer_with_logs):
         with app.app_context():
             customer = Customer.query.get(customer_with_logs["customer_id"])
             result = _customer_to_dict(customer)
@@ -205,8 +205,8 @@ class TestCustomerToDict:
             assert cust["seller_name"] == "Backup Seller"
             assert cust["territory_name"] == "Backup Territory"
 
-            assert len(result["call_logs"]) == 1
-            cl = result["call_logs"][0]
+            assert len(result["notes"]) == 1
+            cl = result["notes"][0]
             assert cl["content"] == "Test call log for backup"
             assert "Backup Topic" in cl["topics"]
             assert "Backup Partner" in cl["partners"]
@@ -222,7 +222,7 @@ class TestCustomerToDict:
 
             result = _customer_to_dict(customer)
             assert result["customer"]["seller_name"] is None
-            assert result["call_logs"] == []
+            assert result["notes"] == []
 
             db.session.delete(customer)
             db.session.commit()
@@ -240,7 +240,7 @@ class TestBackupCustomer:
             result = backup_customer(customer_with_logs["customer_id"])
             assert result is True
 
-            filepath = os.path.join(backup_dir, "call_logs", "Backup Seller", "99999.json")
+            filepath = os.path.join(backup_dir, "notes", "Backup Seller", "99999.json")
             assert os.path.isfile(filepath)
 
             with open(filepath, encoding="utf-8") as f:
@@ -273,7 +273,7 @@ class TestBackupCustomer:
             )
             db.session.add(customer)
             db.session.flush()
-            cl = CallLog(
+            cl = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 1, 1, tzinfo=timezone.utc),
                 content="orphan log",
@@ -284,7 +284,7 @@ class TestBackupCustomer:
             result = backup_customer(customer.id)
             assert result is True
 
-            filepath = os.path.join(backup_dir, "call_logs", "Unassigned", "55555.json")
+            filepath = os.path.join(backup_dir, "notes", "Unassigned", "55555.json")
             assert os.path.isfile(filepath)
 
             db.session.delete(cl)
@@ -295,7 +295,7 @@ class TestBackupCustomer:
         """Backup should overwrite the previous version of the file."""
         with app.app_context():
             backup_customer(customer_with_logs["customer_id"])
-            filepath = os.path.join(backup_dir, "call_logs", "Backup Seller", "99999.json")
+            filepath = os.path.join(backup_dir, "notes", "Backup Seller", "99999.json")
             first_mtime = os.path.getmtime(filepath)
 
             # Write again
@@ -327,7 +327,7 @@ class TestBackupAllCustomers:
                 )
                 db.session.add(c)
                 db.session.flush()
-                cl = CallLog(
+                cl = Note(
                     customer_id=c.id,
                     call_date=datetime(2025, 1, 1 + i, tzinfo=timezone.utc),
                     content=f"Log {i}",
@@ -340,12 +340,12 @@ class TestBackupAllCustomers:
             assert result["failed"] == 0
 
             for i in range(3):
-                fp = os.path.join(backup_dir, "call_logs", "Bulk Seller", f"{80000 + i}.json")
+                fp = os.path.join(backup_dir, "notes", "Bulk Seller", f"{80000 + i}.json")
                 assert os.path.isfile(fp)
 
             # Cleanup
             for c in Customer.query.filter_by(seller_id=seller.id).all():
-                CallLog.query.filter_by(customer_id=c.id).delete()
+                Note.query.filter_by(customer_id=c.id).delete()
             Customer.query.filter_by(seller_id=seller.id).delete()
             db.session.delete(seller)
             db.session.commit()
@@ -371,7 +371,7 @@ class TestBackupAllCustomers:
 class TestRestoreFromBackup:
     """Tests for DR restore."""
 
-    def test_restores_call_logs_by_tpid(self, app):
+    def test_restores_notes_by_tpid(self, app):
         with app.app_context():
             from flask import g
             user = User.query.first()
@@ -388,7 +388,7 @@ class TestRestoreFromBackup:
                     "name": "Restore Corp",
                     "tpid": 44444,
                 },
-                "call_logs": [
+                "notes": [
                     {
                         "call_date": "2025-06-01T10:00:00+00:00",
                         "content": "Restored log 1",
@@ -410,7 +410,7 @@ class TestRestoreFromBackup:
             assert result["logs_skipped"] == 0
             assert result["customer_name"] == "Restore Corp"
 
-            logs = CallLog.query.filter_by(customer_id=customer.id).all()
+            logs = Note.query.filter_by(customer_id=customer.id).all()
             assert len(logs) == 2
 
             topic = Topic.query.filter_by(name="Restored Topic").first()
@@ -421,7 +421,7 @@ class TestRestoreFromBackup:
                 cl.topics.clear()
                 cl.partners.clear()
             db.session.flush()
-            CallLog.query.filter_by(customer_id=customer.id).delete()
+            Note.query.filter_by(customer_id=customer.id).delete()
             db.session.delete(customer)
             Topic.query.filter_by(name="Restored Topic").delete()
             Partner.query.filter_by(name="Restored Partner").delete()
@@ -436,7 +436,7 @@ class TestRestoreFromBackup:
             db.session.add(customer)
             db.session.flush()
 
-            existing_cl = CallLog(
+            existing_cl = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 6, 1, 10, 0, 0, tzinfo=timezone.utc),
                 content="Already exists",
@@ -448,7 +448,7 @@ class TestRestoreFromBackup:
                 "_notehelper_backup": True,
                 "_version": 2,
                 "customer": {"tpid": 33333},
-                "call_logs": [
+                "notes": [
                     {
                         "call_date": "2025-06-01T10:00:00+00:00",
                         "content": "Duplicate",
@@ -470,7 +470,7 @@ class TestRestoreFromBackup:
             assert result["logs_skipped"] == 1
 
             # Cleanup
-            CallLog.query.filter_by(customer_id=customer.id).delete()
+            Note.query.filter_by(customer_id=customer.id).delete()
             db.session.delete(customer)
             db.session.commit()
 
@@ -489,7 +489,7 @@ class TestRestoreFromBackup:
             result = restore_from_backup({
                 "_notehelper_backup": True,
                 "customer": {"tpid": 111111},
-                "call_logs": [],
+                "notes": [],
             })
             assert result["success"] is False
             assert "not found" in result["error"]
@@ -550,7 +550,7 @@ class TestBackupRoutes:
             "_notehelper_backup": True,
             "_version": 2,
             "customer": {"tpid": 66666},
-            "call_logs": [
+            "notes": [
                 {
                     "call_date": "2025-07-01T10:00:00+00:00",
                     "content": "Via API",
@@ -571,7 +571,7 @@ class TestBackupRoutes:
 
         # Cleanup
         with app.app_context():
-            CallLog.query.filter_by(customer_id=customer_id).delete()
+            Note.query.filter_by(customer_id=customer_id).delete()
             Customer.query.filter_by(id=customer_id).delete()
             db.session.commit()
 
@@ -587,7 +587,7 @@ class TestBackupRoutes:
         payload = {
             "_notehelper_backup": True,
             "customer": {"tpid": 999999},
-            "call_logs": [],
+            "notes": [],
         }
         resp = client.post(
             "/api/backup/restore",
@@ -603,7 +603,7 @@ class TestBackupRoutes:
             lambda: {"enabled": True, "backup_dir": backup_dir},
         )
 
-        cl_dir = os.path.join(backup_dir, "call_logs", "Some Seller")
+        cl_dir = os.path.join(backup_dir, "notes", "Some Seller")
         os.makedirs(cl_dir, exist_ok=True)
         for i in range(3):
             Path(os.path.join(cl_dir, f"{i}.json")).write_text("{}")
@@ -614,13 +614,13 @@ class TestBackupRoutes:
 
 
 # =========================================================================
-# Integration: call_logs hooks trigger backup
+# Integration: notes hooks trigger backup
 # =========================================================================
 
-class TestCallLogBackupHooks:
+class TestNoteBackupHooks:
     """Verify that call log CRUD triggers a backup write."""
 
-    def test_create_call_log_triggers_backup(self, client, app, backup_dir, sample_data, monkeypatch):
+    def test_create_note_triggers_backup(self, client, app, backup_dir, sample_data, monkeypatch):
         """Creating a call log should write a backup file."""
         monkeypatch.setattr(
             "app.services.backup._load_db_backup_config",
@@ -628,7 +628,7 @@ class TestCallLogBackupHooks:
         )
 
         resp = client.post(
-            "/call-log/new",
+            "/note/new",
             data={
                 "customer_id": sample_data["customer1_id"],
                 "call_date": "2025-08-01",
@@ -639,7 +639,7 @@ class TestCallLogBackupHooks:
         assert resp.status_code == 200
 
         # customer1 has tpid=1001 and seller=Alice Smith
-        filepath = os.path.join(backup_dir, "call_logs", "Alice Smith", "1001.json")
+        filepath = os.path.join(backup_dir, "notes", "Alice Smith", "1001.json")
         assert os.path.isfile(filepath), f"Expected backup at {filepath}"
 
     def test_backup_not_written_when_disabled(self, client, app, backup_dir, sample_data, monkeypatch):
@@ -653,7 +653,7 @@ class TestCallLogBackupHooks:
         )
 
         client.post(
-            "/call-log/new",
+            "/note/new",
             data={
                 "customer_id": sample_data["customer1_id"],
                 "call_date": "2025-08-02",
@@ -662,7 +662,7 @@ class TestCallLogBackupHooks:
             follow_redirects=True,
         )
 
-        cl_dir = os.path.join(backup_dir, "call_logs")
+        cl_dir = os.path.join(backup_dir, "notes")
         assert not os.path.exists(cl_dir)
 
 
@@ -826,19 +826,19 @@ class TestFindBackupFolder:
     """Tests for the find_backup_folder helper."""
 
     def test_finds_folder_from_config(self, app, backup_dir, backup_config):
-        """Should find the call_logs subfolder from an enabled config."""
+        """Should find the notes subfolder from an enabled config."""
         with app.app_context():
-            # Create the call_logs subfolder
-            call_logs = os.path.join(backup_dir, "call_logs")
-            os.makedirs(call_logs, exist_ok=True)
+            # Create the notes subfolder
+            notes = os.path.join(backup_dir, "notes")
+            os.makedirs(notes, exist_ok=True)
 
             result = find_backup_folder()
-            assert result == call_logs
+            assert result == notes
 
     def test_returns_none_when_no_folder(self, app, backup_dir, monkeypatch):
-        """Should return None when no call_logs folder exists anywhere."""
+        """Should return None when no notes folder exists anywhere."""
         with app.app_context():
-            # Config pointing at dir with no call_logs subfolder
+            # Config pointing at dir with no notes subfolder
             monkeypatch.setattr(
                 "app.services.backup._load_db_backup_config",
                 lambda: {"enabled": True, "backup_dir": backup_dir},
@@ -865,9 +865,9 @@ class TestRestoreAllFromFolder:
     """Tests for the bulk restore from backup folder."""
 
     def _write_backup_json(self, folder: str, seller: str, tpid: int,
-                           customer_name: str, call_logs: list) -> str:
+                           customer_name: str, notes: list) -> str:
         """Helper to write a backup JSON file in the proper folder structure."""
-        seller_dir = os.path.join(folder, "call_logs", seller)
+        seller_dir = os.path.join(folder, "notes", seller)
         os.makedirs(seller_dir, exist_ok=True)
         filepath = os.path.join(seller_dir, f"{tpid}.json")
         data = {
@@ -879,13 +879,13 @@ class TestRestoreAllFromFolder:
                 "tpid": tpid,
                 "seller_name": seller,
             },
-            "call_logs": call_logs,
+            "notes": notes,
         }
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f)
         return filepath
 
-    def test_restore_all_creates_call_logs(self, app, backup_dir):
+    def test_restore_all_creates_notes(self, app, backup_dir):
         """Should restore call logs from multiple files across sellers."""
         with app.app_context():
             user = User.query.first()
@@ -899,7 +899,7 @@ class TestRestoreAllFromFolder:
             db.session.commit()
 
             # Write backup files
-            call_logs_dir = os.path.join(backup_dir, "call_logs")
+            notes_dir = os.path.join(backup_dir, "notes")
             self._write_backup_json(backup_dir, "TestSeller", 50001, "Customer A", [
                 {"call_date": "2025-01-10T10:00:00+00:00", "content": "Log 1", "topics": [], "partners": []},
                 {"call_date": "2025-01-11T10:00:00+00:00", "content": "Log 2", "topics": [], "partners": []},
@@ -911,7 +911,7 @@ class TestRestoreAllFromFolder:
         # Use test_request_context so g.user is set by before_request
         with app.test_request_context():
             app.preprocess_request()
-            result = restore_all_from_folder(call_logs_dir)
+            result = restore_all_from_folder(notes_dir)
             assert result["success"] is True
             assert result["files_processed"] == 2
             assert result["total_logs_created"] == 3
@@ -933,7 +933,7 @@ class TestRestoreAllFromFolder:
             db.session.flush()
 
             # Pre-existing call log
-            existing = CallLog(
+            existing = Note(
                 customer_id=customer.id,
                 call_date=datetime(2025, 3, 1, 10, 0, 0, tzinfo=timezone.utc),
                 content="Already here",
@@ -941,7 +941,7 @@ class TestRestoreAllFromFolder:
             db.session.add(existing)
             db.session.commit()
 
-            call_logs_dir = os.path.join(backup_dir, "call_logs")
+            notes_dir = os.path.join(backup_dir, "notes")
             self._write_backup_json(backup_dir, "DedupSeller", 60001, "Dedup Customer", [
                 {"call_date": "2025-03-01T10:00:00+00:00", "content": "Already here", "topics": [], "partners": []},
                 {"call_date": "2025-03-02T10:00:00+00:00", "content": "New one", "topics": [], "partners": []},
@@ -949,7 +949,7 @@ class TestRestoreAllFromFolder:
 
         with app.test_request_context():
             app.preprocess_request()
-            result = restore_all_from_folder(call_logs_dir)
+            result = restore_all_from_folder(notes_dir)
             assert result["success"] is True
             assert result["total_logs_created"] == 1
             assert result["total_logs_skipped"] == 1
@@ -967,17 +967,17 @@ class TestRestoreAllFromFolder:
             db.session.commit()
 
             # Write one good and one bad file
-            call_logs_dir = os.path.join(backup_dir, "call_logs")
+            notes_dir = os.path.join(backup_dir, "notes")
             self._write_backup_json(backup_dir, "BadJsonSeller", 70001, "Good Customer", [
                 {"call_date": "2025-04-01T10:00:00+00:00", "content": "Works", "topics": [], "partners": []},
             ])
-            bad_dir = os.path.join(call_logs_dir, "BadJsonSeller")
+            bad_dir = os.path.join(notes_dir, "BadJsonSeller")
             with open(os.path.join(bad_dir, "corrupt.json"), "w") as f:
                 f.write("{not valid json!!!")
 
         with app.test_request_context():
             app.preprocess_request()
-            result = restore_all_from_folder(call_logs_dir)
+            result = restore_all_from_folder(notes_dir)
             assert result["success"] is True
             assert result["files_processed"] == 1
             assert result["files_failed"] == 1
@@ -993,10 +993,10 @@ class TestRestoreAllFromFolder:
     def test_restore_all_empty_folder(self, app, backup_dir):
         """Should succeed with zero files when folder is empty."""
         with app.app_context():
-            call_logs_dir = os.path.join(backup_dir, "call_logs")
-            os.makedirs(call_logs_dir, exist_ok=True)
+            notes_dir = os.path.join(backup_dir, "notes")
+            os.makedirs(notes_dir, exist_ok=True)
 
-            result = restore_all_from_folder(call_logs_dir)
+            result = restore_all_from_folder(notes_dir)
             assert result["success"] is True
             assert result["files_processed"] == 0
             assert result["total_logs_created"] == 0
@@ -1033,11 +1033,11 @@ class TestRestoreAllRoute:
             db.session.commit()
 
         # Point find_backup_folder at a dir with no files
-        call_logs_dir = os.path.join(backup_dir, "call_logs")
-        os.makedirs(call_logs_dir, exist_ok=True)
+        notes_dir = os.path.join(backup_dir, "notes")
+        os.makedirs(notes_dir, exist_ok=True)
         monkeypatch.setattr(
             "app.services.backup.find_backup_folder",
-            lambda: call_logs_dir,
+            lambda: notes_dir,
         )
 
         resp = client.post("/api/backup/restore-all")
@@ -1048,33 +1048,33 @@ class TestRestoreAllRoute:
 
 
 # =========================================================================
-# Customer notes backup integration
+# Customer overview backup integration
 # =========================================================================
 
 class TestCustomerNotesBackupIntegration:
-    """Verify that customer notes changes trigger backup and restore correctly."""
+    """Verify that customer overview changes trigger backup and restore correctly."""
 
     def test_update_notes_triggers_backup(self, client, app, backup_dir, sample_data, monkeypatch):
-        """Saving customer notes should write a backup JSON file."""
+        """Saving customer overview should write a backup JSON file."""
         monkeypatch.setattr(
             "app.services.backup._load_db_backup_config",
             lambda: {"enabled": True, "backup_dir": backup_dir},
         )
 
         resp = client.post(
-            f"/customer/{sample_data['customer1_id']}/notes",
-            data={"notes": "Key engagement notes for Acme"},
+            f"/customer/{sample_data['customer1_id']}/overview",
+            data={"overview": "Key engagement notes for Acme"},
             headers={"X-Requested-With": "XMLHttpRequest"},
         )
         assert resp.status_code == 200
 
         # customer1 has tpid=1001 and seller=Alice Smith
-        filepath = os.path.join(backup_dir, "call_logs", "Alice Smith", "1001.json")
+        filepath = os.path.join(backup_dir, "notes", "Alice Smith", "1001.json")
         assert os.path.isfile(filepath), f"Expected backup at {filepath}"
 
         with open(filepath, "r") as f:
             backup = json.load(f)
-        assert backup["customer"]["notes"] == "Key engagement notes for Acme"
+        assert backup["customer"]["overview"] == "Key engagement notes for Acme"
 
     def test_update_notes_backup_disabled(self, client, app, backup_dir, sample_data, monkeypatch):
         """No backup file when backup is disabled."""
@@ -1087,13 +1087,13 @@ class TestCustomerNotesBackupIntegration:
         )
 
         resp = client.post(
-            f"/customer/{sample_data['customer1_id']}/notes",
-            data={"notes": "Should not trigger backup"},
+            f"/customer/{sample_data['customer1_id']}/overview",
+            data={"overview": "Should not trigger backup"},
             headers={"X-Requested-With": "XMLHttpRequest"},
         )
         assert resp.status_code == 200
 
-        cl_dir = os.path.join(backup_dir, "call_logs")
+        cl_dir = os.path.join(backup_dir, "notes")
         assert not os.path.exists(cl_dir)
 
     def test_edit_customer_triggers_backup(self, client, app, backup_dir, sample_data, monkeypatch):
@@ -1115,7 +1115,7 @@ class TestCustomerNotesBackupIntegration:
         )
         assert resp.status_code == 200
 
-        filepath = os.path.join(backup_dir, "call_logs", "Alice Smith", "1001.json")
+        filepath = os.path.join(backup_dir, "notes", "Alice Smith", "1001.json")
         assert os.path.isfile(filepath), f"Expected backup at {filepath}"
 
         with open(filepath, "r") as f:
@@ -1123,7 +1123,7 @@ class TestCustomerNotesBackupIntegration:
         assert backup["customer"]["name"] == "Acme Corp Updated"
 
     def test_restore_includes_notes(self, app):
-        """Restoring a backup with notes should set the customer notes field."""
+        """Restoring a backup with notes should set the customer overview field."""
         with app.app_context():
             from flask import g
             user = User.query.first()
@@ -1132,7 +1132,7 @@ class TestCustomerNotesBackupIntegration:
             customer = Customer(name="Notes Restore Corp", tpid=77777)
             db.session.add(customer)
             db.session.commit()
-            assert customer.notes is None
+            assert customer.overview is None
 
             backup_data = {
                 "_notehelper_backup": True,
@@ -1142,14 +1142,14 @@ class TestCustomerNotesBackupIntegration:
                     "tpid": 77777,
                     "notes": "Restored engagement summary",
                 },
-                "call_logs": [],
+                "notes": [],
             }
 
             result = restore_from_backup(backup_data)
             assert result["success"] is True
 
             db.session.refresh(customer)
-            assert customer.notes == "Restored engagement summary"
+            assert customer.overview == "Restored engagement summary"
 
             # Cleanup
             db.session.delete(customer)
@@ -1164,7 +1164,7 @@ class TestCustomerNotesBackupIntegration:
 
             customer = Customer(
                 name="Existing Notes Corp", tpid=88888,
-                notes="My existing notes",
+                overview="My existing notes",
             )
             db.session.add(customer)
             db.session.commit()
@@ -1177,14 +1177,14 @@ class TestCustomerNotesBackupIntegration:
                     "tpid": 88888,
                     "notes": "Backup notes that should NOT overwrite",
                 },
-                "call_logs": [],
+                "notes": [],
             }
 
             result = restore_from_backup(backup_data)
             assert result["success"] is True
 
             db.session.refresh(customer)
-            assert customer.notes == "My existing notes"
+            assert customer.overview == "My existing notes"
 
             # Cleanup
             db.session.delete(customer)
@@ -1208,14 +1208,14 @@ class TestCustomerNotesBackupIntegration:
                     "name": "No Notes Corp",
                     "tpid": 66666,
                 },
-                "call_logs": [],
+                "notes": [],
             }
 
             result = restore_from_backup(backup_data)
             assert result["success"] is True
 
             db.session.refresh(customer)
-            assert customer.notes is None
+            assert customer.overview is None
 
             # Cleanup
             db.session.delete(customer)

@@ -276,7 +276,7 @@ class TestAIAutoHide:
             from app.routes.ai import is_ai_enabled
             assert is_ai_enabled() is True
 
-    def test_call_log_form_hides_ai_buttons_when_disabled(self, client, app, sample_data):
+    def test_note_form_hides_ai_buttons_when_disabled(self, client, app, sample_data):
         """Call log form should not show AI buttons when AI is not configured."""
         with app.app_context():
             from app.models import Customer
@@ -285,13 +285,13 @@ class TestAIAutoHide:
 
         # Patch at the source — the function is imported inline from app.routes.ai
         with patch('app.routes.ai.is_ai_enabled', return_value=False):
-            response = client.get(f'/call-log/new?customer_id={customer_id}')
+            response = client.get(f'/note/new?customer_id={customer_id}')
             html = response.data.decode()
             # The AI button HTML elements should not be rendered
             assert 'id="aiSuggestBtn"' not in html
             assert 'id="aiMatchMilestoneBtn"' not in html
 
-    def test_call_log_form_shows_ai_buttons_when_enabled(self, client, app, sample_data):
+    def test_note_form_shows_ai_buttons_when_enabled(self, client, app, sample_data):
         """Call log form should show AI buttons when AI is configured."""
         with app.app_context():
             from app.models import Customer
@@ -302,7 +302,7 @@ class TestAIAutoHide:
             'AZURE_OPENAI_ENDPOINT': 'https://test.openai.azure.com/',
             'AZURE_OPENAI_DEPLOYMENT': 'gpt-4o-mini'
         }):
-            response = client.get(f'/call-log/new?customer_id={customer_id}')
+            response = client.get(f'/note/new?customer_id={customer_id}')
             html = response.data.decode()
             assert 'Auto-tag with AI' in html
 
@@ -314,49 +314,49 @@ class TestAIAutoHide:
 class TestWorkiqUIElements:
     """Tests that WorkIQ UI elements are visible when expected."""
 
-    def test_new_call_log_shows_autofill_button(self, client, app, sample_data):
+    def test_new_note_shows_autofill_button(self, client, app, sample_data):
         """New call log form should show the Auto-fill button."""
         with app.app_context():
             from app.models import Customer
             customer = Customer.query.first()
             customer_id = customer.id
 
-        response = client.get(f'/call-log/new?customer_id={customer_id}')
+        response = client.get(f'/note/new?customer_id={customer_id}')
         html = response.data.decode()
         assert 'Auto-fill' in html
         assert 'autoFillBtn' in html
 
-    def test_new_call_log_shows_import_meeting_button(self, client, app, sample_data):
+    def test_new_note_shows_import_meeting_button(self, client, app, sample_data):
         """New call log form should show the Import from Meeting button."""
         with app.app_context():
             from app.models import Customer
             customer = Customer.query.first()
             customer_id = customer.id
 
-        response = client.get(f'/call-log/new?customer_id={customer_id}')
+        response = client.get(f'/note/new?customer_id={customer_id}')
         html = response.data.decode()
         assert 'Import from Meeting' in html
         assert 'importMeetingBtn' in html
 
-    def test_new_call_log_shows_prompt_customization(self, client, app, sample_data):
+    def test_new_note_shows_prompt_customization(self, client, app, sample_data):
         """New call log form should include the prompt customization section."""
         with app.app_context():
             from app.models import Customer
             customer = Customer.query.first()
             customer_id = customer.id
 
-        response = client.get(f'/call-log/new?customer_id={customer_id}')
+        response = client.get(f'/note/new?customer_id={customer_id}')
         html = response.data.decode()
         assert 'meetingCustomPrompt' in html
         assert 'Customize summary prompt' in html
 
-    def test_edit_call_log_hides_workiq_buttons(self, client, app, sample_data):
+    def test_edit_note_hides_workiq_buttons(self, client, app, sample_data):
         """Edit call log form should NOT show WorkIQ import buttons."""
         with app.app_context():
-            from app.models import CallLog
-            call_log = CallLog.query.first()
-            if call_log:
-                response = client.get(f'/call-log/{call_log.id}/edit')
+            from app.models import Note
+            note = Note.query.first()
+            if note:
+                response = client.get(f'/note/{note.id}/edit')
                 html = response.data.decode()
                 assert 'autoFillBtn' not in html
                 assert 'importMeetingBtn' not in html

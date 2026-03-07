@@ -30,8 +30,8 @@ def test_admin_panel_stats_are_clickable(client):
     assert len(links) >= 6, "Should have at least 6 clickable stats"
     
     # Check specific links exist
-    call_logs_link = soup.find('a', href='/call-logs')
-    assert call_logs_link is not None, "Call logs stat should be clickable"
+    notes_link = soup.find('a', href='/notes')
+    assert notes_link is not None, "Call logs stat should be clickable"
     
     customers_link = soup.find('a', href='/customers')
     assert customers_link is not None, "Customers stat should be clickable"
@@ -66,7 +66,7 @@ def test_topics_toggle_shows_current_state(client):
 
 def test_call_content_truncation_word_boundaries(client):
     """Test that call content is truncated at word boundaries."""
-    from app.models import db, Customer, Seller, CallLog, utc_now
+    from app.models import db, Customer, Seller, Note, utc_now
     from datetime import date
     
     # Create test data with long content
@@ -86,7 +86,7 @@ def test_call_content_truncation_word_boundaries(client):
     
     # Create call log with long content that would be truncated mid-word if not using word boundaries
     long_content = "This is a test call log with very long content. " * 10  # ~500 chars
-    call = CallLog(
+    call = Note(
         customer_id=customer.id,
         call_date=date.today(),
         content=long_content,
@@ -106,7 +106,7 @@ def test_call_content_truncation_word_boundaries(client):
     assert '...' in html or len(long_content) < 200, "Long content should be truncated"
     
     # Check call logs list
-    response = client.get('/call-logs')
+    response = client.get('/notes')
     assert response.status_code == 200
     assert '...' in response.data.decode('utf-8') or len(long_content) < 200
 
@@ -133,7 +133,7 @@ def test_customers_filter_toggle_button(client):
 
 def test_search_results_hierarchy_simplified(client):
     """Test that search results have simplified visual hierarchy."""
-    from app.models import db, Customer, Seller, CallLog, utc_now
+    from app.models import db, Customer, Seller, Note, utc_now
     from datetime import date
     
     # Create test data
@@ -151,7 +151,7 @@ def test_search_results_hierarchy_simplified(client):
     db.session.add(customer)
     db.session.commit()
     
-    call = CallLog(
+    call = Note(
         customer_id=customer.id,
         call_date=date.today(),
         content="Test search content",
@@ -199,7 +199,7 @@ def test_draft_save_indicator_exists(client):
         db.session.commit()
     
     # Call log form requires customer_id parameter
-    response = client.get(f'/call-log/new?customer_id={customer.id}')
+    response = client.get(f'/note/new?customer_id={customer.id}')
     assert response.status_code == 200
     
     soup = BeautifulSoup(response.data, 'html.parser')
@@ -218,7 +218,7 @@ def test_button_sizes_standardized(client):
     pages = [
         '/customers',
         '/topics',
-        '/call-logs',
+        '/notes',
         '/sellers',
         '/territories'
     ]

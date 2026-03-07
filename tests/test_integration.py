@@ -4,14 +4,14 @@ These tests verify that all model creations work correctly.
 """
 import pytest
 from datetime import date
-from app.models import db, CallLog, Customer, Seller, Territory, Topic
+from app.models import db, Note, Customer, Seller, Territory, Topic
 
 
-def test_call_log_create_post(client, sample_data):
+def test_note_create_post(client, sample_data):
     """Test that posting to call log create works."""
     customer_id = sample_data['customer1_id']
     
-    response = client.post('/call-log/new', data={
+    response = client.post('/note/new', data={
         'customer_id': customer_id,
         'call_date': date.today().strftime('%Y-%m-%d'),
         'content': '<p>Test call log content</p>',
@@ -22,9 +22,9 @@ def test_call_log_create_post(client, sample_data):
     assert response.status_code == 302
     
     # Verify call log was created
-    call_log = CallLog.query.filter_by(customer_id=customer_id).order_by(CallLog.id.desc()).first()
-    assert call_log is not None
-    assert call_log.content == '<p>Test call log content</p>'
+    note = Note.query.filter_by(customer_id=customer_id).order_by(Note.id.desc()).first()
+    assert note is not None
+    assert note.content == '<p>Test call log content</p>'
 
 
 def test_customer_create_post(client, sample_data):
@@ -95,11 +95,11 @@ def test_topic_create_post(client, sample_data):
     assert topic.description == 'Test description'
 
 
-def test_call_log_create_succeeds(client, sample_data):
+def test_note_create_succeeds(client, sample_data):
     """Test that call log creation succeeds."""
     customer_id = sample_data['customer1_id']
     
-    response = client.post('/call-log/new', data={
+    response = client.post('/note/new', data={
         'customer_id': customer_id,
         'call_date': date.today().strftime('%Y-%m-%d'),
         'content': '<p>Should work</p>',
@@ -110,5 +110,5 @@ def test_call_log_create_succeeds(client, sample_data):
     assert response.status_code == 302
     
     # Verify call log exists
-    call_log = CallLog.query.filter_by(customer_id=customer_id).order_by(CallLog.id.desc()).first()
-    assert call_log is not None
+    note = Note.query.filter_by(customer_id=customer_id).order_by(Note.id.desc()).first()
+    assert note is not None

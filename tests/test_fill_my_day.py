@@ -41,7 +41,7 @@ class TestFillMyDayPage:
 class TestFillMyDaySaveAPI:
     """Tests for the Fill My Day save call log API."""
 
-    def test_save_call_log_success(self, client, sample_data):
+    def test_save_note_success(self, client, sample_data):
         """Test saving a call log from Fill My Day."""
         response = client.post('/api/fill-my-day/save',
             data=json.dumps({
@@ -56,10 +56,10 @@ class TestFillMyDaySaveAPI:
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
-        assert 'call_log_id' in data
+        assert 'note_id' in data
         assert 'view_url' in data
 
-    def test_save_call_log_without_time(self, client, sample_data):
+    def test_save_note_without_time(self, client, sample_data):
         """Test saving a call log without a specific time."""
         response = client.post('/api/fill-my-day/save',
             data=json.dumps({
@@ -74,7 +74,7 @@ class TestFillMyDaySaveAPI:
         data = response.get_json()
         assert data['success'] is True
 
-    def test_save_call_log_missing_customer(self, client, sample_data):
+    def test_save_note_missing_customer(self, client, sample_data):
         """Test that missing customer returns error."""
         response = client.post('/api/fill-my-day/save',
             data=json.dumps({
@@ -89,7 +89,7 @@ class TestFillMyDaySaveAPI:
         assert data['success'] is False
         assert 'Customer' in data['error']
 
-    def test_save_call_log_missing_date(self, client, sample_data):
+    def test_save_note_missing_date(self, client, sample_data):
         """Test that missing date returns error."""
         response = client.post('/api/fill-my-day/save',
             data=json.dumps({
@@ -104,7 +104,7 @@ class TestFillMyDaySaveAPI:
         assert data['success'] is False
         assert 'Date' in data['error']
 
-    def test_save_call_log_missing_content(self, client, sample_data):
+    def test_save_note_missing_content(self, client, sample_data):
         """Test that missing content returns error."""
         response = client.post('/api/fill-my-day/save',
             data=json.dumps({
@@ -120,7 +120,7 @@ class TestFillMyDaySaveAPI:
         assert data['success'] is False
         assert 'Content' in data['error']
 
-    def test_save_call_log_invalid_date(self, client, sample_data):
+    def test_save_note_invalid_date(self, client, sample_data):
         """Test that invalid date format returns error."""
         response = client.post('/api/fill-my-day/save',
             data=json.dumps({
@@ -135,7 +135,7 @@ class TestFillMyDaySaveAPI:
         data = response.get_json()
         assert data['success'] is False
 
-    def test_save_call_log_nonexistent_customer(self, client, sample_data):
+    def test_save_note_nonexistent_customer(self, client, sample_data):
         """Test that nonexistent customer returns 404."""
         response = client.post('/api/fill-my-day/save',
             data=json.dumps({
@@ -150,7 +150,7 @@ class TestFillMyDaySaveAPI:
         data = response.get_json()
         assert data['success'] is False
 
-    def test_save_call_log_with_topics(self, client, sample_data):
+    def test_save_note_with_topics(self, client, sample_data):
         """Test that topics are correctly associated with saved call log."""
         response = client.post('/api/fill-my-day/save',
             data=json.dumps({
@@ -168,11 +168,11 @@ class TestFillMyDaySaveAPI:
 
         # Verify topics were saved
         with client.application.app_context():
-            from app.models import db, CallLog
-            call_log = db.session.get(CallLog, data['call_log_id'])
-            assert len(call_log.topics) == 2
+            from app.models import db, Note
+            note = db.session.get(Note, data['note_id'])
+            assert len(note.topics) == 2
 
-    def test_save_call_log_with_milestone(self, client, sample_data):
+    def test_save_note_with_milestone(self, client, sample_data):
         """Test saving a call log with milestone data from Fill My Day."""
         milestone_data = {
             'msx_milestone_id': 'test-guid-12345',
@@ -203,13 +203,13 @@ class TestFillMyDaySaveAPI:
 
         # Verify milestone was linked
         with client.application.app_context():
-            from app.models import db, CallLog
-            call_log = db.session.get(CallLog, data['call_log_id'])
-            assert len(call_log.milestones) == 1
-            assert call_log.milestones[0].msx_milestone_id == 'test-guid-12345'
-            assert call_log.milestones[0].title == 'Azure Migration - Phase 1'
+            from app.models import db, Note
+            note = db.session.get(Note, data['note_id'])
+            assert len(note.milestones) == 1
+            assert note.milestones[0].msx_milestone_id == 'test-guid-12345'
+            assert note.milestones[0].title == 'Azure Migration - Phase 1'
 
-    def test_save_call_log_reuses_existing_milestone(self, client, sample_data):
+    def test_save_note_reuses_existing_milestone(self, client, sample_data):
         """Test that saving with an existing milestone MSX ID reuses it."""
         milestone_data = {
             'msx_milestone_id': 'reuse-guid-67890',
@@ -254,7 +254,7 @@ class TestFillMyDaySaveAPI:
             # Should have updated name
             assert milestones[0].title == 'Updated Milestone Name'
 
-    def test_save_call_log_no_json_body(self, client):
+    def test_save_note_no_json_body(self, client):
         """Test that missing JSON body returns error."""
         response = client.post('/api/fill-my-day/save',
             content_type='application/json'
@@ -404,7 +404,7 @@ class TestFillMyDayNavigation:
     def test_calendar_has_fill_my_day_icon(self, client, sample_data):
         """Test that the calendar API data supports Fill My Day icon rendering."""
         # The icon is rendered client-side, so we verify the calendar API works
-        response = client.get('/api/call-logs/calendar')
+        response = client.get('/api/notes/calendar')
         assert response.status_code == 200
         data = response.get_json()
         assert 'year' in data

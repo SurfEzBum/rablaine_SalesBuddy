@@ -63,7 +63,7 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2><i class="bi bi-lightning-charge text-warning"></i> Fill My Day</h2>
-            <p class="text-muted mb-0">Import all your meetings for a day into call logs in one shot.</p>
+            <p class="text-muted mb-0">Import all your meetings for a day into notes in one shot.</p>
         </div>
         <a href="{{ url_for('main.index') }}" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left"></i> Back
@@ -479,7 +479,7 @@ function createMeetingCard(idx, meeting, customer, data, dateStr, cardNum) {
             </div>
             <!-- Edit Area (hidden by default) -->
             <div id="notesEdit-${idx}" style="display:none;" class="mb-3">
-                <textarea class="form-control" id="notesTextarea-${idx}" rows="8"
+                <textarea class="form-control" id="overviewTextarea-${idx}" rows="8"
                     style="font-family: monospace; font-size: 0.85rem;">${escapeHtml(data.content_html || '')}</textarea>
                 <div class="mt-2">
                     <button class="btn btn-sm btn-primary" onclick="saveCardEdit(${idx})">
@@ -563,12 +563,12 @@ function createMeetingCard(idx, meeting, customer, data, dateStr, cardNum) {
                 </small>
             </div>
             <div class="d-flex gap-2">
-                <a href="/call-log/new?customer_id=${customer.customer_id}&date=${dateStr}" 
+                <a href="/note/new?customer_id=${customer.customer_id}&date=${dateStr}" 
                    class="btn btn-sm btn-outline-secondary" target="_blank" title="Open in full editor">
                     <i class="bi bi-box-arrow-up-right"></i> Full Editor
                 </a>
-                <button class="btn btn-sm btn-success" onclick="saveCallLog(${idx}, '${dateStr}', '${callTime}')" id="saveBtn-${idx}">
-                    <i class="bi bi-check-circle"></i> Save Call Log
+                <button class="btn btn-sm btn-success" onclick="saveNote(${idx}, '${dateStr}', '${callTime}')" id="saveBtn-${idx}">
+                    <i class="bi bi-check-circle"></i> Save Note
                 </button>
             </div>
         </div>
@@ -771,7 +771,7 @@ function editCardNotes(idx) {
 }
 
 function saveCardEdit(idx) {
-    const textarea = document.getElementById(`notesTextarea-${idx}`);
+    const textarea = document.getElementById(`overviewTextarea-${idx}`);
     const html = textarea.value;
     const card = document.getElementById(`meetingCard-${idx}`);
     card.dataset.contentHtml = html;
@@ -782,12 +782,12 @@ function saveCardEdit(idx) {
 
 function cancelCardEdit(idx) {
     const card = document.getElementById(`meetingCard-${idx}`);
-    document.getElementById(`notesTextarea-${idx}`).value = card.dataset.contentHtml;
+    document.getElementById(`overviewTextarea-${idx}`).value = card.dataset.contentHtml;
     document.getElementById(`notesPreview-${idx}`).style.display = 'block';
     document.getElementById(`notesEdit-${idx}`).style.display = 'none';
 }
 
-async function saveCallLog(idx, dateStr, callTime) {
+async function saveNote(idx, dateStr, callTime) {
     const card = document.getElementById(`meetingCard-${idx}`);
     const btn = document.getElementById(`saveBtn-${idx}`);
 
@@ -804,7 +804,7 @@ async function saveCallLog(idx, dateStr, callTime) {
     const taskDescription = taskDescEl ? taskDescEl.value : (card.dataset.taskDescription || '');
 
     if (!content || content.trim() === '') {
-        alert('Cannot save empty call log. Please add some notes.');
+        alert('Cannot save an empty note. Please add some content.');
         return;
     }
 
@@ -869,7 +869,7 @@ function updateCompletionStatus() {
     if (totalCards > 0 && savedCount >= totalCards) {
         document.getElementById('completionSummary').style.display = 'block';
         document.getElementById('completionText').textContent = 
-            `Saved ${savedCount} call log${savedCount > 1 ? 's' : ''} for this day.`;
+            `Saved ${savedCount} note${savedCount > 1 ? 's' : ''} for this day.`;
     }
 }
 

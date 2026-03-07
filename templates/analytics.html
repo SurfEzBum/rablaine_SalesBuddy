@@ -96,7 +96,7 @@
                     </div>
                     <small class="text-muted">Last 90 days</small>
                 {% else %}
-                    <p class="text-muted">No topics tracked yet. Add topics to call logs to see insights!</p>
+                    <p class="text-muted">No topics tracked yet. Add topics to notes to see insights!</p>
                 {% endif %}
             </div>
         </div>
@@ -127,7 +127,7 @@
                                         </small>
                                     {% endif %}
                                 </div>
-                                <a href="{{ url_for('call_logs.call_log_create', customer_id=customer.id) }}" class="btn btn-sm btn-outline-primary">
+                                <a href="{{ url_for('notes.note_create', customer_id=customer.id) }}" class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-plus"></i> Log Call
                                 </a>
                             </div>
@@ -179,8 +179,8 @@
             <div class="card-body">
                 <h5 class="card-title"><i class="bi bi-lightning"></i> Quick Actions</h5>
                 <div class="d-flex gap-2 flex-wrap">
-                    <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#quickCallLogModal">
-                        <i class="bi bi-plus-circle"></i> New Call Log
+                    <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#quickNoteModal">
+                        <i class="bi bi-plus-circle"></i> New Note
                     </button>
                     <a href="{{ url_for('customers.customers_list') }}" class="btn btn-sm btn-outline-secondary">
                         <i class="bi bi-building"></i> View All Customers
@@ -198,11 +198,11 @@
 </div>
 
 <!-- Quick Call Log Modal (reused from homepage) -->
-<div class="modal fade" id="quickCallLogModal" tabindex="-1" aria-labelledby="quickCallLogModalLabel" aria-hidden="true">
+<div class="modal fade" id="quickNoteModal" tabindex="-1" aria-labelledby="quickNoteModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="quickCallLogModalLabel">Create Call Log</h5>
+                <h5 class="modal-title" id="quickNoteModalLabel">Create Note</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
@@ -222,7 +222,7 @@
     let debounceTimer;
     const customerSearch = document.getElementById('customerSearch');
     const customerResults = document.getElementById('customerResults');
-    const modal = document.getElementById('quickCallLogModal');
+    const modal = document.getElementById('quickNoteModal');
 
     // Focus input when modal opens
     modal.addEventListener('shown.bs.modal', function () {
@@ -258,7 +258,7 @@
                     const displayName = customer.nickname ? `${customer.name} (${customer.nickname})` : customer.name;
                     const tpidBadge = customer.tpid ? `<span class="badge bg-secondary ms-2">TPID: ${customer.tpid}</span>` : '';
                     return `
-                        <a href="{{ url_for('call_logs.call_log_create') }}?customer_id=${customer.id}" class="list-group-item list-group-item-action">
+                        <a href="{{ url_for('notes.note_create') }}?customer_id=${customer.id}" class="list-group-item list-group-item-action">
                             <i class="bi bi-building"></i> ${displayName}${tpidBadge}
                         </a>
                     `;

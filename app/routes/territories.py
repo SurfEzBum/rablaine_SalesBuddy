@@ -6,7 +6,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from datetime import timedelta
 from sqlalchemy import func
 
-from app.models import db, Territory, Seller, Customer, CallLog, POD, UserPreference, utc_now
+from app.models import db, Territory, Seller, Customer, Note, POD, UserPreference, utc_now
 
 # Create blueprint
 territories_bp = Blueprint('territories', __name__)
@@ -72,13 +72,13 @@ def territory_view(id):
         # Get all customers in this territory with call counts
         customers_with_counts = db.session.query(
             Customer,
-            func.count(CallLog.id).label('call_count')
+            func.count(Note.id).label('call_count')
         ).join(
             Seller, Customer.seller_id == Seller.id
         ).filter(
             Seller.territories.any(Territory.id == id)
         ).outerjoin(
-            CallLog, Customer.id == CallLog.customer_id
+            Note, Customer.id == Note.customer_id
         ).group_by(Customer.id, Seller.id, Seller.seller_type).all()
         
         # Group by seller type and sort by call count
@@ -97,10 +97,10 @@ def territory_view(id):
     else:
         # Get calls from last 7 days
         week_ago = utc_now() - timedelta(days=7)
-        recent_calls = CallLog.query.join(Customer).filter(
+        recent_calls = Note.query.join(Customer).filter(
             Customer.territory_id == id,
-            CallLog.call_date >= week_ago
-        ).order_by(CallLog.call_date.desc()).all()
+            Note.call_date >= week_ago
+        ).order_by(Note.call_date.desc()).all()
     
     return render_template('territory_view.html', 
                          territory=territory, 

@@ -9,8 +9,9 @@ from sqlalchemy import func, extract
 import calendar as cal
 import json
 import os
+import re
 
-from app.models import (db, CallLog, Customer, Seller, Territory, Topic,
+from app.models import (db, Note, Customer, Seller, Territory, Topic,
                         UserPreference, User, SyncStatus)
 
 # Create blueprint
@@ -107,7 +108,7 @@ def index():
     """Home page showing recent activity and stats."""
     # Count queries are fast on these small tables
     stats = {
-        'call_logs': CallLog.query.count(),
+        'notes': Note.query.count(),
         'customers': Customer.query.count(),
         'sellers': Seller.query.count(),
         'topics': Topic.query.count()
@@ -116,8 +117,8 @@ def index():
     return render_template('index.html', stats=stats, has_milestones=has_milestones)
 
 
-@main_bp.route('/api/call-logs/calendar')
-def call_logs_calendar_api():
+@main_bp.route('/api/notes/calendar')
+def notes_calendar_api():
     """API endpoint returning call logs for calendar view.
     
     Query params:
@@ -143,24 +144,41 @@ def call_logs_calendar_api():
     last_day = date(year, month, cal.monthrange(year, month)[1])
     
     # Query call logs for this month with customer data and relationships
-    call_logs = CallLog.query.options(
-        db.joinedload(CallLog.customer),
-        db.joinedload(CallLog.milestones)
+    notes = Note.query.options(
+        db.joinedload(Note.customer),
+        db.joinedload(Note.milestones),
+        db.joinedload(Note.topics),
     ).filter(
-        CallLog.call_date >= first_day,
-        CallLog.call_date <= last_day
-    ).order_by(CallLog.call_date).all()
+        Note.call_date >= first_day,
+        Note.call_date <= last_day
+    ).order_by(Note.call_date).all()
     
-    # Group by day (call_logs already sorted by call_date from query)
+    # Group by day (notes already sorted by call_date from query)
     days = {}
-    for log in call_logs:
+    for log in notes:
         day = log.call_date.day
         if day not in days:
             days[day] = []
+
+        # For general notes, build a short label from content or topics
+        if log.customer:
+            display_name = log.customer.get_display_name()
+            is_general = False
+        else:
+            # Use first topic name, or a snippet of the content
+            if log.topics:
+                display_name = log.topics[0].name
+            else:
+                plain = re.sub(r'<[^>]+>', '', log.content or '').strip()
+                display_name = (plain[:30] + '...') if len(plain) > 30 else plain
+                display_name = display_name or 'General Note'
+            is_general = True
+
         days[day].append({
             'id': log.id,
-            'customer_name': log.customer.name if log.customer else 'Unknown',
+            'customer_name': display_name,
             'customer_id': log.customer.id if log.customer else None,
+            'is_general': is_general,
             'has_milestone': len(log.milestones) > 0,
             'has_task': log.msx_tasks.count() > 0,
             'has_hok': any(t.is_hok for t in log.msx_tasks.all()),
@@ -212,20 +230,20 @@ def search():
     # Check if any search criteria provided
     has_search = bool(search_text or customer_id or seller_id or territory_id or topic_ids)
     
-    call_logs = []
+    notes = []
     grouped_data = {}
     
     # Only perform search if criteria provided
     if has_search:
         # Start with base query filtered by user
-        query = CallLog.query
+        query = Note.query
         
         # Apply filters
         if search_text:
-            query = query.filter(CallLog.content.ilike(f'%{search_text}%'))
+            query = query.filter(Note.content.ilike(f'%{search_text}%'))
         
         if customer_id:
-            query = query.filter(CallLog.customer_id == customer_id)
+            query = query.filter(Note.customer_id == customer_id)
         
         if seller_id:
             query = query.join(Customer).filter(Customer.seller_id == seller_id)
@@ -237,14 +255,14 @@ def search():
         
         if topic_ids:
             # Filter by topics (call logs that have ANY of the selected topics)
-            query = query.join(CallLog.topics).filter(Topic.id.in_(topic_ids))
+            query = query.join(Note.topics).filter(Topic.id.in_(topic_ids))
         
         # Get filtered call logs
-        call_logs = query.order_by(CallLog.call_date.desc()).all()
+        notes = query.order_by(Note.call_date.desc()).all()
         
         # Group call logs by Seller → Customer structure (FR011)
-        # Structure: { seller_id: { 'seller': Seller, 'customers': { customer_id: { 'customer': Customer, 'calls': [CallLog] } } } }
-        for call in call_logs:
+        # Structure: { seller_id: { 'seller': Seller, 'customers': { customer_id: { 'customer': Customer, 'calls': [Note] } } } }
+        for call in notes:
             seller_id_key = call.seller.id if call.seller else 0  # 0 = no seller
             customer_id_key = call.customer_id if call.customer_id else 0  # 0 = no customer
             
@@ -284,7 +302,7 @@ def search():
     
     return render_template('search.html',
                          grouped_data=grouped_data,
-                         call_logs=call_logs,
+                         notes=notes,
                          search_text=search_text,
                          selected_customer_id=customer_id,
                          selected_seller_id=seller_id,
@@ -315,42 +333,42 @@ def analytics():
     three_months_ago = today - timedelta(days=90)
     
     # Call volume metrics
-    total_calls = CallLog.query.count()
-    calls_this_week = CallLog.query.filter(
-        CallLog.call_date >= week_ago
+    total_calls = Note.query.count()
+    calls_this_week = Note.query.filter(
+        Note.call_date >= week_ago
     ).count()
-    calls_this_month = CallLog.query.filter(
-        CallLog.call_date >= month_ago
+    calls_this_month = Note.query.filter(
+        Note.call_date >= month_ago
     ).count()
     
     # Customer engagement
     total_customers = Customer.query.count()
-    customers_called_this_week = db.session.query(func.count(distinct(CallLog.customer_id))).filter(
-        CallLog.call_date >= week_ago
+    customers_called_this_week = db.session.query(func.count(distinct(Note.customer_id))).filter(
+        Note.call_date >= week_ago
     ).scalar()
-    customers_called_this_month = db.session.query(func.count(distinct(CallLog.customer_id))).filter(
-        CallLog.call_date >= month_ago
+    customers_called_this_month = db.session.query(func.count(distinct(Note.customer_id))).filter(
+        Note.call_date >= month_ago
     ).scalar()
     
     # Topic insights - most discussed topics
     top_topics = db.session.query(
         Topic.id,
         Topic.name,
-        func.count(CallLog.id).label('call_count')
+        func.count(Note.id).label('call_count')
     ).join(
-        CallLog.topics
+        Note.topics
     ).filter(
-        CallLog.call_date >= three_months_ago
+        Note.call_date >= three_months_ago
     ).group_by(
         Topic.id,
         Topic.name
     ).order_by(
-        func.count(CallLog.id).desc()
+        func.count(Note.id).desc()
     ).limit(10).all()
     
     # Customers not called recently (90+ days or never)
-    customers_with_recent_calls = db.session.query(CallLog.customer_id).filter(
-        CallLog.call_date >= three_months_ago
+    customers_with_recent_calls = db.session.query(Note.customer_id).filter(
+        Note.call_date >= three_months_ago
     ).distinct().scalar_subquery()
     
     customers_needing_attention = Customer.query.filter(
@@ -361,18 +379,18 @@ def analytics():
     seller_activity = db.session.query(
         Seller.id,
         Seller.name,
-        func.count(CallLog.id).label('call_count')
+        func.count(Note.id).label('call_count')
     ).join(
         Customer, Customer.seller_id == Seller.id
     ).join(
-        CallLog, CallLog.customer_id == Customer.id
+        Note, Note.customer_id == Customer.id
     ).filter(
-        CallLog.call_date >= month_ago
+        Note.call_date >= month_ago
     ).group_by(
         Seller.id,
         Seller.name
     ).order_by(
-        func.count(CallLog.id).desc()
+        func.count(Note.id).desc()
     ).limit(10).all()
     
     # Call frequency trend (last 30 days, grouped by week)
@@ -380,9 +398,9 @@ def analytics():
     for i in range(4):
         week_start = today - timedelta(days=7*(i+1))
         week_end = today - timedelta(days=7*i)
-        count = CallLog.query.filter(
-            CallLog.call_date >= week_start,
-            CallLog.call_date < week_end
+        count = Note.query.filter(
+            Note.call_date >= week_start,
+            Note.call_date < week_end
         ).count()
         weekly_calls.append({
             'week_label': f"{week_start.strftime('%b %d')} - {week_end.strftime('%b %d')}",

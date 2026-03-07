@@ -3,7 +3,7 @@ Tests for analytics dashboard.
 """
 import pytest
 from datetime import date, timedelta
-from app.models import db, CallLog, Customer, Seller, Territory, Topic, utc_now
+from app.models import db, Note, Customer, Seller, Territory, Topic, utc_now
 
 
 def test_analytics_page_loads(client):
@@ -43,7 +43,7 @@ def test_analytics_top_topics(client, sample_data):
     
     if customer and topic1:
         # Add a call with topic
-        call = CallLog(
+        call = Note(
             customer_id=customer.id,
             call_date=date.today(),
             content="Test call with topic",
@@ -102,14 +102,14 @@ def test_analytics_quick_actions(client):
     
     # Should have quick actions
     assert b'Quick Actions' in response.data
-    assert b'New Call Log' in response.data
+    assert b'New Note' in response.data
     assert b'View All Customers' in response.data
 
 
 def test_analytics_with_no_data(client):
     """Test analytics page handles empty data gracefully."""
     # Clear all call logs for user
-    CallLog.query.delete()
+    Note.query.delete()
     db.session.commit()
     
     response = client.get('/analytics')
@@ -142,7 +142,7 @@ def test_analytics_calculates_weekly_trends_correctly(client):
     
     # Add calls from different weeks
     for days_ago in [1, 8, 15, 22]:  # One call per week for 4 weeks
-        call = CallLog(
+        call = Note(
             customer_id=customer.id,
             call_date=today - timedelta(days=days_ago),
             content=f"Call from {days_ago} days ago",

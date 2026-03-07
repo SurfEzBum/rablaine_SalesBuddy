@@ -399,9 +399,9 @@ class TestMilestoneViewPage:
         # MSX link only on this page
         assert 'Open in MSX' in html
 
-    def test_milestone_view_shows_call_logs(self, app, client, db_session, sample_user):
+    def test_milestone_view_shows_notes(self, app, client, db_session, sample_user):
         """Test that milestone view page shows associated call logs."""
-        from app.models import CallLog
+        from app.models import Note
         from datetime import datetime, timezone
 
         customer = Customer(
@@ -418,7 +418,7 @@ class TestMilestoneViewPage:
         db_session.add(ms)
         db_session.flush()
 
-        call = CallLog(
+        call = Note(
             customer_id=customer.id,
             call_date=datetime(2026, 2, 15, tzinfo=timezone.utc),
             content='Discussed migration plan',

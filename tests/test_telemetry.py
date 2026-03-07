@@ -18,7 +18,7 @@ class TestTelemetryHelpers:
     def test_derive_category_known_blueprint(self):
         """Should map known blueprints to friendly category names."""
         from app.services.telemetry import _derive_category
-        assert _derive_category('call_logs', '/call-logs') == 'Call Logs'
+        assert _derive_category('notes', '/notes') == 'Call Logs'
         assert _derive_category('admin', '/admin') == 'Admin'
         assert _derive_category('ai', '/api/ai/suggest') == 'AI'
         assert _derive_category('msx', '/api/msx/status') == 'MSX Integration'
@@ -45,10 +45,10 @@ class TestTelemetryHelpers:
         from app.services.telemetry import _safe_referrer_path
 
         class FakeReq:
-            referrer = 'https://localhost:5000/call-logs?page=2&search=test'
+            referrer = 'https://localhost:5000/notes?page=2&search=test'
 
         result = _safe_referrer_path(FakeReq())
-        assert result == '/call-logs'
+        assert result == '/notes'
 
     def test_safe_referrer_path_none(self):
         """Should return None when no Referer header."""
@@ -71,7 +71,7 @@ class TestTelemetryHelpers:
     def test_should_log_normal_routes(self):
         """Should log normal page and API routes."""
         from app.services.telemetry import _should_log
-        assert _should_log('/call-logs') is True
+        assert _should_log('/notes') is True
         assert _should_log('/api/admin/backup/status') is True
         assert _should_log('/customers') is True
         assert _should_log('/admin') is True
@@ -111,7 +111,7 @@ class TestTelemetryCapture:
             assert event.response_time_ms is not None
             assert event.response_time_ms >= 0
 
-    def test_api_call_logged(self, client, app):
+    def test_api_noteged(self, client, app):
         """An API call should be logged with is_api=True."""
         response = client.get('/api/admin/backup/status')
 
@@ -128,7 +128,7 @@ class TestTelemetryCapture:
 
     def test_post_request_logged(self, client, app, sample_data):
         """POST requests should be logged."""
-        response = client.post(f'/call-log/{sample_data["call1_id"]}/delete')
+        response = client.post(f'/note/{sample_data["call1_id"]}/delete')
 
         with app.app_context():
             events = UsageEvent.query.filter_by(method='POST').all()
@@ -173,14 +173,14 @@ class TestTelemetryCapture:
         """The Referer header should be captured as path-only."""
         client.get(
             '/api/customers',
-            headers={'Referer': 'http://localhost:5000/call-log/new?customer=1'}
+            headers={'Referer': 'http://localhost:5000/note/new?customer=1'}
         )
 
         with app.app_context():
             events = UsageEvent.query.filter_by(endpoint='/api/customers').all()
             assert len(events) >= 1
             event = events[-1]
-            assert event.referrer_path == '/call-log/new'
+            assert event.referrer_path == '/note/new'
 
     def test_referrer_strips_query_string(self, client, app):
         """Query strings should be stripped from referrer to avoid PII."""
@@ -249,7 +249,7 @@ class TestTelemetryStatsAPI:
                 event = UsageEvent(
                     method='GET' if i % 2 == 0 else 'POST',
                     endpoint=f'/api/test/{i}' if i % 3 == 0 else f'/page/{i}',
-                    blueprint='admin' if i % 2 == 0 else 'call_logs',
+                    blueprint='admin' if i % 2 == 0 else 'notes',
                     view_function=f'test_func_{i}',
                     is_api=i % 3 == 0,
                     status_code=200 if i < 8 else 500,
@@ -340,7 +340,7 @@ class TestTelemetryStatsAPI:
                 method='POST', endpoint='/api/ai/suggest-topics',
                 blueprint='ai', view_function='api_ai_suggest_topics',
                 is_api=True, status_code=200, response_time_ms=50.0,
-                referrer_path='/call-log/new', category='AI',
+                referrer_path='/note/new', category='AI',
             )
             db.session.add(event)
             db.session.commit()
@@ -348,7 +348,7 @@ class TestTelemetryStatsAPI:
         response = client.get('/api/admin/telemetry/stats')
         data = response.get_json()
         matching = [f for f in data['feature_flows']
-                    if f['from_page'] == '/call-log/new'
+                    if f['from_page'] == '/note/new'
                     and f['to_api'] == '/api/ai/suggest-topics']
         assert len(matching) >= 1
 

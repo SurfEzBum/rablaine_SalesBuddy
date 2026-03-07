@@ -45,7 +45,10 @@ def create_app():
     # Create default user and preferences on app startup
     with app.app_context():
         from app.models import User, UserPreference
-        from app.migrations import run_migrations
+        from app.migrations import run_table_renames, run_migrations
+        
+        # Rename old tables (call_logs -> notes) before create_all
+        run_table_renames(db)
         
         # Ensure database tables exist
         db.create_all()
@@ -100,7 +103,7 @@ def create_app():
     from app.routes.sellers import sellers_bp
     from app.routes.customers import customers_bp
     from app.routes.topics import topics_bp
-    from app.routes.call_logs import call_logs_bp
+    from app.routes.notes import notes_bp
     from app.routes.main import main_bp
     from app.routes.revenue import revenue_bp
     from app.routes.partners import partners_bp
@@ -118,7 +121,7 @@ def create_app():
     app.register_blueprint(sellers_bp)
     app.register_blueprint(customers_bp)
     app.register_blueprint(topics_bp)
-    app.register_blueprint(call_logs_bp)
+    app.register_blueprint(notes_bp)
     app.register_blueprint(main_bp)
     app.register_blueprint(revenue_bp)
     app.register_blueprint(partners_bp)
