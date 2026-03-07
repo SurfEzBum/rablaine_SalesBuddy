@@ -141,11 +141,26 @@ You can also run it from PowerShell:
 | `update.bat` | Update shortcut that runs `scripts/server.ps1 -Force` |
 | `backup.bat` | Run a backup now or set up automatic backups |
 | `restore.bat` | Interactive restore from a backup |
+| `uninstall.bat` | Remove all NoteHelper scheduled tasks and stop the server |
 | `scripts/server.ps1` | The brain - handles setup, updates, and server management |
 | `scripts/backup.ps1` | Backup engine - copy, rotate, schedule |
 | `scripts/restore.ps1` | Restore engine - browse, compare, swap |
+| `scripts/uninstall.ps1` | Uninstall engine - remove tasks, stop server |
 
 > **Admin elevation:** Batch files automatically request admin (UAC prompt) only when `PORT` in `.env` is below 1024 (e.g. port 80). For higher ports like 8080, they run without elevation.
+
+## Scheduled Tasks
+
+NoteHelper registers Windows Scheduled Tasks during first-run setup. These run under your user account (inheriting your `az login` session and OneDrive access):
+
+| Task Name | Trigger | Purpose |
+|-----------|---------|--------|
+| `NoteHelper-AutoStart` | At login | Starts the web server automatically when you sign in |
+| `NoteHelper-DailyBackup` | Daily at 11:00 AM | Backs up the database to OneDrive |
+
+To remove all scheduled tasks: double-click `uninstall.bat` or run `scripts\uninstall.ps1`.
+
+To view registered tasks in Task Scheduler, search for "NoteHelper" in the Task Scheduler Library.
 
 ## Backups
 
@@ -347,6 +362,15 @@ This application stores customer account data locally. The SQLite database is **
 - **Must run on a Microsoft-managed device** (Intune-enrolled or domain-joined)
 - **Must reside on a BitLocker-encrypted drive** — this is your encryption-at-rest layer
 - Do not copy the database file (`data/notehelper.db`) to unmanaged devices or unencrypted storage
+
+## Uninstalling
+
+Double-click `uninstall.bat` (or run `scripts\uninstall.ps1`) to cleanly remove NoteHelper from your system. This will:
+
+1. **Stop the running server** on the configured port
+2. **Remove all scheduled tasks** (`NoteHelper-AutoStart`, `NoteHelper-DailyBackup`)
+
+Your data is preserved. To fully remove NoteHelper, delete the app folder after running the uninstall script. Your OneDrive backups remain in the `NoteHelper_Backups` folder.
 
 ## License
 
