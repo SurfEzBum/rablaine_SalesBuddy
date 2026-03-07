@@ -385,7 +385,7 @@ class TestGenerateEngagementSummary:
                 content_type='application/json',
             )
         assert resp.status_code == 400
-        assert 'No call logs' in resp.get_json()['error']
+        assert 'No notes' in resp.get_json()['error']
 
     @patch('app.routes.ai.get_azure_openai_client')
     def test_success_returns_summary(self, mock_get_client, app, client):

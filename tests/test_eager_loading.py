@@ -65,7 +65,7 @@ def test_customer_view_topics_count(client, sample_data):
     response = client.get(f'/customer/{customer_id}')
     assert response.status_code == 200
     # Should not crash with TypeError on .count()
-    assert b'Call Logs' in response.data
+    assert b'Notes' in response.data
 
 
 def test_call_log_view_topics_iteration(client, sample_data):

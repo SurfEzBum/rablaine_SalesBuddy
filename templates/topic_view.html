@@ -27,7 +27,7 @@
             <div class="modal-body">
                 <p>Are you sure you want to delete the topic <strong>{{ topic.name }}</strong>?</p>
                 {% if call_logs|length > 0 %}
-                    <p class="text-warning"><i class="bi bi-exclamation-triangle"></i> This topic is currently associated with {{ call_logs|length }} call log(s). The topic will be removed from all associated calls.</p>
+                    <p class="text-warning"><i class="bi bi-exclamation-triangle"></i> This topic is currently associated with {{ call_logs|length }} note(s). The topic will be removed from all associated calls.</p>
                 {% endif %}
             </div>
             <div class="modal-footer">
@@ -61,7 +61,7 @@
     <div class="col-md-8">
         <div class="card mb-3">
             <div class="card-header">
-                <h5 class="mb-0">Call Logs (most recent first)</h5>
+                <h5 class="mb-0">Notes (most recent first)</h5>
             </div>
             <div class="card-body">
                 {% if call_logs %}
@@ -99,7 +99,7 @@
                         </div>
                     {% endfor %}
                 {% else %}
-                    <p class="text-muted">No call logs tagged with this topic yet.</p>
+                    <p class="text-muted">No notes tagged with this topic yet.</p>
                 {% endif %}
             </div>
         </div>

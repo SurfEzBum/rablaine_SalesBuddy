@@ -111,7 +111,7 @@ def topic_delete(id):
     db.session.commit()
     
     if call_logs_count > 0:
-        flash(f'Topic "{topic_name}" deleted and removed from {call_logs_count} call log(s).', 'success')
+        flash(f'Topic "{topic_name}" deleted and removed from {call_logs_count} note(s).', 'success')
     else:
         flash(f'Topic "{topic_name}" deleted successfully.', 'success')
     

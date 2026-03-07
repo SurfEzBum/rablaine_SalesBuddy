@@ -130,7 +130,7 @@ def backup_restore_all():
     if not SyncStatus.is_complete("accounts"):
         return jsonify({
             "success": False,
-            "error": "Accounts must be synced before restoring call logs. "
+            "error": "Accounts must be synced before restoring notes. "
                      "Run the MSX import first.",
         }), 400
 

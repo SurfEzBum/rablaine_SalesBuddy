@@ -211,7 +211,7 @@ def test_search_page_loads(client):
     """Test search page loads."""
     response = client.get('/search')
     assert response.status_code == 200
-    assert b'Search Call Logs' in response.data
+    assert b'Search' in response.data and b'Notes' in response.data
 
 
 def test_search_with_query(client, sample_data):

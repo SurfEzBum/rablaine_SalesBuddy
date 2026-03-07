@@ -188,7 +188,7 @@ class TestMilestoneViewTasks:
         assert response.status_code == 200
         html = response.data.decode()
         assert 'Linked CL Task' in html
-        assert 'Linked Call Log' in html
+        assert 'Linked Note' in html
         assert f'/call-log/{call_log.id}' in html
 
     def test_milestone_view_no_new_task_without_msx_id(self, app, client, db_session, sample_user):

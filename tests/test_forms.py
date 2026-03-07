@@ -101,7 +101,7 @@ def test_call_log_create_form_loads(client, sample_data):
     customer_id = sample_data['customer1_id']
     response = client.get(f'/call-log/new?customer_id={customer_id}')
     assert response.status_code == 200
-    assert b'New Call Log' in response.data
+    assert b'New Note' in response.data
     assert b'Acme Corp' in response.data  # Customer dropdown
 
 
@@ -131,7 +131,7 @@ def test_call_log_create_with_invalid_date_param(client, sample_data):
     response = client.get(f'/call-log/new?customer_id={customer_id}&date=invalid-date')
     assert response.status_code == 200
     # Should still load successfully (falls back to today)
-    assert b'New Call Log' in response.data
+    assert b'New Note' in response.data
 
 
 def test_call_log_edit_form_loads(client, sample_data):
@@ -139,5 +139,5 @@ def test_call_log_edit_form_loads(client, sample_data):
     call_id = sample_data['call1_id']
     response = client.get(f'/call-log/{call_id}/edit')
     assert response.status_code == 200
-    assert b'Edit Call Log' in response.data
+    assert b'Edit Note' in response.data
     assert b'Discussed VM migration' in response.data

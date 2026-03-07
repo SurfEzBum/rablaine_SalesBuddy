@@ -190,7 +190,7 @@ def milestone_delete(id):
     
     # Protect milestones that are linked to call logs
     if milestone.call_logs:
-        flash('Cannot delete this milestone — it is linked to call logs. '
+        flash('Cannot delete this milestone — it is linked to notes. '
               'Remove the milestone from those call logs first.', 'danger')
         return redirect(url_for('milestones.milestone_view', id=milestone.id))
     

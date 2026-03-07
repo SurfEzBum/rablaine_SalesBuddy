@@ -305,12 +305,12 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="quickCreateModalLabel">
-                    <i class="bi bi-plus-circle"></i> New Call Log for <span id="quickCreateDate"></span>
+                    <i class="bi bi-plus-circle"></i> New Note for <span id="quickCreateDate"></span>
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted">Select a customer to create a call log:</p>
+                <p class="text-muted">Select a customer to create a note:</p>
                 <input type="text" class="form-control mb-3" id="quickCreateSearch" placeholder="Search customers...">
                 <div class="list-group" id="quickCreateCustomerList" style="max-height: 400px; overflow-y: auto;">
                     <!-- Customer list will be populated here -->
@@ -703,7 +703,7 @@
                     addBtn.href = '#';
                     addBtn.className = 'text-muted text-decoration-none cal-add-btn';
                     addBtn.innerHTML = '<i class="bi bi-plus-circle"></i>';
-                    addBtn.title = 'New call log';
+                    addBtn.title = 'New note';
                     addBtn.setAttribute('data-date', dateStr);
                     addBtn.addEventListener('click', function(e) {
                         e.preventDefault();

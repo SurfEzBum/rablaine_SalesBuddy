@@ -168,7 +168,7 @@ def call_log_create():
             return redirect(url_for('call_logs.call_log_create'))
         
         if not content:
-            flash('Call log content is required.', 'danger')
+            flash('Note content is required.', 'danger')
             return redirect(url_for('call_logs.call_log_create'))
         
         # Parse call date and time
@@ -222,7 +222,7 @@ def call_log_create():
                 _handle_milestone_and_task(call_log)
             except Exception as e:
                 logger.exception("Error handling milestone/task during call log create")
-                flash(f'Call log will be saved, but milestone/task failed: {e}', 'warning')
+                flash(f'Note will be saved, but milestone/task failed: {e}', 'warning')
         
         db.session.commit()
 
@@ -233,7 +233,7 @@ def call_log_create():
             except Exception:
                 logger.debug("Backup skipped", exc_info=True)
         
-        flash('Call log created successfully!', 'success')
+        flash('Note created successfully!', 'success')
         
         # Redirect back to referrer if provided
         if referrer:
@@ -337,7 +337,7 @@ def call_log_edit(id):
             return redirect(url_for('call_logs.call_log_edit', id=id))
         
         if not content:
-            flash('Call log content is required.', 'danger')
+            flash('Note content is required.', 'danger')
             return redirect(url_for('call_logs.call_log_edit', id=id))
         
         # Parse call date and time
@@ -375,7 +375,7 @@ def call_log_edit(id):
                 _handle_milestone_and_task(call_log)
             except Exception as e:
                 logger.exception("Error handling milestone/task during call log edit")
-                flash(f'Call log will be saved, but milestone/task failed: {e}', 'warning')
+                flash(f'Note will be saved, but milestone/task failed: {e}', 'warning')
         
         db.session.commit()
 
@@ -386,7 +386,7 @@ def call_log_edit(id):
             except Exception:
                 logger.debug("Backup skipped", exc_info=True)
         
-        flash('Call log updated successfully!', 'success')
+        flash('Note updated successfully!', 'success')
         return redirect(url_for('call_logs.call_log_view', id=call_log.id))
     
     # GET request - load form
@@ -417,7 +417,7 @@ def call_log_delete(id):
     call_log = db.session.get(CallLog, id)
     
     if not call_log:
-        flash('Call log not found.', 'danger')
+        flash('Note not found.', 'danger')
         return redirect(url_for('call_logs.call_logs_list'))
     
     # Store customer for redirect
@@ -433,7 +433,7 @@ def call_log_delete(id):
     except Exception:
         logger.debug("Backup skipped", exc_info=True)
     
-    flash('Call log deleted successfully.', 'success')
+    flash('Note deleted successfully.', 'success')
     
     # Redirect to customer view if we have a customer, otherwise call logs list
     if customer_id:

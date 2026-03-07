@@ -102,7 +102,7 @@ def test_analytics_quick_actions(client):
     
     # Should have quick actions
     assert b'Quick Actions' in response.data
-    assert b'New Call Log' in response.data
+    assert b'New Note' in response.data
     assert b'View All Customers' in response.data
 
 

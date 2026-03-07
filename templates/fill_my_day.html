@@ -63,7 +63,7 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h2><i class="bi bi-lightning-charge text-warning"></i> Fill My Day</h2>
-            <p class="text-muted mb-0">Import all your meetings for a day into call logs in one shot.</p>
+            <p class="text-muted mb-0">Import all your meetings for a day into notes in one shot.</p>
         </div>
         <a href="{{ url_for('main.index') }}" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left"></i> Back
@@ -568,7 +568,7 @@ function createMeetingCard(idx, meeting, customer, data, dateStr, cardNum) {
                     <i class="bi bi-box-arrow-up-right"></i> Full Editor
                 </a>
                 <button class="btn btn-sm btn-success" onclick="saveCallLog(${idx}, '${dateStr}', '${callTime}')" id="saveBtn-${idx}">
-                    <i class="bi bi-check-circle"></i> Save Call Log
+                    <i class="bi bi-check-circle"></i> Save Note
                 </button>
             </div>
         </div>
@@ -804,7 +804,7 @@ async function saveCallLog(idx, dateStr, callTime) {
     const taskDescription = taskDescEl ? taskDescEl.value : (card.dataset.taskDescription || '');
 
     if (!content || content.trim() === '') {
-        alert('Cannot save empty call log. Please add some notes.');
+        alert('Cannot save an empty note. Please add some content.');
         return;
     }
 
@@ -869,7 +869,7 @@ function updateCompletionStatus() {
     if (totalCards > 0 && savedCount >= totalCards) {
         document.getElementById('completionSummary').style.display = 'block';
         document.getElementById('completionText').textContent = 
-            `Saved ${savedCount} call log${savedCount > 1 ? 's' : ''} for this day.`;
+            `Saved ${savedCount} note${savedCount > 1 ? 's' : ''} for this day.`;
     }
 }
 

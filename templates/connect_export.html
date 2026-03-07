@@ -11,8 +11,8 @@
 </div>
 
 <p class="text-muted mb-4">
-    Generate structured exports of your call log activity for writing Microsoft Connects (self-evaluations).
-    Choose a date range and get a summary with full call log content, grouped by customer.
+    Generate structured exports of your note activity for writing Microsoft Connects (self-evaluations).
+    Choose a date range and get a summary with full note content, grouped by customer.
 </p>
 
 <!-- Export Form -->
@@ -60,7 +60,7 @@
                 <div class="col-md-3">
                     <div class="text-center">
                         <h3 class="text-primary mb-0" id="summaryCallLogs">0</h3>
-                        <small class="text-muted">Call Logs</small>
+                        <small class="text-muted">Notes</small>
                     </div>
                 </div>
                 <div class="col-md-3">
@@ -173,7 +173,7 @@
                 <tr>
                     <th>Name</th>
                     <th>Date Range</th>
-                    <th>Call Logs</th>
+                    <th>Notes</th>
                     <th>Customers</th>
                     <th>Created</th>
                     <th class="text-end">Actions</th>
@@ -379,7 +379,7 @@ async function generateAiSummary() {
         btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Generating...';
     }
     
-    showAiLoading('Sending call log data to AI...');
+    showAiLoading('Sending note data to AI...');
     animateProgress(30, 2000);
     
     try {
@@ -387,7 +387,7 @@ async function generateAiSummary() {
         setTimeout(() => {
             const loadingState = document.getElementById('aiLoadingState');
             if (loadingState && loadingState.style.display !== 'none') {
-                document.getElementById('aiLoadingMessage').textContent = 'AI is analyzing your call logs...';
+                document.getElementById('aiLoadingMessage').textContent = 'AI is analyzing your notes...';
                 animateProgress(60, 5000);
             }
         }, 3000);

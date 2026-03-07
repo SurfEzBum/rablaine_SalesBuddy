@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% from 'partials/customer_favicon.html' import customer_favicon %}
 
-{% block title %}Search Call Logs - NoteHelper{% endblock %}
+{% block title %}Search Notes - NoteHelper{% endblock %}
 
 {% block content %}
-<h1 class="mb-4"><i class="bi bi-search"></i> Search & Filter Call Logs</h1>
+<h1 class="mb-4"><i class="bi bi-search"></i> Search & Filter Notes</h1>
 
 <!-- Search and Filter Form -->
 <div class="card mb-4">
@@ -85,7 +85,7 @@
 <!-- Results -->
 {% if call_logs %}
     <div class="alert alert-info">
-        <i class="bi bi-info-circle"></i> Found {{ call_logs|length }} call log(s)
+        <i class="bi bi-info-circle"></i> Found {{ call_logs|length }} note(s)
     </div>
     
     <!-- Grouped Results: Seller → Customer → Calls -->
@@ -149,7 +149,7 @@
 {% elif search_text or selected_customer_id or selected_seller_id or selected_territory_id or selected_topic_ids %}
     <div class="alert alert-warning">
         <i class="bi bi-inbox"></i> 
-        No call logs match your search criteria. Try adjusting your filters.
+        No notes match your search criteria. Try adjusting your filters.
     </div>
 {% endif %}
 {% endblock %}

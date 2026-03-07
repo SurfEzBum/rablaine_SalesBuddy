@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ 'Edit' if call_log else 'New' }} Call Log - NoteHelper{% endblock %}
+{% block title %}{{ 'Edit' if call_log else 'New' }} Note - NoteHelper{% endblock %}
 
 {% block extra_css %}
 <!-- Quill Rich Text Editor -->
@@ -43,7 +43,7 @@
                 {% if is_general_note %}
                     <i class="bi bi-journal-text"></i> {{ 'Edit' if call_log else 'New' }} General Note
                 {% else %}
-                    {{ 'Edit' if call_log else 'New' }} Call Log{% if not call_log and preselect_customer %} - {{ preselect_customer.name }}{% endif %}
+                    {{ 'Edit' if call_log else 'New' }} Note{% if not call_log and preselect_customer %} - {{ preselect_customer.name }}{% endif %}
                 {% endif %}
             </h1>
             <div class="d-flex align-items-center gap-3">
@@ -203,7 +203,7 @@
                     <!-- Content Editor with Import Button -->
                     <div class="mb-3">
                         <div class="d-flex justify-content-between align-items-center mb-2">
-                            <label class="form-label mb-0">Call Notes *</label>
+                            <label class="form-label mb-0">Notes *</label>
                             {% if not call_log %}
                             <button type="button" class="btn btn-sm btn-outline-info" id="importMeetingBtn" onclick="openMeetingImport()">
                                 <i class="bi bi-calendar-event"></i> Import from Meeting
@@ -350,7 +350,7 @@
                                             <button type="button" class="btn btn-primary btn-sm" id="create_task_btn" onclick="createTaskInMSX()">
                                                 <i class="bi bi-cloud-upload me-1"></i> Create Task in MSX
                                             </button>
-                                            <small class="text-muted">Task will be linked when you save the call log</small>
+                                            <small class="text-muted">Task will be linked when you save the note</small>
                                         </div>
                                         <div id="task_creation_error" class="alert alert-danger mt-2" style="display: none;"></div>
                                     </div>
@@ -369,7 +369,7 @@
                     <div class="d-flex justify-content-between">
                         <div>
                             <button type="submit" class="btn btn-success">
-                                <i class="bi bi-check-circle"></i> Save Call Log
+                                <i class="bi bi-check-circle"></i> Save Note
                             </button>
                             {% if not call_log %}
                             <button type="button" class="btn btn-outline-danger ms-2" onclick="discardDraft()">
@@ -390,7 +390,7 @@
     <div class="col-md-6">
         <div class="card previous-calls-card">
             <div class="card-header">
-                <h5 class="mb-0">Previous Call Logs ({{ previous_calls|length }})</h5>
+                <h5 class="mb-0">Previous Notes ({{ previous_calls|length }})</h5>
             </div>
             <div class="card-body previous-calls-body">
                 {% for call in previous_calls %}
@@ -530,7 +530,7 @@ document.getElementById('callLogForm').onsubmit = function(e) {
     if (textContent.trim().length === 0) {
         e.preventDefault();
         e.stopImmediatePropagation(); // Stop other submit handlers from running
-        alert('Call notes cannot be empty.');
+        alert('Notes cannot be empty.');
         quill.focus();
         return false;
     }
@@ -1261,7 +1261,7 @@ function renderMilestoneDropdown() {
                     ${number ? '<span class="text-muted small">(' + number + ')</span>' : ''}
                     <span class="badge ${statusClass} ms-1">${status}</span>
                     ${milestone.on_my_team ? '<span class="badge bg-primary ms-1" title="On my team"><i class="bi bi-people-fill"></i> On Team</span>' : ''}
-                    ${usedIn > 0 ? '<span class="badge bg-info ms-1" title="Used in ' + usedIn + ' call log(s)"><i class="bi bi-journal-text"></i> ' + usedIn + '</span>' : ''}
+                    ${usedIn > 0 ? '<span class="badge bg-info ms-1" title="Used in ' + usedIn + ' note(s)"><i class="bi bi-journal-text"></i> ' + usedIn + '</span>' : ''}
                 </div>
                 ${usageDisplay ? '<span class="badge bg-success">' + usageDisplay + '/mo</span>' : ''}
             </div>
@@ -1618,7 +1618,7 @@ function aiMatchMilestone() {
             const matched = allMilestones.find(m => m.id === data.matched_milestone_id);
             if (matched) {
                 // Show confirmation
-                const confirmMsg = `AI suggests milestone:\n\n"${matched.name}"\n${matched.opportunity_name ? 'Opportunity: ' + matched.opportunity_name : ''}\n\nReason: ${data.reason || 'Best match based on call notes'}\n\nAdd this milestone to the call log?`;
+                const confirmMsg = `AI suggests milestone:\n\n"${matched.name}"\n${matched.opportunity_name ? 'Opportunity: ' + matched.opportunity_name : ''}\n\nReason: ${data.reason || 'Best match based on call notes'}\n\nAdd this milestone to the note?`;
                 
                 if (confirm(confirmMsg)) {
                     // Add the milestone
@@ -2071,10 +2071,10 @@ document.getElementById('callLogForm').addEventListener('submit', async function
     })
     .catch(error => {
         console.error('Form submission error:', error);
-        alert('Failed to save call log. Your draft has been preserved. Please try again.');
+        alert('Failed to save note. Your draft has been preserved. Please try again.');
         // Re-enable submit button
         submitButton.disabled = false;
-        submitButton.innerHTML = '<i class="bi bi-save"></i> Save Call Log';
+        submitButton.innerHTML = '<i class="bi bi-save"></i> Save Note';
     });
 });
 

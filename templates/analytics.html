@@ -96,7 +96,7 @@
                     </div>
                     <small class="text-muted">Last 90 days</small>
                 {% else %}
-                    <p class="text-muted">No topics tracked yet. Add topics to call logs to see insights!</p>
+                    <p class="text-muted">No topics tracked yet. Add topics to notes to see insights!</p>
                 {% endif %}
             </div>
         </div>
@@ -180,7 +180,7 @@
                 <h5 class="card-title"><i class="bi bi-lightning"></i> Quick Actions</h5>
                 <div class="d-flex gap-2 flex-wrap">
                     <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#quickCallLogModal">
-                        <i class="bi bi-plus-circle"></i> New Call Log
+                        <i class="bi bi-plus-circle"></i> New Note
                     </button>
                     <a href="{{ url_for('customers.customers_list') }}" class="btn btn-sm btn-outline-secondary">
                         <i class="bi bi-building"></i> View All Customers
@@ -202,7 +202,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="quickCallLogModalLabel">Create Call Log</h5>
+                <h5 class="modal-title" id="quickCallLogModalLabel">Create Note</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">

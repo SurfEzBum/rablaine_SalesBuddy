@@ -833,7 +833,7 @@ class TestAiSummaryEndpoint:
                                content_type='application/json')
         assert response.status_code == 400
         data = response.get_json()
-        assert 'No call log data' in data['error']
+        assert 'No note data' in data['error']
 
     def test_ai_summary_success(self, client, app, sample_data, monkeypatch):
         """Should generate and cache AI summary successfully."""

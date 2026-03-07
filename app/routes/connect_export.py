@@ -46,7 +46,7 @@ CHUNK_TARGET_TOKENS = 80_000
 # System prompt for single-call (full export fits in context)
 CONNECT_SUMMARY_SYSTEM_PROMPT = (
     "You are an expert at writing Microsoft Connect self-evaluations for "
-    "Azure technical sellers. You will receive structured call log data "
+    "Azure technical sellers. You will receive structured note data "
     "covering a specific date range. Your job is to produce content the "
     "seller can paste directly into their Connect form.\n\n"
     "The Connect form has 3 fields. Write each as a separate Markdown section:\n\n"
@@ -75,7 +75,7 @@ CONNECT_SUMMARY_SYSTEM_PROMPT = (
 # System prompt for per-chunk calls (subset of customers)
 CONNECT_CHUNK_SYSTEM_PROMPT = (
     "You are an expert at writing Microsoft Connect self-evaluations for "
-    "Azure technical sellers. You will receive a subset of call log data for "
+    "Azure technical sellers. You will receive a subset of note data for "
     "specific customers. Summarize the engagements for ONLY the customers in "
     "this chunk.\n\n"
     "Write concise bullet points covering:\n"
@@ -310,7 +310,7 @@ def _build_text_export(data: dict, name: str) -> str:
     lines.append(f"Period: {summary['start_date']} to {summary['end_date']}")
     lines.append(f"{'=' * 60}")
     lines.append("")
-    lines.append(f"{summary['total_call_logs']} call logs across "
+    lines.append(f"{summary['total_call_logs']} notes across "
                  f"{summary['unique_customers']} customers")
 
     if summary['total_milestone_revenue'] > 0:
@@ -340,7 +340,7 @@ def _build_text_export(data: dict, name: str) -> str:
 
     for cust in customers:
         lines.append("")
-        lines.append(f"--- {cust['name']} ({len(cust['call_logs'])} call logs) ---")
+        lines.append(f"--- {cust['name']} ({len(cust['call_logs'])} notes) ---")
         if cust['seller']:
             lines.append(f"Seller: {cust['seller']}")
         if cust['territory']:
@@ -404,7 +404,7 @@ def _build_markdown_export(data: dict, name: str) -> str:
     lines.append(f"# {name}")
     lines.append(f"**Period:** {summary['start_date']} to {summary['end_date']}")
     lines.append("")
-    lines.append(f"{summary['total_call_logs']} call logs across "
+    lines.append(f"{summary['total_call_logs']} notes across "
                  f"{summary['unique_customers']} customers")
 
     if summary['total_milestone_revenue'] > 0:
@@ -435,7 +435,7 @@ def _build_markdown_export(data: dict, name: str) -> str:
 
     for cust in customers:
         lines.append("")
-        lines.append(f"### {cust['name']} ({len(cust['call_logs'])} call logs)")
+        lines.append(f"### {cust['name']} ({len(cust['call_logs'])} notes)")
         lines.append("")
         meta_parts = []
         if cust['seller']:
@@ -494,7 +494,7 @@ def _build_summary_header(data: dict) -> str:
     summary = data['summary']
     lines = [
         f"Period: {summary['start_date']} to {summary['end_date']}",
-        f"Total call logs: {summary['total_call_logs']}",
+        f"Total notes: {summary['total_call_logs']}",
         f"Unique customers: {summary['unique_customers']}",
         f"Unique topics: {summary['unique_topics']}",
     ]
@@ -513,7 +513,7 @@ def _build_summary_header(data: dict) -> str:
 def _build_customer_text_block(cust: dict) -> str:
     """Build the text block for a single customer (for chunking)."""
     lines = []
-    lines.append(f"--- {cust['name']} ({len(cust['call_logs'])} call logs) ---")
+    lines.append(f"--- {cust['name']} ({len(cust['call_logs'])} notes) ---")
     if cust.get('seller'):
         lines.append(f"Seller: {cust['seller']}")
     if cust.get('territory'):
@@ -621,7 +621,7 @@ def _call_openai(system_prompt: str, user_prompt: str,
 def _generate_ai_summary_single(data: dict, text_export: str) -> tuple[str, dict]:
     """Generate an AI summary with a single API call (export fits in context)."""
     user_prompt = (
-        "Here is my call log data for this Connect period.  "
+        "Here is my note data for this Connect period.  "
         "Please write my Connect self-evaluation.\n\n"
         f"{text_export}"
     )
@@ -873,7 +873,7 @@ def generate_connect_ai_summary(export_id: int):
     if not data['customers']:
         return jsonify({
             'success': False,
-            'error': 'No call log data found for this date range',
+            'error': 'No note data found for this date range',
         }), 400
 
     # Estimate tokens for informational purposes

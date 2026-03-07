@@ -487,10 +487,10 @@ Guidelines:
 
 # System prompt for customer engagement summary generation
 ENGAGEMENT_SUMMARY_PROMPT = (
-    "You are a Microsoft technical seller's assistant. Analyze the provided call log notes "
+    "You are a Microsoft technical seller's assistant. Analyze the provided notes "
     "and any existing customer notes for a customer and generate a structured engagement summary. "
-    "Fill in each field based on what you can extract from the call logs and notes. If a field "
-    "cannot be determined from the available information, write 'Not identified in call logs' "
+    "Fill in each field based on what you can extract from the notes. If a field "
+    "cannot be determined from the available information, write 'Not identified in notes' "
     "for that field.\n\n"
     "Return your response in EXACTLY this format (keep the field labels exactly as shown, "
     "fill in the values after the colon):\n\n"
@@ -501,7 +501,7 @@ ENGAGEMENT_SUMMARY_PROMPT = (
     "Business Outcome in Estimated $$ACR: [expected revenue impact or business value]\n"
     "Future Date/Timeline: [any deadlines, milestones, or target dates mentioned]\n"
     "Risks/Blockers: [any risks, blockers, or concerns raised]\n\n"
-    "Be concise but specific. Use actual details from the call logs and notes, not generic "
+    "Be concise but specific. Use actual details from the notes, not generic "
     "statements. If multiple topics or workstreams exist, cover the most significant ones."
 )
 
@@ -541,7 +541,7 @@ def api_ai_generate_engagement_summary():
     )
 
     if not call_logs:
-        return jsonify({'success': False, 'error': 'No call logs found for this customer'}), 400
+        return jsonify({'success': False, 'error': 'No notes found for this customer'}), 400
 
     # Build the call log text for the prompt
     import re as _re
@@ -562,7 +562,7 @@ def api_ai_generate_engagement_summary():
     # Cap the input to avoid token limits (roughly 30k chars)
     MAX_CHARS = 30000
     if len(call_text) > MAX_CHARS:
-        call_text = call_text[:MAX_CHARS] + '\n\n[... additional call logs truncated ...]'
+        call_text = call_text[:MAX_CHARS] + '\n\n[... additional notes truncated ...]'
 
     # Include existing customer notes as additional context if present
     notes_section = ''
@@ -572,9 +572,9 @@ def api_ai_generate_engagement_summary():
 
     user_message = (
         f"Customer: {customer.name} (TPID: {customer.tpid})\n"
-        f"Total call logs: {len(call_logs)}\n"
+        f"Total notes: {len(call_logs)}\n"
         f"{notes_section}\n"
-        f"Call Log Notes:\n\n{call_text}"
+        f"Notes:\n\n{call_text}"
     )
 
     try:
