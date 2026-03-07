@@ -488,7 +488,7 @@ Guidelines:
 # System prompt for customer engagement summary generation
 ENGAGEMENT_SUMMARY_PROMPT = (
     "You are a Microsoft technical seller's assistant. Analyze the provided notes "
-    "and any existing customer overview for a customer and generate a structured engagement summary. "
+    "and any existing customer account context for a customer and generate a structured engagement summary. "
     "Fill in each field based on what you can extract from the notes. If a field "
     "cannot be determined from the available information, write 'Not identified in notes' "
     "for that field.\n\n"
@@ -564,11 +564,11 @@ def api_ai_generate_engagement_summary():
     if len(call_text) > MAX_CHARS:
         call_text = call_text[:MAX_CHARS] + '\n\n[... additional notes truncated ...]'
 
-    # Include existing customer overview as additional context if present
+    # Include existing customer account context as additional context if present
     notes_section = ''
-    if customer.overview:
-        notes_text = _re.sub(r'<[^>]+>', '', customer.overview)
-        notes_section = f"\nExisting Customer Notes:\n{notes_text}\n"
+    if customer.account_context:
+        notes_text = _re.sub(r'<[^>]+>', '', customer.account_context)
+        notes_section = f"\nExisting Account Context:\n{notes_text}\n"
 
     user_message = (
         f"Customer: {customer.name} (TPID: {customer.tpid})\n"

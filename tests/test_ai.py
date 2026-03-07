@@ -467,14 +467,14 @@ class TestGenerateEngagementSummary:
 
     @patch('app.routes.ai.get_azure_openai_client')
     def test_includes_customer_notes_in_prompt(self, mock_get_client, app, client):
-        """Should include existing customer overview in the user message sent to AI."""
+        """Should include existing customer account context in the user message sent to AI."""
         customer_id = self._create_customer_with_logs(app)
 
-        # Add notes to the customer
+        # Add account context to the customer
         from app.models import Customer
         with app.app_context():
             customer = db.session.get(Customer, customer_id)
-            customer.overview = "Key contact is Jane Smith (CTO). Budget approved for Q3."
+            customer.account_context = "Key contact is Jane Smith (CTO). Budget approved for Q3."
             db.session.commit()
 
         mock_client = MagicMock()
@@ -489,10 +489,10 @@ class TestGenerateEngagementSummary:
             )
 
         assert resp.status_code == 200
-        # Verify the user message sent to OpenAI includes the customer overview
+        # Verify the user message sent to OpenAI includes the customer account context
         call_args = mock_client.chat.completions.create.call_args
         user_message = call_args[1]['messages'][1]['content'] if 'messages' in call_args[1] else call_args[0][0][1]['content']
-        assert 'Existing Customer Notes' in user_message
+        assert 'Existing Account Context' in user_message
         assert 'Jane Smith (CTO)' in user_message
         assert 'Budget approved for Q3' in user_message
 
@@ -519,7 +519,7 @@ class TestGenerateButtonVisibility:
         with patch.dict('os.environ', AI_ENV_VARS):
             resp = client.get(f'/customer/{cid}')
         assert resp.status_code == 200
-        assert b'id="generateNotesBtn"' in resp.data
+        assert b'id="generateContextBtn"' in resp.data
 
     def test_generate_button_hidden_when_ai_disabled(self, app, client):
         """Generate button should not appear when AI is disabled."""
@@ -540,7 +540,7 @@ class TestGenerateButtonVisibility:
         with patch.dict('os.environ', {}, clear=True):
             resp = client.get(f'/customer/{cid}')
         assert resp.status_code == 200
-        assert b'id="generateNotesBtn"' not in resp.data
+        assert b'id="generateContextBtn"' not in resp.data
 
     def test_generate_button_hidden_when_no_notes(self, app, client):
         """Generate button should not appear when customer has no call logs."""
@@ -554,4 +554,4 @@ class TestGenerateButtonVisibility:
         with patch.dict('os.environ', AI_ENV_VARS):
             resp = client.get(f'/customer/{cid}')
         assert resp.status_code == 200
-        assert b'id="generateNotesBtn"' not in resp.data
+        assert b'id="generateContextBtn"' not in resp.data

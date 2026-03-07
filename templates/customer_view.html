@@ -4,7 +4,34 @@
 {% block title %}{{ customer.name }} - NoteHelper{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4 gap-3">
+<style>
+    .clickable-call {
+        cursor: pointer;
+        transition: background-color 0.15s ease-in-out;
+    }
+    .clickable-call:hover {
+        background-color: rgba(0, 0, 0, 0.05);
+    }
+    html[data-bs-theme="dark"] .clickable-call:hover {
+        background-color: rgba(255, 255, 255, 0.15);
+    }
+    .clickable-call a {
+        position: relative;
+        z-index: 2;
+    }
+    .engagement-card {
+        transition: border-color 0.15s ease-in-out;
+    }
+    .engagement-card:hover {
+        border-color: var(--bs-primary) !important;
+    }
+    .story-completeness .progress {
+        height: 4px;
+    }
+</style>
+
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-center mb-3 gap-3">
     <div style="min-width: 0; flex: 1; display: flex; align-items: center; gap: 0.5rem;">
         <span style="flex-shrink: 0; line-height: 1; margin-top: 4px; margin-right: 6px;">{{ customer_favicon(customer, size=34) }}</span>
         <h1 class="mb-0 text-truncate" style="min-width: 0;" title="{{ customer.name }}">
@@ -19,14 +46,193 @@
         <a href="{{ url_for('notes.note_create') }}?customer_id={{ customer.id }}" class="btn btn-success text-nowrap">
             <i class="bi bi-plus-circle"></i> New Note
         </a>
+        <a href="{{ url_for('engagements.engagement_create', customer_id=customer.id) }}" class="btn btn-outline-primary text-nowrap">
+            <i class="bi bi-diagram-3"></i> New Engagement
+        </a>
         <a href="{{ url_for('customers.customer_edit', id=customer.id) }}" class="btn btn-primary text-nowrap">
             <i class="bi bi-pencil"></i> Edit Customer
         </a>
     </div>
 </div>
 
+<!-- Key Metrics Row -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card text-center h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">Last Contact</div>
+                <div class="fw-bold">
+                    {% if last_contact %}
+                        {{ last_contact.strftime('%b %d, %Y') }}
+                    {% else %}
+                        <span class="text-muted">--</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">Active Engagements</div>
+                <div class="fw-bold">{{ active_engagements|length }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">Active Milestones</div>
+                <div class="fw-bold">{{ active_milestone_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card text-center h-100">
+            <div class="card-body py-2">
+                <div class="text-muted small">Opportunities</div>
+                <div class="fw-bold">{{ opportunity_count }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row">
+    <!-- Main Content Column -->
+    <div class="col-md-8">
+        <!-- Engagements Section -->
+        {% if engagements %}
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-diagram-3"></i> Engagements</h5>
+                <a href="{{ url_for('engagements.engagement_create', customer_id=customer.id) }}" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-plus"></i> New
+                </a>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    {% for eng in engagements %}
+                    <div class="col-md-6">
+                        <a href="{{ url_for('engagements.engagement_view', id=eng.id) }}" class="card engagement-card h-100 text-decoration-none border{% if eng.status == 'Active' %}-primary{% endif %}" style="{% if eng.status == 'Active' %}border-width: 2px;{% endif %}">
+                            <div class="card-body p-3">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <h6 class="card-title mb-0 text-body">{{ eng.title }}</h6>
+                                    <span class="badge flex-shrink-0 ms-2
+                                        {% if eng.status == 'Active' %}bg-success
+                                        {% elif eng.status == 'On Hold' %}bg-warning text-dark
+                                        {% elif eng.status == 'Won' %}bg-primary
+                                        {% elif eng.status == 'Lost' %}bg-secondary
+                                        {% endif %}">{{ eng.status }}</span>
+                                </div>
+                                <!-- Story completeness -->
+                                <div class="story-completeness mb-2">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <span class="text-muted" style="font-size: 0.75rem;">Story {{ eng.story_completeness }}%</span>
+                                    </div>
+                                    <div class="progress">
+                                        <div class="progress-bar {% if eng.story_completeness >= 80 %}bg-success{% elif eng.story_completeness >= 40 %}bg-warning{% else %}bg-danger{% endif %}" 
+                                             style="width: {{ eng.story_completeness }}%"></div>
+                                    </div>
+                                </div>
+                                <!-- Quick stats -->
+                                <div class="d-flex gap-3 text-muted" style="font-size: 0.8rem;">
+                                    <span><i class="bi bi-journal-text"></i> {{ eng.linked_note_count }} note{{ 's' if eng.linked_note_count != 1 else '' }}</span>
+                                    {% if eng.opportunities|length > 0 %}
+                                    <span><i class="bi bi-briefcase"></i> {{ eng.opportunities|length }}</span>
+                                    {% endif %}
+                                    {% if eng.milestones|length > 0 %}
+                                    <span><i class="bi bi-flag"></i> {{ eng.milestones|length }}</span>
+                                    {% endif %}
+                                </div>
+                                {% if eng.target_date %}
+                                <div class="text-muted mt-1" style="font-size: 0.75rem;">
+                                    <i class="bi bi-calendar"></i> Target: {{ eng.target_date.strftime('%b %d, %Y') }}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </a>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <!-- Empty engagement state -->
+        <div class="card mb-3 border-dashed">
+            <div class="card-body text-center py-4">
+                <i class="bi bi-diagram-3 text-muted" style="font-size: 2rem;"></i>
+                <p class="text-muted mt-2 mb-2">No engagements yet. Create one to organize your notes into workstreams.</p>
+                <a href="{{ url_for('engagements.engagement_create', customer_id=customer.id) }}" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-plus-circle"></i> Create First Engagement
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Notes List -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-journal-text"></i> Notes ({{ notes|length }})</h5>
+                <a href="{{ url_for('notes.note_create') }}?customer_id={{ customer.id }}" class="btn btn-sm btn-success">
+                    <i class="bi bi-plus"></i> New Note
+                </a>
+            </div>
+            <div class="card-body">
+                {% if notes %}
+                    {# Check if all notes are with the same seller as the customer's seller #}
+                    {% set all_same_seller = notes|selectattr('seller.id', 'equalto', customer.seller.id)|list|length == notes|length if customer.seller else false %}
+                    <div class="list-group">
+                        {% for call in notes %}
+                            <div class="list-group-item clickable-call" onclick="window.location.href='{{ url_for('notes.note_view', id=call.id) }}';">
+                                <div class="d-flex w-100 justify-content-between mb-2">
+                                    <div>
+                                        <h6 class="mb-0 d-inline">{{ call.call_date.strftime('%b %d, %Y') }}{% if call.call_date.hour != 0 or call.call_date.minute != 0 %} {{ call.call_date.strftime('%I:%M %p') }}{% endif %}</h6>
+                                        {% if call.engagements %}
+                                            {% for eng in call.engagements %}
+                                                <span class="badge bg-primary bg-opacity-25 text-primary ms-1" style="font-size: 0.7rem;" onclick="event.stopPropagation(); window.location.href='{{ url_for('engagements.engagement_view', id=eng.id) }}';">
+                                                    <i class="bi bi-diagram-3"></i> {{ eng.title[:25] }}{% if eng.title|length > 25 %}...{% endif %}
+                                                </span>
+                                            {% endfor %}
+                                        {% endif %}
+                                    </div>
+                                    {% if call.seller and not all_same_seller %}
+                                        <a href="{{ url_for('sellers.seller_view', id=call.seller.id) }}" class="badge {{ get_seller_color(call.seller.id) }} text-decoration-none" onclick="event.stopPropagation();"><i class="bi bi-person"></i> {{ call.seller.name }}</a>
+                                    {% endif %}
+                                </div>
+                                <div class="mb-2">{{ call.content|safe }}</div>
+                                {% if call.topics|length > 0 or call.partners|length > 0 or call.milestones|length > 0 or call.msx_tasks.count() > 0 %}
+                                    <div>
+                                        {% for topic in call.topics %}
+                                            <a href="{{ url_for('topics.topic_view', id=topic.id) }}" class="badge bg-warning text-dark text-decoration-none" onclick="event.stopPropagation();"><i class="bi bi-tag"></i> {{ topic.name }}</a>
+                                        {% endfor %}
+                                        {% for partner in call.partners %}
+                                            <a href="{{ url_for('partners.partner_view', id=partner.id) }}" class="badge text-decoration-none" style="background-color: #6f42c1;" onclick="event.stopPropagation();"><i class="bi bi-building"></i> {{ partner.name }}</a>
+                                        {% endfor %}
+                                        {% for milestone in call.milestones %}
+                                            <a href="{{ url_for('milestones.milestone_view', id=milestone.id) }}" class="badge bg-success text-decoration-none" title="{{ milestone.display_text }}" onclick="event.stopPropagation();"><i class="bi bi-flag"></i> {{ milestone.display_text[:25] }}{% if milestone.display_text|length > 25 %}...{% endif %}</a>
+                                        {% endfor %}
+                                        {% for task in call.msx_tasks %}
+                                            {% if task.msx_task_url %}
+                                            <a href="{{ task.msx_task_url }}" target="_blank" class="badge bg-secondary text-decoration-none" title="{{ task.subject }}" onclick="event.stopPropagation();"><i class="bi bi-check2-circle"></i> {{ task.subject[:20] }}{% if task.subject|length > 20 %}...{% endif %} <i class="bi bi-box-arrow-up-right"></i></a>
+                                            {% else %}
+                                            <span class="badge bg-secondary" title="{{ task.subject }}"><i class="bi bi-check2-circle"></i> {{ task.subject[:20] }}{% if task.subject|length > 20 %}...{% endif %}</span>
+                                            {% endif %}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-muted">No notes for this customer yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Sidebar -->
     <div class="col-md-4">
+        <!-- Details Card -->
         <div class="card mb-3">
             <div class="card-header">
                 <h5 class="mb-0">Details</h5>
@@ -63,7 +269,7 @@
                         {% endfor %}
                     </p>
                 {% endif %}
-                <p><strong>Total Calls:</strong> {{ notes|length }}</p>
+                <p><strong>Total Notes:</strong> {{ notes|length }}</p>
                 
                 {% set partner_dict = {} %}
                 {% for call in notes %}
@@ -82,6 +288,48 @@
                     {% endfor %}
                 </p>
                 {% endif %}
+            </div>
+        </div>
+
+        <!-- Account Context Card -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-sticky"></i> Account Context</h5>
+                <div class="d-flex gap-2">
+                    {% if ai_enabled and notes %}
+                    <button type="button" class="btn btn-sm btn-outline-success" id="generateContextBtn" onclick="generateEngagementSummary()" title="Use AI to generate an account context summary from all notes">
+                        <i class="bi bi-stars"></i> Generate
+                    </button>
+                    {% endif %}
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="editContextBtn" onclick="toggleContextEdit()">
+                        <i class="bi bi-pencil"></i> Edit
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="contextDisplay" {% if not customer.account_context %}style="display: none;"{% endif %}>
+                    <p class="mb-0" style="white-space: pre-wrap;">{{ customer.account_context or '' }}</p>
+                </div>
+                <div id="contextEmpty" {% if customer.account_context %}style="display: none;"{% endif %}>
+                    <p class="text-muted mb-0">No account context yet. Click Edit to add high-level context about this account.</p>
+                </div>
+                <div id="contextGenerating" style="display: none;">
+                    <div class="d-flex align-items-center gap-2 text-muted">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span>Analyzing {{ notes|length }} note{{ 's' if notes|length != 1 else '' }}...</span>
+                    </div>
+                </div>
+                <form id="contextForm" action="{{ url_for('customers.customer_update_overview', id=customer.id) }}" method="post" style="display: none;">
+                    <textarea class="form-control mb-2" name="account_context" id="contextTextarea" rows="10" placeholder="High-level account context: key contacts, strategic priorities, ongoing initiatives...">{{ customer.account_context or '' }}</textarea>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-sm btn-primary">
+                            <i class="bi bi-check-lg"></i> Save
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="cancelContextEdit()">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
         
@@ -143,49 +391,7 @@
             </div>
         </div>
         {% endif %}
-        
-        <!-- Customer Notes Card -->
-        <div class="card mb-3">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-sticky"></i> Notes</h5>
-                <div class="d-flex gap-2">
-                    {% if ai_enabled and notes %}
-                    <button type="button" class="btn btn-sm btn-outline-success" id="generateNotesBtn" onclick="generateEngagementSummary()" title="Use AI to generate an engagement summary from all notes">
-                        <i class="bi bi-stars"></i> Generate
-                    </button>
-                    {% endif %}
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="editOverviewBtn" onclick="toggleOverviewEdit()">
-                        <i class="bi bi-pencil"></i> Edit
-                    </button>
-                </div>
-            </div>
-            <div class="card-body">
-                <div id="overviewDisplay" {% if not customer.overview %}style="display: none;"{% endif %}>
-                    <p class="mb-0" style="white-space: pre-wrap;">{{ customer.overview or '' }}</p>
-                </div>
-                <div id="overviewEmpty" {% if customer.overview %}style="display: none;"{% endif %}>
-                    <p class="text-muted mb-0">No notes yet. Click Edit to add notes about opportunities or milestones.</p>
-                </div>
-                <div id="overviewGenerating" style="display: none;">
-                    <div class="d-flex align-items-center gap-2 text-muted">
-                        <div class="spinner-border spinner-border-sm" role="status"></div>
-                        <span>Analyzing {{ notes|length }} note{{ 's' if notes|length != 1 else '' }}...</span>
-                    </div>
-                </div>
-                <form id="overviewForm" action="{{ url_for('customers.customer_update_overview', id=customer.id) }}" method="post" style="display: none;">
-                    <textarea class="form-control mb-2" name="overview" id="overviewTextarea" rows="10" placeholder="Track opportunities, milestones, key contacts, etc.">{{ customer.overview or '' }}</textarea>
-                    <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-sm btn-primary">
-                            <i class="bi bi-check-lg"></i> Save
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="cancelOverviewEdit()">
-                            Cancel
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-        
+
         {% if revenue_analyses %}
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -240,111 +446,46 @@
         </div>
         {% endif %}
     </div>
-    
-    <div class="col-md-8">
-        <div class="card mb-3">
-            <div class="card-header">
-                <h5 class="mb-0">Notes (most recent first)</h5>
-            </div>
-            <div class="card-body">
-                {% if notes %}
-                    <style>
-                        .clickable-call {
-                            cursor: pointer;
-                            transition: background-color 0.15s ease-in-out;
-                        }
-                        .clickable-call:hover {
-                            background-color: rgba(0, 0, 0, 0.05);
-                        }
-                        html[data-bs-theme="dark"] .clickable-call:hover {
-                            background-color: rgba(255, 255, 255, 0.15);
-                        }
-                        .clickable-call a {
-                            position: relative;
-                            z-index: 2;
-                        }
-                    </style>
-                    {# Check if all call logs are with the same seller as the customer's seller #}
-                    {% set all_same_seller = notes|selectattr('seller.id', 'equalto', customer.seller.id)|list|length == notes|length if customer.seller else false %}
-                    <div class="list-group">
-                        {% for call in notes %}
-                            <div class="list-group-item clickable-call" onclick="window.location.href='{{ url_for('notes.note_view', id=call.id) }}';">
-                                <div class="d-flex w-100 justify-content-between mb-2">
-                                    <h6 class="mb-0">{{ call.call_date.strftime('%b %d, %Y') }}{% if call.call_date.hour != 0 or call.call_date.minute != 0 %} {{ call.call_date.strftime('%I:%M %p') }}{% endif %}</h6>
-                                    {% if call.seller and not all_same_seller %}
-                                        <a href="{{ url_for('sellers.seller_view', id=call.seller.id) }}" class="badge {{ get_seller_color(call.seller.id) }} text-decoration-none" onclick="event.stopPropagation();"><i class="bi bi-person"></i> {{ call.seller.name }}</a>
-                                    {% endif %}
-                                </div>
-                                <div class="mb-2">{{ call.content|safe }}</div>
-                                {% if call.topics|length > 0 or call.partners|length > 0 or call.milestones|length > 0 or call.msx_tasks.count() > 0 %}
-                                    <div>
-                                        {% for topic in call.topics %}
-                                            <a href="{{ url_for('topics.topic_view', id=topic.id) }}" class="badge bg-warning text-dark text-decoration-none" onclick="event.stopPropagation();"><i class="bi bi-tag"></i> {{ topic.name }}</a>
-                                        {% endfor %}
-                                        {% for partner in call.partners %}
-                                            <a href="{{ url_for('partners.partner_view', id=partner.id) }}" class="badge text-decoration-none" style="background-color: #6f42c1;" onclick="event.stopPropagation();"><i class="bi bi-building"></i> {{ partner.name }}</a>
-                                        {% endfor %}
-                                        {% for milestone in call.milestones %}
-                                            <a href="{{ url_for('milestones.milestone_view', id=milestone.id) }}" class="badge bg-success text-decoration-none" title="{{ milestone.display_text }}" onclick="event.stopPropagation();"><i class="bi bi-flag"></i> {{ milestone.display_text[:25] }}{% if milestone.display_text|length > 25 %}...{% endif %}</a>
-                                        {% endfor %}
-                                        {% for task in call.msx_tasks %}
-                                            {% if task.msx_task_url %}
-                                            <a href="{{ task.msx_task_url }}" target="_blank" class="badge bg-secondary text-decoration-none" title="{{ task.subject }}" onclick="event.stopPropagation();"><i class="bi bi-check2-circle"></i> {{ task.subject[:20] }}{% if task.subject|length > 20 %}...{% endif %} <i class="bi bi-box-arrow-up-right"></i></a>
-                                            {% else %}
-                                            <span class="badge bg-secondary" title="{{ task.subject }}"><i class="bi bi-check2-circle"></i> {{ task.subject[:20] }}{% if task.subject|length > 20 %}...{% endif %}</span>
-                                            {% endif %}
-                                        {% endfor %}
-                                    </div>
-                                {% endif %}
-                            </div>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <p class="text-muted">No notes for this customer yet.</p>
-                {% endif %}
-            </div>
-        </div>
-    </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-function toggleOverviewEdit() {
-    document.getElementById('overviewDisplay').style.display = 'none';
-    document.getElementById('overviewEmpty').style.display = 'none';
-    document.getElementById('overviewForm').style.display = 'block';
-    document.getElementById('editOverviewBtn').style.display = 'none';
-    document.getElementById('overviewTextarea').focus();
+function toggleContextEdit() {
+    document.getElementById('contextDisplay').style.display = 'none';
+    document.getElementById('contextEmpty').style.display = 'none';
+    document.getElementById('contextForm').style.display = 'block';
+    document.getElementById('editContextBtn').style.display = 'none';
+    document.getElementById('contextTextarea').focus();
 }
 
-function cancelOverviewEdit() {
-    const textarea = document.getElementById('overviewTextarea');
-    const hasNotes = textarea.defaultValue.trim().length > 0;
+function cancelContextEdit() {
+    const textarea = document.getElementById('contextTextarea');
+    const hasContext = textarea.defaultValue.trim().length > 0;
     
     // Reset textarea to original value
     textarea.value = textarea.defaultValue;
     
-    document.getElementById('overviewForm').style.display = 'none';
-    document.getElementById('editOverviewBtn').style.display = 'inline-block';
-    const genBtn = document.getElementById('generateNotesBtn');
+    document.getElementById('contextForm').style.display = 'none';
+    document.getElementById('editContextBtn').style.display = 'inline-block';
+    const genBtn = document.getElementById('generateContextBtn');
     if (genBtn) genBtn.style.display = 'inline-block';
     
-    if (hasNotes) {
-        document.getElementById('overviewDisplay').style.display = 'block';
-        document.getElementById('overviewEmpty').style.display = 'none';
+    if (hasContext) {
+        document.getElementById('contextDisplay').style.display = 'block';
+        document.getElementById('contextEmpty').style.display = 'none';
     } else {
-        document.getElementById('overviewDisplay').style.display = 'none';
-        document.getElementById('overviewEmpty').style.display = 'block';
+        document.getElementById('contextDisplay').style.display = 'none';
+        document.getElementById('contextEmpty').style.display = 'block';
     }
 }
 
 function generateEngagementSummary() {
-    const btn = document.getElementById('generateNotesBtn');
-    const editBtn = document.getElementById('editOverviewBtn');
-    const generating = document.getElementById('overviewGenerating');
-    const display = document.getElementById('overviewDisplay');
-    const empty = document.getElementById('overviewEmpty');
+    const btn = document.getElementById('generateContextBtn');
+    const editBtn = document.getElementById('editContextBtn');
+    const generating = document.getElementById('contextGenerating');
+    const display = document.getElementById('contextDisplay');
+    const empty = document.getElementById('contextEmpty');
 
     // Show loading state
     btn.disabled = true;
@@ -363,18 +504,18 @@ function generateEngagementSummary() {
         generating.style.display = 'none';
         if (data.success) {
             // Open the edit form with the generated summary pre-filled
-            const textarea = document.getElementById('overviewTextarea');
+            const textarea = document.getElementById('contextTextarea');
             textarea.value = data.summary;
             textarea.rows = Math.max(10, data.summary.split('\n').length + 2);
-            document.getElementById('overviewForm').style.display = 'block';
+            document.getElementById('contextForm').style.display = 'block';
             btn.style.display = 'none';
             editBtn.style.display = 'none';
             textarea.focus();
         } else {
             alert('Failed to generate summary: ' + (data.error || 'Unknown error'));
             // Restore original display
-            const hasNotes = document.getElementById('overviewTextarea').defaultValue.trim().length > 0;
-            if (hasNotes) display.style.display = 'block';
+            const hasContext = document.getElementById('contextTextarea').defaultValue.trim().length > 0;
+            if (hasContext) display.style.display = 'block';
             else empty.style.display = 'block';
         }
         btn.disabled = false;
@@ -383,8 +524,8 @@ function generateEngagementSummary() {
     .catch(err => {
         generating.style.display = 'none';
         alert('Error: ' + err.message);
-        const hasNotes = document.getElementById('overviewTextarea').defaultValue.trim().length > 0;
-        if (hasNotes) display.style.display = 'block';
+        const hasContext = document.getElementById('contextTextarea').defaultValue.trim().length > 0;
+        if (hasContext) display.style.display = 'block';
         else empty.style.display = 'block';
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-stars"></i> Generate';
