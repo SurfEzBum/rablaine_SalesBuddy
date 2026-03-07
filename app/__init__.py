@@ -87,6 +87,10 @@ def create_app():
                 db.session.add(g.user_prefs)
                 db.session.commit()
     
+    # Initialize usage telemetry hooks (before registering blueprints)
+    from app.services.telemetry import init_telemetry
+    init_telemetry(app)
+    
     # Register blueprints
     from app.routes.admin import admin_bp
     from app.routes.ai import ai_bp
