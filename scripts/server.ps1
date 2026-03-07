@@ -528,7 +528,58 @@ if (-not $backupConfigExists -and -not $Force) {
     Write-Host "  [INFO] Backups not configured. Run backup.bat to set up." -ForegroundColor Gray
 }
 
+# -- Step 12: Register autostart scheduled task --------------------------------
+$AutoStartTaskName = 'NoteHelper-AutoStart'
+$autoStartTask = Get-ScheduledTask -TaskName $AutoStartTaskName -ErrorAction SilentlyContinue
 
+if (-not $autoStartTask -and -not $Force) {
+    Write-Host ""
+    Write-Host "  Registering auto-start on login..." -ForegroundColor Yellow
+
+    $serverScript = Join-Path $PSScriptRoot 'server.ps1'
+    $asAction = New-ScheduledTaskAction `
+        -Execute 'powershell.exe' `
+        -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$serverScript`"" `
+        -WorkingDirectory $RepoRoot
+    $asTrigger = New-ScheduledTaskTrigger -AtLogOn
+    $asTrigger.UserId = $env:USERNAME
+    $asSettings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+
+    $asRegistered = $false
+    try {
+        $asPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+        Register-ScheduledTask `
+            -TaskName $AutoStartTaskName -Action $asAction -Trigger $asTrigger `
+            -Principal $asPrincipal -Settings $asSettings `
+            -Description 'Start NoteHelper web server automatically at login' `
+            -ErrorAction Stop | Out-Null
+        $asRegistered = $true
+    } catch {
+        try {
+            $asPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+            Register-ScheduledTask `
+                -TaskName $AutoStartTaskName -Action $asAction -Trigger $asTrigger `
+                -Principal $asPrincipal -Settings $asSettings `
+                -Description 'Start NoteHelper web server automatically at login' `
+                -ErrorAction Stop | Out-Null
+            $asRegistered = $true
+        } catch {
+            Write-Host "  [WARNING] Could not register auto-start task: $_" -ForegroundColor Yellow
+            Write-Host "            You can still start manually with start.bat." -ForegroundColor Gray
+        }
+    }
+
+    if ($asRegistered) {
+        Write-Host "  [OK] NoteHelper will start automatically at login." -ForegroundColor Green
+        Write-Host "       Task name: $AutoStartTaskName (remove with uninstall.bat)" -ForegroundColor Gray
+    }
+} elseif ($autoStartTask) {
+    Write-Host "  [OK] Auto-start at login enabled." -ForegroundColor Green
+}
 
 # ==============================================================================
 # Decision Logic
