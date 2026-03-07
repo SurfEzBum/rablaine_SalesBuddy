@@ -148,7 +148,11 @@
     .cal-customer-14.cal-highlight { background-color: rgba(75, 0, 130, 0.7) !important; box-shadow: 0 0 0 2px rgba(75, 0, 130, 0.8); }
     .cal-customer-15.cal-highlight { background-color: rgba(184, 134, 11, 0.75) !important; box-shadow: 0 0 0 2px rgba(184, 134, 11, 0.9); }
     
+    /* General note (no customer) style */
+    .cal-general-note { background-color: rgba(108, 117, 125, 0.2) !important; border-left: 2px solid rgba(108, 117, 125, 0.6); }
+    .cal-general-note.cal-highlight { background-color: rgba(108, 117, 125, 0.45) !important; box-shadow: 0 0 0 2px rgba(108, 117, 125, 0.6); }
     [data-customer-id] { cursor: pointer; transition: all 0.15s ease; }
+    .cal-general-note { cursor: pointer; transition: all 0.15s ease; }
     .cal-add-btn { opacity: 0.3; transition: opacity 0.15s; font-size: 0.85rem; }
     .cal-add-btn:hover { opacity: 1; color: var(--bs-primary) !important; }
     .cal-fill-btn { opacity: 0.3; transition: opacity 0.15s; font-size: 0.85rem; }
@@ -201,7 +205,7 @@
     <div class="col-md-12">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h3 class="mb-0">Activity</h3>
-            <ul class="nav nav-pills" id="callLogViewTabs" role="tablist">
+            <ul class="nav nav-pills" id="noteViewTabs" role="tablist">
                 {% if has_milestones %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link active" id="calendar-tab" data-bs-toggle="pill" data-bs-target="#calendar-view" type="button" role="tab" aria-controls="calendar-view" aria-selected="true">
@@ -217,7 +221,7 @@
             </ul>
         </div>
         
-        <div class="tab-content" id="callLogViewTabContent">
+        <div class="tab-content" id="noteViewTabContent">
             <!-- Calendar View Tab -->
             <div class="tab-pane fade show active" id="calendar-view" role="tabpanel" aria-labelledby="calendar-tab">
                 <div class="card">
@@ -379,7 +383,7 @@
         
         filtered.forEach(customer => {
             const item = document.createElement('a');
-            item.href = `/call-log/new?customer_id=${customer.id}&date=${quickCreateDate}`;
+            item.href = `/note/new?customer_id=${customer.id}&date=${quickCreateDate}`;
             item.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
             item.innerHTML = `
                 <div>
@@ -454,7 +458,7 @@
                 const topicCount = draft.data.topics ? draft.data.topics.length : 0;
                 
                 return `
-                    <a href="{{ url_for('call_logs.call_log_create') }}?customer_id=${draft.customerId}" class="list-group-item list-group-item-action">
+                    <a href="{{ url_for('notes.note_create') }}?customer_id=${draft.customerId}" class="list-group-item list-group-item-action">
                         <div class="d-flex w-100 justify-content-between align-items-start">
                             <div>
                                 <h6 class="mb-1">
@@ -610,7 +614,7 @@
         // Show loading state
         calendarBody.innerHTML = '<tr><td colspan="5" class="text-center py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Loading...</td></tr>';
         
-        fetch(`/api/call-logs/calendar?year=${year}&month=${month}`)
+        fetch(`/api/notes/calendar?year=${year}&month=${month}`)
             .then(response => response.json())
             .then(data => {
                 calendarTitle.textContent = `${data.month_name} ${data.year}`;
@@ -642,7 +646,9 @@
         const customerColorMap = {};
         const allCustomerIds = new Set();
         Object.values(days).forEach(logs => {
-            logs.forEach(log => allCustomerIds.add(log.customer_id));
+            logs.forEach(log => {
+                if (log.customer_id) allCustomerIds.add(log.customer_id);
+            });
         });
         const customerList = Array.from(allCustomerIds);
         customerList.forEach((id, index) => {
@@ -716,23 +722,35 @@
                     cell.appendChild(dayHeader);
                     
                     // Call log entries for this day
-                    const callLogs = days[dayNum] || [];
-                    if (callLogs.length > 0) {
+                    const noteEntries = days[dayNum] || [];
+                    if (noteEntries.length > 0) {
                         const entriesContainer = document.createElement('div');
                         entriesContainer.className = 'calendar-entries';
                         entriesContainer.style.fontSize = '0.75rem';
                         entriesContainer.style.maxHeight = '70px';
                         entriesContainer.style.overflowY = 'auto';
                         
-                        callLogs.forEach(log => {
+                        noteEntries.forEach(log => {
                             const entry = document.createElement('a');
-                            entry.href = `/call-log/${log.id}`;
-                            const colorIndex = customerColorMap[log.customer_id];
-                            entry.className = `d-block text-decoration-none text-truncate mb-1 px-1 rounded cal-customer-${colorIndex}`;
+                            entry.href = `/note/${log.id}`;
+                            
+                            if (log.is_general) {
+                                // General note: distinct muted style with sticky-note icon
+                                entry.className = 'd-block text-decoration-none text-truncate mb-1 px-1 rounded cal-general-note';
+                                entry.setAttribute('data-general-note', 'true');
+                            } else {
+                                // Customer note: color-coded by customer
+                                const colorIndex = customerColorMap[log.customer_id];
+                                entry.className = `d-block text-decoration-none text-truncate mb-1 px-1 rounded cal-customer-${colorIndex}`;
+                                entry.setAttribute('data-customer-id', log.customer_id);
+                            }
                             entry.style.color = 'inherit';
                             
                             // Build entry content with indicators
                             let indicators = '';
+                            if (log.is_general) {
+                                indicators += '<i class="bi bi-sticky text-secondary" title="General note"></i> ';
+                            }
                             if (log.has_milestone) {
                                 indicators += '<i class="bi bi-flag-fill text-success" title="Has milestone"></i> ';
                             }
@@ -745,19 +763,20 @@
                             let timePrefix = log.time ? `<small class="text-muted">${escapeHtml(log.time)}</small> ` : '';
                             entry.innerHTML = indicators + timePrefix + escapeHtml(log.customer_name);
                             entry.title = (log.time ? log.time + ' - ' : '') + log.customer_name + (log.has_milestone ? ' (Milestone)' : '') + (log.has_task ? ' (Task)' : '') + (log.has_hok ? ' (HOK)' : '');
-                            entry.setAttribute('data-customer-id', log.customer_id);
                             
-                            // Hover: highlight all entries for this customer
-                            entry.addEventListener('mouseenter', function() {
-                                document.querySelectorAll(`[data-customer-id="${log.customer_id}"]`).forEach(el => {
-                                    el.classList.add('cal-highlight');
+                            // Hover: highlight all entries for this customer (skip for general notes)
+                            if (!log.is_general) {
+                                entry.addEventListener('mouseenter', function() {
+                                    document.querySelectorAll(`[data-customer-id="${log.customer_id}"]`).forEach(el => {
+                                        el.classList.add('cal-highlight');
+                                    });
                                 });
-                            });
-                            entry.addEventListener('mouseleave', function() {
-                                document.querySelectorAll(`[data-customer-id="${log.customer_id}"]`).forEach(el => {
-                                    el.classList.remove('cal-highlight');
+                                entry.addEventListener('mouseleave', function() {
+                                    document.querySelectorAll(`[data-customer-id="${log.customer_id}"]`).forEach(el => {
+                                        el.classList.remove('cal-highlight');
+                                    });
                                 });
-                            });
+                            }
                             
                             entriesContainer.appendChild(entry);
                         });

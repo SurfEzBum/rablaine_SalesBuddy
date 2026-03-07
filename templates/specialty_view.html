@@ -49,7 +49,7 @@
                         <br><small class="text-muted">{{ partner.contacts|length }} contact{{ 's' if partner.contacts|length != 1 else '' }}</small>
                         {% endif %}
                     </div>
-                    <span class="badge bg-secondary">{{ partner.call_logs|length }} calls</span>
+                    <span class="badge bg-secondary">{{ partner.notes|length }} calls</span>
                 </li>
                 {% endfor %}
             </ul>

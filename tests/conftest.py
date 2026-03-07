@@ -115,7 +115,7 @@ def runner(app):
 def sample_data(app):
     """Create sample data for tests."""
     with app.app_context():
-        from app.models import db, Territory, Seller, Customer, Topic, CallLog, User
+        from app.models import db, Territory, Seller, Customer, Topic, Note, User
         
         # Get the test user
         test_user = User.query.first()
@@ -169,14 +169,14 @@ def sample_data(app):
         
         # Create call logs - Use correct field name 'content'
         # Note: seller and territory are now derived from customer relationship
-        call1 = CallLog(
+        call1 = Note(
             customer_id=customer1.id,
             call_date=datetime.now(timezone.utc),
             content='Discussed VM migration strategy and cloud architecture options.'
         )
         call1.topics.append(topic1)
         
-        call2 = CallLog(
+        call2 = Note(
             customer_id=customer2.id,
             call_date=datetime.now(timezone.utc),
             content='Storage optimization review with focus on blob storage.'

@@ -61,13 +61,15 @@ def backup_status():
     backup_root = _get_backup_root()
     enabled = backup_root is not None
 
-    # Count .json files in the call_logs subfolder
+    # Count .json files in the notes subfolder (check both new and legacy names)
     file_count = 0
     if backup_root:
-        call_logs_dir = os.path.join(backup_root, "call_logs")
-        if os.path.isdir(call_logs_dir):
-            for root, _dirs, files in os.walk(call_logs_dir):
-                file_count += sum(1 for f in files if f.endswith(".json"))
+        for dirname in ("notes", "call_logs"):
+            notes_dir = os.path.join(backup_root, dirname)
+            if os.path.isdir(notes_dir):
+                for root, _dirs, files in os.walk(notes_dir):
+                    file_count += sum(1 for f in files if f.endswith(".json"))
+                break  # Only count from first folder found
 
     return jsonify({
         "enabled": enabled,
@@ -121,7 +123,7 @@ def backup_restore():
 def backup_restore_all():
     """Restore all call logs from the backup folder on disk.
 
-    Reads every .json file under ``call_logs/{seller}/`` in the configured
+    Reads every .json file under ``notes/{seller}/`` in the configured
     (or auto-detected) backup folder.  Requires accounts to have been
     synced first so customer TPID matching works.
     """

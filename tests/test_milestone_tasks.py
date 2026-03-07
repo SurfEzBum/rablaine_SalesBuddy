@@ -2,7 +2,7 @@
 Tests for creating tasks directly from the milestone view page.
 
 Covers:
-- MsxTask model nullable call_log_id
+- MsxTask model nullable note_id
 - Milestone view showing tasks section
 - POST /milestone/<id>/tasks endpoint
 - Task creation modal behavior
@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import patch
 from datetime import datetime, timezone
 
-from app.models import db, MsxTask, Milestone, Customer, CallLog, User
+from app.models import db, MsxTask, Milestone, Customer, Note, User
 
 
 @pytest.fixture
@@ -21,11 +21,11 @@ def sample_user(app):
         return User.query.first()
 
 
-class TestMsxTaskNullableCallLog:
-    """Tests that MsxTask can be created without a call_log_id."""
+class TestMsxTaskNullableNote:
+    """Tests that MsxTask can be created without a note_id."""
 
-    def test_create_task_without_call_log(self, app, client, db_session, sample_user):
-        """MsxTask should allow null call_log_id for tasks created from milestone view."""
+    def test_create_task_without_note(self, app, client, db_session, sample_user):
+        """MsxTask should allow null note_id for tasks created from milestone view."""
         milestone = Milestone(
             msx_milestone_id='ms-nullable-test',
             url='https://example.com/ms-nullable',
@@ -41,7 +41,7 @@ class TestMsxTaskNullableCallLog:
             task_category_name='Architecture Design Session',
             duration_minutes=60,
             is_hok=True,
-            call_log_id=None,
+            note_id=None,
             milestone_id=milestone.id,
         )
         db_session.add(task)
@@ -49,13 +49,13 @@ class TestMsxTaskNullableCallLog:
 
         saved = MsxTask.query.filter_by(msx_task_id='task-no-calllog-001').first()
         assert saved is not None
-        assert saved.call_log_id is None
+        assert saved.note_id is None
         assert saved.milestone_id == milestone.id
         assert saved.subject == 'Standalone Task'
         assert saved.is_hok is True
 
-    def test_create_task_with_call_log_still_works(self, app, client, db_session, sample_user):
-        """MsxTask with call_log_id should still work (backward compatibility)."""
+    def test_create_task_with_note_still_works(self, app, client, db_session, sample_user):
+        """MsxTask with note_id should still work (backward compatibility)."""
         customer = Customer(
             name='Task Compat Customer', tpid=8801,
         )
@@ -70,12 +70,12 @@ class TestMsxTaskNullableCallLog:
         db_session.add(milestone)
         db_session.flush()
 
-        call_log = CallLog(
+        note = Note(
             customer_id=customer.id,
             content='Test call log',
             call_date=datetime(2026, 1, 15, tzinfo=timezone.utc),
         )
-        db_session.add(call_log)
+        db_session.add(note)
         db_session.flush()
 
         task = MsxTask(
@@ -85,7 +85,7 @@ class TestMsxTaskNullableCallLog:
             task_category_name='Demo',
             duration_minutes=30,
             is_hok=True,
-            call_log_id=call_log.id,
+            note_id=note.id,
             milestone_id=milestone.id,
         )
         db_session.add(task)
@@ -93,7 +93,7 @@ class TestMsxTaskNullableCallLog:
 
         saved = MsxTask.query.filter_by(msx_task_id='task-with-calllog-001').first()
         assert saved is not None
-        assert saved.call_log_id == call_log.id
+        assert saved.note_id == note.id
         assert saved.milestone_id == milestone.id
 
 
@@ -134,7 +134,7 @@ class TestMilestoneViewTasks:
             task_category_name='Architecture Design Session',
             duration_minutes=90,
             is_hok=True,
-            call_log_id=None,
+            note_id=None,
             milestone_id=milestone.id,
         )
         db_session.add(task)
@@ -147,7 +147,7 @@ class TestMilestoneViewTasks:
         assert 'Architecture Design Session' in html
         assert 'HoK' in html
 
-    def test_milestone_view_shows_task_linked_call_log(self, app, client, db_session, sample_user):
+    def test_milestone_view_shows_task_linked_note(self, app, client, db_session, sample_user):
         """Tasks linked to a call log should show a link to that call log."""
         customer = Customer(
             name='Task Link Customer', tpid=8802,
@@ -163,12 +163,12 @@ class TestMilestoneViewTasks:
         db_session.add(milestone)
         db_session.flush()
 
-        call_log = CallLog(
+        note = Note(
             customer_id=customer.id,
             content='Link test call log',
             call_date=datetime(2026, 2, 1, tzinfo=timezone.utc),
         )
-        db_session.add(call_log)
+        db_session.add(note)
         db_session.flush()
 
         task = MsxTask(
@@ -178,7 +178,7 @@ class TestMilestoneViewTasks:
             task_category_name='Demo',
             duration_minutes=60,
             is_hok=True,
-            call_log_id=call_log.id,
+            note_id=note.id,
             milestone_id=milestone.id,
         )
         db_session.add(task)
@@ -189,7 +189,7 @@ class TestMilestoneViewTasks:
         html = response.data.decode()
         assert 'Linked CL Task' in html
         assert 'Linked Note' in html
-        assert f'/call-log/{call_log.id}' in html
+        assert f'/note/{note.id}' in html
 
     def test_milestone_view_no_new_task_without_msx_id(self, app, client, db_session, sample_user):
         """Milestone without MSX ID should not show the New Task button."""
@@ -271,7 +271,7 @@ class TestMilestoneCreateTask:
         assert task.task_category_name == 'Architecture Design Session'
         assert task.is_hok is True
         assert task.duration_minutes == 60
-        assert task.call_log_id is None
+        assert task.note_id is None
         assert task.milestone_id == milestone.id
         assert task.description == 'Planning session for the migration'
         assert task.due_date is not None

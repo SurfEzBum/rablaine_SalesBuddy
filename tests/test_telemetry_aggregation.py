@@ -50,7 +50,7 @@ class TestDailyFeatureStatsModel:
             stat = DailyFeatureStats(
                 date=_yesterday().date(),
                 category='Call Logs',
-                endpoint='/call-logs',
+                endpoint='/notes',
                 method='GET',
                 is_api=False,
                 event_count=42,
@@ -117,15 +117,15 @@ class TestAggregateDaily:
         self._cleanup(app)
         ts = _yesterday() + timedelta(hours=10)
         _seed_events(app, [
-            {'endpoint': '/call-logs', 'method': 'GET', 'category': 'Call Logs',
+            {'endpoint': '/notes', 'method': 'GET', 'category': 'Call Logs',
              'status_code': 200, 'response_time_ms': 50.0, 'timestamp': ts,
-             'is_api': False, 'blueprint': 'call_logs'},
-            {'endpoint': '/call-logs', 'method': 'GET', 'category': 'Call Logs',
+             'is_api': False, 'blueprint': 'notes'},
+            {'endpoint': '/notes', 'method': 'GET', 'category': 'Call Logs',
              'status_code': 200, 'response_time_ms': 70.0, 'timestamp': ts + timedelta(hours=1),
-             'is_api': False, 'blueprint': 'call_logs'},
-            {'endpoint': '/call-logs', 'method': 'GET', 'category': 'Call Logs',
+             'is_api': False, 'blueprint': 'notes'},
+            {'endpoint': '/notes', 'method': 'GET', 'category': 'Call Logs',
              'status_code': 500, 'response_time_ms': 200.0, 'timestamp': ts + timedelta(hours=2),
-             'is_api': False, 'blueprint': 'call_logs'},
+             'is_api': False, 'blueprint': 'notes'},
         ])
 
         with app.app_context():
@@ -135,7 +135,7 @@ class TestAggregateDaily:
             assert result['rows_upserted'] >= 1
 
             stat = DailyFeatureStats.query.filter_by(
-                category='Call Logs', endpoint='/call-logs',
+                category='Call Logs', endpoint='/notes',
             ).first()
             assert stat is not None
             assert stat.event_count == 3
@@ -268,7 +268,7 @@ class TestFeatureHealth:
         d = _yesterday().date()
         with app.app_context():
             db.session.add(DailyFeatureStats(
-                date=d, category='Call Logs', endpoint='/call-logs',
+                date=d, category='Call Logs', endpoint='/notes',
                 method='GET', event_count=100, error_count=2,
                 avg_response_ms=50.0, is_api=False,
             ))
@@ -297,7 +297,7 @@ class TestFeatureHealth:
             # Only one category has data
             d = _yesterday().date()
             db.session.add(DailyFeatureStats(
-                date=d, category='Call Logs', endpoint='/call-logs',
+                date=d, category='Call Logs', endpoint='/notes',
                 method='GET', event_count=10, is_api=False,
             ))
             db.session.commit()
@@ -481,6 +481,12 @@ class TestBuildCustomEvent:
 class TestQueueEvent:
     """Tests for queue_event() buffer mechanics."""
 
+    @pytest.fixture(autouse=True)
+    def _force_telemetry_enabled(self):
+        """Ensure telemetry is enabled regardless of env vars."""
+        with patch('app.services.telemetry_shipper.is_telemetry_enabled', return_value=True):
+            yield
+
     def _reset_buffer(self):
         """Clear the in-memory buffer and stats between tests."""
         import app.services.telemetry_shipper as ts
@@ -564,6 +570,12 @@ class TestQueueEvent:
 
 class TestFlushBuffer:
     """Tests for flush_buffer() with mocked HTTP."""
+
+    @pytest.fixture(autouse=True)
+    def _force_telemetry_enabled(self):
+        """Ensure telemetry is enabled regardless of env vars."""
+        with patch('app.services.telemetry_shipper.is_telemetry_enabled', return_value=True):
+            yield
 
     def _reset_buffer(self):
         import app.services.telemetry_shipper as ts

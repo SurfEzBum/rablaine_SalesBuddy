@@ -33,7 +33,7 @@ _BLUEPRINT_CATEGORIES: dict[str, str] = {
     'admin': 'Admin',
     'ai': 'AI',
     'backup': 'Backup',
-    'call_logs': 'Call Logs',
+    'notes': 'Call Logs',
     'connect_export': 'Connect Export',
     'customers': 'Customers',
     'main': 'General',

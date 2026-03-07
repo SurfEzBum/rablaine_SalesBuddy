@@ -6,8 +6,9 @@ deployment without risk of data loss. Each migration checks if it needs to run
 before making changes.
 
 Usage:
-    from app.migrations import run_migrations
-    run_migrations(db)
+    from app.migrations import run_table_renames, run_migrations
+    run_table_renames(db)   # Must run BEFORE db.create_all()
+    run_migrations(db)      # Runs AFTER db.create_all()
 
 Guidelines for adding new migrations:
 1. Always check if the change is needed before applying (idempotent)
@@ -17,6 +18,39 @@ Guidelines for adding new migrations:
 5. Add a descriptive print statement so deploy logs show what happened
 """
 from sqlalchemy import inspect, text
+
+
+def run_table_renames(db):
+    """
+    Rename tables from old call_logs naming to new notes naming.
+
+    Must run BEFORE db.create_all() so SQLAlchemy sees the tables by their
+    new names and doesn't create duplicate empty tables alongside the old ones.
+
+    Uses ALTER TABLE RENAME TO (safe on SQLite 3.26+ which auto-updates FK
+    references in other tables).
+    """
+    inspector = inspect(db.engine)
+    existing = set(inspector.get_table_names())
+
+    renames = [
+        ('call_logs', 'notes'),
+        ('call_logs_topics', 'notes_topics'),
+        ('call_logs_partners', 'notes_partners'),
+        ('call_logs_milestones', 'notes_milestones'),
+    ]
+
+    any_renamed = False
+    with db.engine.connect() as conn:
+        for old, new in renames:
+            if old in existing and new not in existing:
+                conn.execute(text(f"ALTER TABLE [{old}] RENAME TO [{new}]"))
+                print(f"  Renamed table '{old}' -> '{new}'")
+                any_renamed = True
+        conn.commit()
+
+    if any_renamed:
+        print("Table renames complete.")
 
 
 def run_migrations(db):
@@ -51,8 +85,8 @@ def run_migrations(db):
     # Migration: Create opportunities table and add opportunity_id FK to milestones
     _migrate_opportunities_table(db, inspector)
 
-    # Migration: Make call_log_id nullable on msx_tasks (tasks can be created from milestone view)
-    _migrate_msx_tasks_nullable_call_log(db, inspector)
+    # Migration: Make note_id nullable on msx_tasks (tasks can be created from milestone view)
+    _migrate_msx_tasks_nullable_note(db, inspector)
     
     # Migration: Create sync_status table for tracking sync completion
     _migrate_sync_status_table(db, inspector)
@@ -96,8 +130,11 @@ def run_migrations(db):
     # Migration: Add website and favicon_b64 columns to customers
     _migrate_customer_favicon_columns(db, inspector)
 
-    # Migration: Make customer_id nullable on call_logs (support non-customer notes)
-    _migrate_call_logs_nullable_customer(db, inspector)
+    # Migration: Make customer_id nullable on notes (support non-customer overview)
+    _migrate_notes_nullable_customer(db, inspector)
+
+    # Migration: Rename columns from old call_log naming to note naming
+    _rename_calllog_columns(db, inspector)
 
     # =========================================================================
     # End migrations
@@ -140,7 +177,7 @@ def _add_index_if_not_exists(db, inspector, table: str, index_name: str, columns
         columns: List of column names to index
     
     Example:
-        _add_index_if_not_exists(db, inspector, 'call_logs', 'ix_call_logs_date', ['call_date'])
+        _add_index_if_not_exists(db, inspector, 'notes', 'ix_notes_date', ['call_date'])
     """
     existing_indexes = [idx['name'] for idx in inspector.get_indexes(table)]
     if index_name not in existing_indexes:
@@ -180,7 +217,7 @@ def _migrate_milestones_for_msx(db, inspector):
             
             with db.engine.connect() as conn:
                 # Clear junction table first (foreign keys)
-                conn.execute(text("DELETE FROM call_logs_milestones"))
+                conn.execute(text("DELETE FROM notes_milestones"))
                 # SQLite can't add UNIQUE column via ALTER TABLE, so drop and recreate
                 conn.execute(text("DROP TABLE milestones"))
                 conn.execute(text("""
@@ -216,7 +253,7 @@ def _migrate_milestones_for_msx(db, inspector):
                     task_category_name VARCHAR(100),
                     duration_minutes INTEGER DEFAULT 60 NOT NULL,
                     is_hok BOOLEAN DEFAULT 0 NOT NULL,
-                    call_log_id INTEGER REFERENCES call_logs(id),
+                    note_id INTEGER REFERENCES notes(id),
                     milestone_id INTEGER NOT NULL REFERENCES milestones(id),
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
@@ -237,11 +274,11 @@ def _migrate_call_date_to_datetime(db, inspector):
     
     Idempotent: Checks column type before running. Safe if already DateTime.
     """
-    if not _table_exists(inspector, 'call_logs'):
+    if not _table_exists(inspector, 'notes'):
         return
     
     # Check if call_date is already DateTime by inspecting column type
-    columns = {c['name']: c for c in inspector.get_columns('call_logs')}
+    columns = {c['name']: c for c in inspector.get_columns('notes')}
     if 'call_date' not in columns:
         return
     
@@ -256,12 +293,12 @@ def _migrate_call_date_to_datetime(db, inspector):
     with db.engine.connect() as conn:
         # Step 1: Add temporary datetime column (check first - may exist from partial migration)
         if 'call_datetime' not in columns:
-            conn.execute(text("ALTER TABLE call_logs ADD COLUMN call_datetime DATETIME"))
+            conn.execute(text("ALTER TABLE notes ADD COLUMN call_datetime DATETIME"))
         
         # Step 2: Copy and convert data
         # Handles various date formats safely
         conn.execute(text("""
-            UPDATE call_logs 
+            UPDATE notes 
             SET call_datetime = CASE
                 WHEN call_date LIKE '____-__-__ %' THEN call_date
                 WHEN call_date LIKE '____-__-__T%' THEN REPLACE(call_date, 'T', ' ')
@@ -272,22 +309,22 @@ def _migrate_call_date_to_datetime(db, inspector):
         
         # Step 3: Rebuild table with new column type (SQLite can't ALTER COLUMN)
         # Get all current columns except call_date and call_datetime
-        all_cols = [c['name'] for c in inspector.get_columns('call_logs') 
+        all_cols = [c['name'] for c in inspector.get_columns('notes') 
                     if c['name'] not in ('call_date', 'call_datetime')]
         
         # Build column list for copy
         cols_csv = ', '.join(all_cols)
         
-        conn.execute(text("ALTER TABLE call_logs RENAME TO call_logs_backup"))
+        conn.execute(text("ALTER TABLE notes RENAME TO notes_backup"))
         
         # Get the CREATE TABLE statement and modify it
         result = conn.execute(text(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='call_logs_backup'"
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='notes_backup'"
         ))
         create_sql = result.scalar()
         
         # Replace table name and fix the column type
-        create_sql = create_sql.replace('call_logs_backup', 'call_logs', 1)
+        create_sql = create_sql.replace('notes_backup', 'notes', 1)
         # Replace DATE with DATETIME for call_date column
         create_sql = create_sql.replace(
             'call_date DATE NOT NULL', 
@@ -303,11 +340,11 @@ def _migrate_call_date_to_datetime(db, inspector):
         
         # Copy data back, using call_datetime for the call_date column
         conn.execute(text(f"""
-            INSERT INTO call_logs ({cols_csv}, call_date)
-            SELECT {cols_csv}, call_datetime FROM call_logs_backup
+            INSERT INTO notes ({cols_csv}, call_date)
+            SELECT {cols_csv}, call_datetime FROM notes_backup
         """))
         
-        conn.execute(text("DROP TABLE call_logs_backup"))
+        conn.execute(text("DROP TABLE notes_backup"))
         conn.commit()
     
     print("    Upgraded call_date to DateTime successfully")
@@ -393,23 +430,23 @@ def _migrate_opportunities_table(db, inspector):
         )
 
 
-def _migrate_msx_tasks_nullable_call_log(db, inspector):
+def _migrate_msx_tasks_nullable_note(db, inspector):
     """
-    Make call_log_id nullable on msx_tasks table.
+    Make note_id nullable on msx_tasks table.
     
     Tasks can now be created directly from the milestone view page
     without an associated call log. SQLite doesn't support ALTER COLUMN,
-    so we rebuild the table if call_log_id is currently NOT NULL.
+    so we rebuild the table if note_id is currently NOT NULL.
     """
     if not _table_exists(inspector, 'msx_tasks'):
         return
     
-    # Check if call_log_id is currently NOT NULL
+    # Check if note_id is currently NOT NULL
     columns = inspector.get_columns('msx_tasks')
-    call_log_col = next((c for c in columns if c['name'] == 'call_log_id'), None)
+    note_col = next((c for c in columns if c['name'] == 'note_id'), None)
     
-    if call_log_col and call_log_col.get('nullable') == False:
-        print("  Making call_log_id nullable on msx_tasks...")
+    if note_col and note_col.get('nullable') == False:
+        print("  Making note_id nullable on msx_tasks...")
         with db.engine.connect() as conn:
             # SQLite requires table rebuild to change NOT NULL constraint
             conn.execute(text("ALTER TABLE msx_tasks RENAME TO msx_tasks_old"))
@@ -425,7 +462,7 @@ def _migrate_msx_tasks_nullable_call_log(db, inspector):
                     duration_minutes INTEGER DEFAULT 60 NOT NULL,
                     is_hok BOOLEAN DEFAULT 0 NOT NULL,
                     due_date DATETIME,
-                    call_log_id INTEGER REFERENCES call_logs(id),
+                    note_id INTEGER REFERENCES notes(id),
                     milestone_id INTEGER NOT NULL REFERENCES milestones(id),
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
@@ -433,15 +470,15 @@ def _migrate_msx_tasks_nullable_call_log(db, inspector):
             conn.execute(text("""
                 INSERT INTO msx_tasks (id, msx_task_id, msx_task_url, subject, description,
                     task_category, task_category_name, duration_minutes, is_hok, due_date,
-                    call_log_id, milestone_id, created_at)
+                    note_id, milestone_id, created_at)
                 SELECT id, msx_task_id, msx_task_url, subject, description,
                     task_category, task_category_name, duration_minutes, is_hok, due_date,
-                    call_log_id, milestone_id, created_at
+                    note_id, milestone_id, created_at
                 FROM msx_tasks_old
             """))
             conn.execute(text("DROP TABLE msx_tasks_old"))
             conn.commit()
-        print("    Made call_log_id nullable on msx_tasks")
+        print("    Made note_id nullable on msx_tasks")
 
 
 def _migrate_sync_status_table(db, inspector):
@@ -525,7 +562,7 @@ def _migrate_connect_exports_table(db, inspector):
                 name VARCHAR(200) NOT NULL,
                 start_date DATE NOT NULL,
                 end_date DATE NOT NULL,
-                call_log_count INTEGER NOT NULL DEFAULT 0,
+                note_count INTEGER NOT NULL DEFAULT 0,
                 customer_count INTEGER NOT NULL DEFAULT 0,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
@@ -619,7 +656,7 @@ def _migrate_customer_tpid_unique(db, inspector):
 
     print("  Migrating: enforcing unique constraint on customers.tpid")
 
-    # Step 1: deduplicate -- keep the row with the most call_logs per TPID
+    # Step 1: deduplicate -- keep the row with the most notes per TPID
     from sqlalchemy import text
     dupes = db.session.execute(text("""
         SELECT tpid, COUNT(*) AS cnt
@@ -632,7 +669,7 @@ def _migrate_customer_tpid_unique(db, inspector):
     for tpid_val, cnt in dupes:
         rows = db.session.execute(text("""
             SELECT c.id,
-                   (SELECT COUNT(*) FROM call_logs WHERE customer_id = c.id) AS log_count
+                   (SELECT COUNT(*) FROM notes WHERE customer_id = c.id) AS log_count
             FROM customers c
             WHERE c.tpid = :tpid
             ORDER BY log_count DESC, c.id ASC
@@ -644,7 +681,7 @@ def _migrate_customer_tpid_unique(db, inspector):
             delete_id = row[0]
             # Re-parent any call logs from the duplicate to the keeper
             db.session.execute(text(
-                "UPDATE call_logs SET customer_id = :keep WHERE customer_id = :dup"
+                "UPDATE notes SET customer_id = :keep WHERE customer_id = :dup"
             ), {"keep": keep_id, "dup": delete_id})
             # Re-parent milestones
             db.session.execute(text(
@@ -703,7 +740,7 @@ def _drop_user_id_columns(db, inspector):
     tables_with_user_id = [
         'pods', 'solution_engineers', 'verticals', 'territories',
         'sellers', 'customers', 'topics', 'specialties', 'partners',
-        'partner_contacts', 'call_logs', 'opportunities', 'milestones',
+        'partner_contacts', 'notes', 'opportunities', 'milestones',
         'user_preferences', 'ai_query_log', 'revenue_imports',
         'revenue_config', 'connect_exports',
     ]
@@ -783,17 +820,17 @@ def _migrate_customer_favicon_columns(db, inspector):
     _add_column_if_not_exists(db, inspector, 'customers', 'favicon_b64', 'TEXT')
 
 
-def _migrate_call_logs_nullable_customer(db, inspector):
-    """Make customer_id nullable on call_logs to support non-customer notes.
+def _migrate_notes_nullable_customer(db, inspector):
+    """Make customer_id nullable on notes to support non-customer overview.
     
     SQLite doesn't support ALTER COLUMN, so we recreate the table with the
     new schema and copy data over.
     """
-    if 'call_logs' not in inspector.get_table_names():
+    if 'notes' not in inspector.get_table_names():
         return
     
     # Check if customer_id is already nullable
-    columns = inspector.get_columns('call_logs')
+    columns = inspector.get_columns('notes')
     for col in columns:
         if col['name'] == 'customer_id':
             if col.get('nullable', True):
@@ -804,7 +841,7 @@ def _migrate_call_logs_nullable_customer(db, inspector):
         # customer_id column not found, nothing to do
         return
     
-    print("Migration: Making customer_id nullable on call_logs...")
+    print("Migration: Making customer_id nullable on notes...")
     
     db.session.execute(text('PRAGMA foreign_keys=OFF'))
     db.session.commit()
@@ -814,7 +851,7 @@ def _migrate_call_logs_nullable_customer(db, inspector):
     col_list = ', '.join(col_names)
     
     db.session.execute(text('''
-        CREATE TABLE call_logs_new (
+        CREATE TABLE notes_new (
             id INTEGER PRIMARY KEY,
             customer_id INTEGER REFERENCES customers(id),
             call_date DATETIME NOT NULL,
@@ -828,12 +865,46 @@ def _migrate_call_logs_nullable_customer(db, inspector):
     new_cols = ['id', 'customer_id', 'call_date', 'content', 'created_at', 'updated_at']
     shared = [c for c in new_cols if c in col_names]
     shared_list = ', '.join(shared)
-    db.session.execute(text(f'INSERT INTO call_logs_new ({shared_list}) SELECT {shared_list} FROM call_logs'))
+    db.session.execute(text(f'INSERT INTO notes_new ({shared_list}) SELECT {shared_list} FROM notes'))
     
-    db.session.execute(text('DROP TABLE call_logs'))
-    db.session.execute(text('ALTER TABLE call_logs_new RENAME TO call_logs'))
+    db.session.execute(text('DROP TABLE notes'))
+    db.session.execute(text('ALTER TABLE notes_new RENAME TO notes'))
     
     db.session.execute(text('PRAGMA foreign_keys=ON'))
     db.session.commit()
     
-    print("  -> customer_id is now nullable on call_logs")
+    print("  -> customer_id is now nullable on notes")
+
+
+def _rename_calllog_columns(db, inspector):
+    """
+    Rename columns from old call_log naming to new note naming.
+
+    Uses ALTER TABLE RENAME COLUMN (requires SQLite 3.25+, Python 3.13
+    ships with 3.46+). Idempotent: only renames if old column exists and
+    new column does not.
+    """
+    renames = [
+        # Association tables: call_log_id -> note_id
+        ('notes_topics', 'call_log_id', 'note_id'),
+        ('notes_partners', 'call_log_id', 'note_id'),
+        ('notes_milestones', 'call_log_id', 'note_id'),
+        # FK columns in other tables
+        ('msx_tasks', 'call_log_id', 'note_id'),
+        ('revenue_engagements', 'call_log_id', 'note_id'),
+        # Renamed value columns
+        ('connect_exports', 'call_log_count', 'note_count'),
+        # Customer "notes" text column -> "overview" (avoids collision with Note relationship)
+        ('customers', 'notes', 'overview'),
+    ]
+
+    for table, old_col, new_col in renames:
+        if not _table_exists(inspector, table):
+            continue
+        if _column_exists(inspector, table, old_col) and not _column_exists(inspector, table, new_col):
+            with db.engine.connect() as conn:
+                conn.execute(text(
+                    f"ALTER TABLE [{table}] RENAME COLUMN [{old_col}] TO [{new_col}]"
+                ))
+                conn.commit()
+            print(f"  Renamed column '{table}.{old_col}' -> '{new_col}'")

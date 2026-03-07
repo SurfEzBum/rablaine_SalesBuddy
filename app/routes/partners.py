@@ -3,7 +3,7 @@ Partner routes for NoteHelper.
 Handles partner management, contacts, and specialties.
 """
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, g
-from app.models import db, Partner, PartnerContact, Specialty, CallLog
+from app.models import db, Partner, PartnerContact, Specialty, Note
 
 partners_bp = Blueprint('partners', __name__)
 
@@ -24,7 +24,7 @@ def partner_new():
     """Create a new partner."""
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
-        notes = request.form.get('notes', '').strip()
+        overview = request.form.get('overview', '').strip()
         rating_str = request.form.get('rating', '').strip()
         specialty_ids = request.form.getlist('specialty_ids')
         
@@ -72,7 +72,7 @@ def partner_edit(id):
     
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
-        notes = request.form.get('notes', '').strip()
+        overview = request.form.get('overview', '').strip()
         rating_str = request.form.get('rating', '').strip()
         specialty_ids = request.form.getlist('specialty_ids')
         
@@ -112,7 +112,7 @@ def partner_delete(id):
     name = partner.name
     
     # Remove from all call logs (unassociate)
-    partner.call_logs = []
+    partner.notes = []
     
     db.session.delete(partner)
     db.session.commit()

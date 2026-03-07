@@ -3,7 +3,7 @@ Tests for milestone functionality.
 """
 import pytest
 from datetime import datetime
-from app.models import db, Milestone, CallLog
+from app.models import db, Milestone, Note
 
 
 class TestMilestoneModel:
@@ -176,7 +176,7 @@ class TestMilestoneCRUD:
         deleted = db.session.get(Milestone, milestone_id)
         assert deleted is None
 
-    def test_milestone_delete_blocked_when_linked_to_call_log(self, client, app, db_session, sample_user, sample_customer):
+    def test_milestone_delete_blocked_when_linked_to_note(self, client, app, db_session, sample_user, sample_customer):
         """Test that deleting a milestone linked to a call log is blocked."""
         milestone = Milestone(
             url='https://example.com/linked/test',
@@ -185,13 +185,13 @@ class TestMilestoneCRUD:
         db_session.add(milestone)
         db_session.flush()
 
-        call_log = CallLog(
+        note = Note(
             customer_id=sample_customer.id,
             call_date=datetime(2026, 2, 25),
             content='<p>Test call</p>',
         )
-        call_log.milestones = [milestone]
-        db_session.add(call_log)
+        note.milestones = [milestone]
+        db_session.add(note)
         db_session.commit()
         milestone_id = milestone.id
 
@@ -205,15 +205,15 @@ class TestMilestoneCRUD:
         assert still_exists is not None
 
 
-class TestCallLogMilestoneIntegration:
+class TestNoteMilestoneIntegration:
     """Tests for milestone integration with call logs."""
     
-    def test_call_log_with_msx_milestone_creates_milestone(self, client, app, db_session, sample_customer):
+    def test_note_with_msx_milestone_creates_milestone(self, client, app, db_session, sample_customer):
         """Test that adding MSX milestone to call log creates a new milestone."""
         msx_milestone_id = 'test-msx-id-12345678'
         milestone_url = 'https://msxsalesplatform.dynamics.com/new/milestone'
         
-        response = client.post(f'/call-log/new?customer_id={sample_customer.id}', data={
+        response = client.post(f'/note/new?customer_id={sample_customer.id}', data={
             'customer_id': sample_customer.id,
             'call_date': '2026-01-30',
             'content': '<p>Test call log with milestone</p>',
@@ -230,24 +230,24 @@ class TestCallLogMilestoneIntegration:
         
         # Verify milestone was created
         with app.app_context():
-            from app.models import Milestone, CallLog
+            from app.models import Milestone, Note
             milestone = Milestone.query.filter_by(msx_milestone_id=msx_milestone_id).first()
             assert milestone is not None
             assert milestone.url == milestone_url
             assert milestone.msx_status == 'On Track'
             
             # Verify call log is linked to milestone
-            call_log = CallLog.query.filter_by(customer_id=sample_customer.id).first()
-            assert call_log is not None
-            assert milestone in call_log.milestones
+            note = Note.query.filter_by(customer_id=sample_customer.id).first()
+            assert note is not None
+            assert milestone in note.milestones
     
-    def test_call_log_with_existing_msx_milestone(self, client, app, db_session, sample_customer, sample_user):
+    def test_note_with_existing_msx_milestone(self, client, app, db_session, sample_customer, sample_user):
         """Test that adding existing MSX milestone links to existing milestone."""
         msx_milestone_id = 'existing-msx-id-12345'
         
         # Create existing milestone
         with app.app_context():
-            from app.models import db, Milestone, User, CallLog
+            from app.models import db, Milestone, User, Note
             test_user = User.query.first()
             
             existing_milestone = Milestone(
@@ -259,7 +259,7 @@ class TestCallLogMilestoneIntegration:
             db.session.commit()
             existing_id = existing_milestone.id
         
-        response = client.post(f'/call-log/new?customer_id={sample_customer.id}', data={
+        response = client.post(f'/note/new?customer_id={sample_customer.id}', data={
             'customer_id': sample_customer.id,
             'call_date': '2026-01-30',
             'content': '<p>Test call log linking to existing milestone</p>',
@@ -274,7 +274,7 @@ class TestCallLogMilestoneIntegration:
         
         # Should not create duplicate milestone
         with app.app_context():
-            from app.models import Milestone, CallLog
+            from app.models import Milestone, Note
             milestones = Milestone.query.filter_by(msx_milestone_id=msx_milestone_id).all()
             assert len(milestones) == 1
             
@@ -283,15 +283,15 @@ class TestCallLogMilestoneIntegration:
             assert milestone.msx_status == 'Blocked'
             
             # Call log should be linked to existing milestone
-            call_log = CallLog.query.filter_by(customer_id=sample_customer.id).first()
-            assert len([m for m in call_log.milestones if m.id == existing_id]) == 1
+            note = Note.query.filter_by(customer_id=sample_customer.id).first()
+            assert len([m for m in note.milestones if m.id == existing_id]) == 1
     
-    def test_call_log_view_shows_milestone(self, client, app, db_session, sample_customer, sample_user):
+    def test_note_view_shows_milestone(self, client, app, db_session, sample_customer, sample_user):
         """Test that call log view shows associated milestone."""
         from datetime import date
         
         with app.app_context():
-            from app.models import db, Milestone, CallLog, User
+            from app.models import db, Milestone, Note, User
             test_user = User.query.first()
             
             milestone = Milestone(
@@ -300,26 +300,26 @@ class TestCallLogMilestoneIntegration:
             )
             db.session.add(milestone)
             
-            call_log = CallLog(
+            note = Note(
                 customer_id=sample_customer.id,
                 call_date=date(2026, 1, 30),
                 content='<p>Test content</p>',
             )
-            call_log.milestones.append(milestone)
-            db.session.add(call_log)
+            note.milestones.append(milestone)
+            db.session.add(note)
             db.session.commit()
-            call_log_id = call_log.id
+            note_id = note.id
         
-        response = client.get(f'/call-log/{call_log_id}')
+        response = client.get(f'/note/{note_id}')
         assert response.status_code == 200
         assert b'Visible Milestone' in response.data
     
-    def test_call_log_edit_updates_milestone(self, client, app, db_session, sample_customer, sample_user):
+    def test_note_edit_updates_milestone(self, client, app, db_session, sample_customer, sample_user):
         """Test that editing call log can change milestone."""
         from datetime import date
         
         with app.app_context():
-            from app.models import db, Milestone, CallLog, User
+            from app.models import db, Milestone, Note, User
             test_user = User.query.first()
             
             # Create call log with initial milestone
@@ -329,18 +329,18 @@ class TestCallLogMilestoneIntegration:
             )
             db.session.add(old_milestone)
             
-            call_log = CallLog(
+            note = Note(
                 customer_id=sample_customer.id,
                 call_date=date(2026, 1, 30),
                 content='<p>Original content</p>',
             )
-            call_log.milestones.append(old_milestone)
-            db.session.add(call_log)
+            note.milestones.append(old_milestone)
+            db.session.add(note)
             db.session.commit()
-            call_log_id = call_log.id
+            note_id = note.id
         
         # Edit with new MSX milestone
-        response = client.post(f'/call-log/{call_log_id}/edit', data={
+        response = client.post(f'/note/{note_id}/edit', data={
             'customer_id': sample_customer.id,
             'call_date': '2026-01-30',
             'content': '<p>Updated content</p>',
@@ -354,11 +354,11 @@ class TestCallLogMilestoneIntegration:
         
         # Verify new milestone was created and linked
         with app.app_context():
-            from app.models import db, CallLog
-            call_log = db.session.get(CallLog, call_log_id)
-            assert len(call_log.milestones) == 1
-            assert call_log.milestones[0].msx_milestone_id == 'new-msx-id-67890'
-            assert call_log.milestones[0].url == 'https://example.com/new/milestone'
+            from app.models import db, Note
+            note = db.session.get(Note, note_id)
+            assert len(note.milestones) == 1
+            assert note.milestones[0].msx_milestone_id == 'new-msx-id-67890'
+            assert note.milestones[0].url == 'https://example.com/new/milestone'
 
 
 class TestMilestoneAPI:

@@ -20,34 +20,34 @@ class TestGeneralNoteCreate:
 
     def test_create_form_loads_without_customer(self, client):
         """The create form should load without a customer_id (general note)."""
-        response = client.get('/call-log/new')
+        response = client.get('/note/new')
         assert response.status_code == 200
         assert b'General Note' in response.data
 
     def test_create_form_shows_general_note_info(self, client):
         """General note form should show info alert instead of customer dropdown."""
-        response = client.get('/call-log/new')
+        response = client.get('/note/new')
         assert response.status_code == 200
         assert b'not associated with a specific customer' in response.data
 
     def test_create_general_note_post(self, client, app):
         """Should successfully create a call log without a customer."""
-        response = client.post('/call-log/new', data={
+        response = client.post('/note/new', data={
             'call_date': '2025-06-15',
             'content': '<p>Internal planning session notes</p>',
         }, follow_redirects=True)
         assert response.status_code == 200
 
         with app.app_context():
-            from app.models import CallLog
-            cl = CallLog.query.filter_by(content='<p>Internal planning session notes</p>').first()
+            from app.models import Note
+            cl = Note.query.filter_by(content='<p>Internal planning session notes</p>').first()
             assert cl is not None
             assert cl.customer_id is None
 
     def test_create_general_note_with_topics(self, client, app, sample_data):
         """General notes should support topic tagging."""
         topic_id = sample_data['topic1_id']
-        response = client.post('/call-log/new', data={
+        response = client.post('/note/new', data={
             'call_date': '2025-06-15',
             'content': '<p>Topic research notes</p>',
             'topic_ids': [str(topic_id)],
@@ -55,28 +55,28 @@ class TestGeneralNoteCreate:
         assert response.status_code == 200
 
         with app.app_context():
-            from app.models import CallLog
-            cl = CallLog.query.filter_by(content='<p>Topic research notes</p>').first()
+            from app.models import Note
+            cl = Note.query.filter_by(content='<p>Topic research notes</p>').first()
             assert cl is not None
             assert cl.customer_id is None
             assert len(cl.topics) == 1
 
     def test_create_general_note_no_milestone_section(self, client):
         """General note form should not show milestone picker section."""
-        response = client.get('/call-log/new')
+        response = client.get('/note/new')
         assert response.status_code == 200
         assert b'Milestone Picker' not in response.data
 
     def test_create_general_note_no_task_section(self, client):
         """General note form should not show task creation section."""
-        response = client.get('/call-log/new')
+        response = client.get('/note/new')
         assert response.status_code == 200
         assert b'Create MSX Task' not in response.data
 
     def test_create_with_customer_still_works(self, client, app, sample_data):
         """Creating a note with a customer should still work normally."""
         customer_id = sample_data['customer1_id']
-        response = client.post('/call-log/new', data={
+        response = client.post('/note/new', data={
             'customer_id': str(customer_id),
             'call_date': '2025-06-15',
             'content': '<p>Customer meeting notes</p>',
@@ -84,8 +84,8 @@ class TestGeneralNoteCreate:
         assert response.status_code == 200
 
         with app.app_context():
-            from app.models import CallLog
-            cl = CallLog.query.filter_by(content='<p>Customer meeting notes</p>').first()
+            from app.models import Note
+            cl = Note.query.filter_by(content='<p>Customer meeting notes</p>').first()
             assert cl is not None
             assert cl.customer_id == customer_id
 
@@ -96,8 +96,8 @@ class TestGeneralNoteEdit:
     def test_edit_general_note_loads(self, client, app):
         """Edit form should load for a general note."""
         with app.app_context():
-            from app.models import db, CallLog
-            cl = CallLog(
+            from app.models import db, Note
+            cl = Note(
                 customer_id=None,
                 call_date=datetime.now(timezone.utc),
                 content='<p>General note to edit</p>',
@@ -106,7 +106,7 @@ class TestGeneralNoteEdit:
             db.session.commit()
             cl_id = cl.id
 
-        response = client.get(f'/call-log/{cl_id}/edit')
+        response = client.get(f'/note/{cl_id}/edit')
         assert response.status_code == 200
         assert b'General Note' in response.data
         assert b'General note to edit' in response.data
@@ -114,8 +114,8 @@ class TestGeneralNoteEdit:
     def test_edit_general_note_post(self, client, app):
         """Should successfully update a general note."""
         with app.app_context():
-            from app.models import db, CallLog
-            cl = CallLog(
+            from app.models import db, Note
+            cl = Note(
                 customer_id=None,
                 call_date=datetime.now(timezone.utc),
                 content='<p>Original content</p>',
@@ -124,15 +124,15 @@ class TestGeneralNoteEdit:
             db.session.commit()
             cl_id = cl.id
 
-        response = client.post(f'/call-log/{cl_id}/edit', data={
+        response = client.post(f'/note/{cl_id}/edit', data={
             'call_date': '2025-06-15',
             'content': '<p>Updated general note</p>',
         }, follow_redirects=True)
         assert response.status_code == 200
 
         with app.app_context():
-            from app.models import CallLog
-            cl = CallLog.query.get(cl_id)
+            from app.models import Note
+            cl = Note.query.get(cl_id)
             assert cl.content == '<p>Updated general note</p>'
             assert cl.customer_id is None
 
@@ -143,8 +143,8 @@ class TestGeneralNoteListView:
     def _create_mixed_notes(self, app, sample_data):
         """Helper to create both customer and general notes."""
         with app.app_context():
-            from app.models import db, CallLog
-            general = CallLog(
+            from app.models import db, Note
+            general = Note(
                 customer_id=None,
                 call_date=datetime.now(timezone.utc),
                 content='<p>General planning note</p>',
@@ -156,7 +156,7 @@ class TestGeneralNoteListView:
     def test_list_shows_general_notes(self, client, app, sample_data):
         """General notes should appear in the call logs list."""
         general_id = self._create_mixed_notes(app, sample_data)
-        response = client.get('/call-logs')
+        response = client.get('/notes')
         assert response.status_code == 200
         assert b'General Note' in response.data
         assert b'Acme Corp' in response.data  # Customer note still shows
@@ -164,7 +164,7 @@ class TestGeneralNoteListView:
     def test_filter_customer_notes(self, client, app, sample_data):
         """Filter=customer should show only customer-associated notes."""
         self._create_mixed_notes(app, sample_data)
-        response = client.get('/call-logs?filter=customer')
+        response = client.get('/notes?filter=customer')
         assert response.status_code == 200
         assert b'Acme Corp' in response.data
         assert b'General planning note' not in response.data
@@ -172,16 +172,16 @@ class TestGeneralNoteListView:
     def test_filter_general_notes(self, client, app, sample_data):
         """Filter=general should show only general notes."""
         self._create_mixed_notes(app, sample_data)
-        response = client.get('/call-logs?filter=general')
+        response = client.get('/notes?filter=general')
         assert response.status_code == 200
         assert b'General Note' in response.data
-        # Customer notes should not appear
+        # Customer overview should not appear
         assert b'Acme Corp' not in response.data
 
     def test_no_filter_shows_all(self, client, app, sample_data):
         """No filter should show both customer and general notes."""
         self._create_mixed_notes(app, sample_data)
-        response = client.get('/call-logs')
+        response = client.get('/notes')
         assert response.status_code == 200
         assert b'General Note' in response.data
         assert b'Acme Corp' in response.data
@@ -193,8 +193,8 @@ class TestGeneralNoteDetailView:
     def test_view_general_note(self, client, app):
         """General note detail should render with 'General Note' label."""
         with app.app_context():
-            from app.models import db, CallLog
-            cl = CallLog(
+            from app.models import db, Note
+            cl = Note(
                 customer_id=None,
                 call_date=datetime.now(timezone.utc),
                 content='<p>Detailed general note</p>',
@@ -203,7 +203,7 @@ class TestGeneralNoteDetailView:
             db.session.commit()
             cl_id = cl.id
 
-        response = client.get(f'/call-log/{cl_id}')
+        response = client.get(f'/note/{cl_id}')
         assert response.status_code == 200
         assert b'General Note' in response.data
         assert b'Detailed general note' in response.data
@@ -215,9 +215,9 @@ class TestGeneralNotesInConnectExport:
     def _create_export_data(self, app, sample_data):
         """Create mixed data for export testing."""
         with app.app_context():
-            from app.models import db, CallLog, Topic
+            from app.models import db, Note, Topic
             topic = Topic.query.get(sample_data['topic1_id'])
-            general = CallLog(
+            general = Note(
                 customer_id=None,
                 call_date=datetime.now(timezone.utc),
                 content='<p>General research on Azure trends</p>',
@@ -328,18 +328,18 @@ class TestGeneralNotesInConnectExport:
         data = response.get_json()
         assert data['success'] is True
         # Total should include the general note
-        assert data['summary']['total_call_logs'] == 3  # 2 customer + 1 general
+        assert data['summary']['total_notes'] == 3  # 2 customer + 1 general
         assert 'GENERAL NOTES' in data['text_export']
 
 
 class TestGeneralNoteModel:
-    """Tests for the CallLog model with nullable customer_id."""
+    """Tests for the Note model with nullable customer_id."""
 
-    def test_create_call_log_without_customer(self, app):
-        """CallLog should allow null customer_id."""
+    def test_create_note_without_customer(self, app):
+        """Note should allow null customer_id."""
         with app.app_context():
-            from app.models import db, CallLog
-            cl = CallLog(
+            from app.models import db, Note
+            cl = Note(
                 customer_id=None,
                 call_date=datetime.now(timezone.utc),
                 content='<p>No customer</p>',
@@ -347,15 +347,15 @@ class TestGeneralNoteModel:
             db.session.add(cl)
             db.session.commit()
 
-            fetched = CallLog.query.get(cl.id)
+            fetched = Note.query.get(cl.id)
             assert fetched.customer_id is None
             assert fetched.customer is None
 
     def test_repr_general_note(self, app):
-        """CallLog repr should show 'General' for notes without a customer."""
+        """Note repr should show 'General' for notes without a customer."""
         with app.app_context():
-            from app.models import db, CallLog
-            cl = CallLog(
+            from app.models import db, Note
+            cl = Note(
                 customer_id=None,
                 call_date=datetime(2025, 6, 15),
                 content='<p>Test</p>',
@@ -367,8 +367,8 @@ class TestGeneralNoteModel:
     def test_seller_property_returns_none(self, app):
         """seller property should return None for general notes."""
         with app.app_context():
-            from app.models import db, CallLog
-            cl = CallLog(
+            from app.models import db, Note
+            cl = Note(
                 customer_id=None,
                 call_date=datetime.now(timezone.utc),
                 content='<p>Test</p>',
@@ -380,8 +380,8 @@ class TestGeneralNoteModel:
     def test_territory_property_returns_none(self, app):
         """territory property should return None for general notes."""
         with app.app_context():
-            from app.models import db, CallLog
-            cl = CallLog(
+            from app.models import db, Note
+            cl = Note(
                 customer_id=None,
                 call_date=datetime.now(timezone.utc),
                 content='<p>Test</p>',
@@ -389,3 +389,87 @@ class TestGeneralNoteModel:
             db.session.add(cl)
             db.session.commit()
             assert cl.territory is None
+
+
+class TestGeneralNotesOnCalendar:
+    """Tests for general notes appearing on the calendar API."""
+
+    def test_calendar_includes_general_notes(self, client, app):
+        """General notes should appear in the calendar API response."""
+        with app.app_context():
+            from app.models import db, Note
+            now = datetime.now(timezone.utc)
+            note = Note(
+                customer_id=None,
+                call_date=now,
+                content='<p>Internal planning meeting</p>',
+            )
+            db.session.add(note)
+            db.session.commit()
+
+        response = client.get(f'/api/notes/calendar?year={now.year}&month={now.month}')
+        assert response.status_code == 200
+        data = response.get_json()
+
+        day_entries = data['days'].get(str(now.day), [])
+        general = [e for e in day_entries if e.get('is_general')]
+        assert len(general) >= 1
+        assert general[0]['customer_id'] is None
+        assert general[0]['is_general'] is True
+
+    def test_calendar_general_note_uses_topic_as_label(self, client, app):
+        """When a general note has topics, the first topic name should be the label."""
+        with app.app_context():
+            from app.models import db, Note, Topic
+            now = datetime.now(timezone.utc)
+            topic = Topic(name='Team Sync')
+            db.session.add(topic)
+            db.session.flush()
+
+            note = Note(
+                customer_id=None,
+                call_date=now,
+                content='<p>Weekly standup</p>',
+            )
+            note.topics.append(topic)
+            db.session.add(note)
+            db.session.commit()
+
+        response = client.get(f'/api/notes/calendar?year={now.year}&month={now.month}')
+        data = response.get_json()
+
+        day_entries = data['days'].get(str(now.day), [])
+        general = [e for e in day_entries if e.get('is_general')]
+        assert any(e['customer_name'] == 'Team Sync' for e in general)
+
+    def test_calendar_general_note_uses_content_snippet(self, client, app):
+        """When a general note has no topics, a content snippet should be the label."""
+        with app.app_context():
+            from app.models import db, Note
+            now = datetime.now(timezone.utc)
+            note = Note(
+                customer_id=None,
+                call_date=now,
+                content='<p>Preparing quarterly business review slides</p>',
+            )
+            db.session.add(note)
+            db.session.commit()
+
+        response = client.get(f'/api/notes/calendar?year={now.year}&month={now.month}')
+        data = response.get_json()
+
+        day_entries = data['days'].get(str(now.day), [])
+        general = [e for e in day_entries if e.get('is_general')]
+        assert len(general) >= 1
+        assert 'Preparing quarterly' in general[0]['customer_name']
+
+    def test_calendar_customer_notes_not_marked_general(self, client, sample_data):
+        """Customer-associated notes should have is_general=False."""
+        from datetime import datetime
+        response = client.get(f'/api/notes/calendar?year={datetime.now().year}&month={datetime.now().month}')
+        data = response.get_json()
+
+        for day_entries in data['days'].values():
+            for entry in day_entries:
+                if entry['customer_id'] is not None:
+                    assert entry['is_general'] is False

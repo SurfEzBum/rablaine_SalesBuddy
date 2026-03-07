@@ -28,8 +28,8 @@
             <div class="card-body">
                 <div class="row text-center">
                     <div class="col-6 col-md-3 col-lg mb-3">
-                        <a href="{{ url_for('call_logs.call_logs_list') }}" class="text-decoration-none">
-                            <h3 class="text-success">{{ stats.total_call_logs }}</h3>
+                        <a href="{{ url_for('notes.notes_list') }}" class="text-decoration-none">
+                            <h3 class="text-success">{{ stats.total_notes }}</h3>
                             <small class="text-muted">Notes</small>
                         </a>
                     </div>
@@ -511,11 +511,11 @@
                                 <h6 class="mb-3"><i class="bi bi-file-earmark-code"></i> Notes (JSON)</h6>
                                 <div class="mb-2">
                                     <small class="text-muted d-block">Backed Up Files</small>
-                                    <span><span id="callLogFileCount" class="fw-bold">0</span> customer files</span>
+                                    <span><span id="noteFileCount" class="fw-bold">0</span> customer files</span>
                                 </div>
                                 <p class="text-muted small mb-3">Each customer's notes are automatically exported to JSON when created or edited.</p>
                                 <div class="mb-3">
-                                    <button class="btn btn-primary btn-sm" onclick="backupAllCallLogs()">
+                                    <button class="btn btn-primary btn-sm" onclick="backupAllNotes()">
                                         <i class="bi bi-arrow-repeat"></i> Backup All Now
                                     </button>
                                 </div>
@@ -2046,7 +2046,7 @@ function loadBackupStatus() {
 
         // Call log details
         if (clEnabled) {
-            document.getElementById('callLogFileCount').textContent = clData.file_count || 0;
+            document.getElementById('noteFileCount').textContent = clData.file_count || 0;
         }
     });
 }
@@ -2089,7 +2089,7 @@ function runDbBackupNow() {
 // Call Log Backup
 // =============================================================================
 
-function backupAllCallLogs() {
+function backupAllNotes() {
     const btn = event.target.closest('button');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Backing up...';

@@ -59,7 +59,7 @@
             <div class="row mb-3">
                 <div class="col-md-3">
                     <div class="text-center">
-                        <h3 class="text-primary mb-0" id="summaryCallLogs">0</h3>
+                        <h3 class="text-primary mb-0" id="summaryNotes">0</h3>
                         <small class="text-muted">Notes</small>
                     </div>
                 </div>
@@ -184,7 +184,7 @@
                 <tr id="exportRow{{ export.id }}">
                     <td>{{ export.name }}</td>
                     <td>{{ export.start_date.strftime('%Y-%m-%d') }} to {{ export.end_date.strftime('%Y-%m-%d') }}</td>
-                    <td>{{ export.call_log_count }}</td>
+                    <td>{{ export.note_count }}</td>
                     <td>{{ export.customer_count }}</td>
                     <td>{{ export.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                     <td class="text-end">
@@ -266,7 +266,7 @@ function renderExportResults(data) {
     
     // Update summary
     const summary = data.summary;
-    document.getElementById('summaryCallLogs').textContent = summary.total_call_logs;
+    document.getElementById('summaryNotes').textContent = summary.total_notes;
     document.getElementById('summaryCustomers').textContent = summary.unique_customers;
     document.getElementById('summaryTopics').textContent = summary.unique_topics;
     document.getElementById('summaryRevenue').textContent = formatCurrency(summary.total_milestone_revenue);

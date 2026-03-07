@@ -29,7 +29,7 @@
                     {{ milestone.url }}
                 </small>
             </div>
-            <span class="badge bg-secondary">{{ milestone.call_logs|length }} call{{ 's' if milestone.call_logs|length != 1 else '' }}</span>
+            <span class="badge bg-secondary">{{ milestone.notes|length }} call{{ 's' if milestone.notes|length != 1 else '' }}</span>
         </a>
         {% endfor %}
     </div>

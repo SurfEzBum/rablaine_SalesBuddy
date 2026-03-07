@@ -17,13 +17,13 @@ class TestMsxAuthBannerPresence:
         pref.first_run_modal_dismissed = True
         db.session.commit()
 
-    def test_call_log_form_has_auth_banner(self, app, client, sample_data):
+    def test_note_form_has_auth_banner(self, app, client, sample_data):
         """Test that the new call log form includes the MSX auth banner."""
         with app.app_context():
             self._dismiss_onboarding(app)
             from app.models import Customer
             customer = Customer.query.first()
-            response = client.get(f'/call-log/new?customer_id={customer.id}')
+            response = client.get(f'/note/new?customer_id={customer.id}')
             assert response.status_code == 200
             soup = BeautifulSoup(response.data, 'html.parser')
             banner = soup.find(id='msxAuthBanner')

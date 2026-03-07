@@ -17,12 +17,12 @@ def topics_list():
     pref = UserPreference.query.first()
     
     # Load topics with eager loading
-    topics = Topic.query.options(db.joinedload(Topic.call_logs)).all()
+    topics = Topic.query.options(db.joinedload(Topic.notes)).all()
     
     # Sort based on preference
     if pref and pref.topic_sort_by_calls:
         # Sort by number of calls (descending), then by name
-        topics = sorted(topics, key=lambda t: (-len(t.call_logs), t.name.lower()))
+        topics = sorted(topics, key=lambda t: (-len(t.notes), t.name.lower()))
     else:
         # Sort alphabetically
         topics = sorted(topics, key=lambda t: t.name.lower())
@@ -64,8 +64,8 @@ def topic_view(id):
     """View topic details (FR009)."""
     topic = Topic.query.filter_by(id=id).first_or_404()
     # Sort call logs in-memory since they're eager-loaded
-    call_logs = sorted(topic.call_logs, key=lambda c: c.call_date, reverse=True)
-    return render_template('topic_view.html', topic=topic, call_logs=call_logs)
+    notes = sorted(topic.notes, key=lambda c: c.call_date, reverse=True)
+    return render_template('topic_view.html', topic=topic, notes=notes)
 
 
 @topics_bp.route('/topic/<int:id>/edit', methods=['GET', 'POST'])
@@ -104,14 +104,14 @@ def topic_delete(id):
     topic_name = topic.name
     
     # Get all call logs associated with this topic
-    call_logs_count = len(topic.call_logs)
+    notes_count = len(topic.notes)
     
-    # Delete the topic (SQLAlchemy will automatically remove associations from call_logs_topics table)
+    # Delete the topic (SQLAlchemy will automatically remove associations from notes_topics table)
     db.session.delete(topic)
     db.session.commit()
     
-    if call_logs_count > 0:
-        flash(f'Topic "{topic_name}" deleted and removed from {call_logs_count} note(s).', 'success')
+    if notes_count > 0:
+        flash(f'Topic "{topic_name}" deleted and removed from {notes_count} note(s).', 'success')
     else:
         flash(f'Topic "{topic_name}" deleted successfully.', 'success')
     

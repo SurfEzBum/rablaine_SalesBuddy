@@ -15,7 +15,7 @@ def test_seller_view_customers_sorted(client, sample_data):
     assert b'Acme Corp' in response.data
 
 
-def test_customer_view_call_logs_sorted(client, sample_data):
+def test_customer_view_notes_sorted(client, sample_data):
     """Test that customer view correctly sorts eager-loaded call logs."""
     customer_id = sample_data['customer1_id']
     response = client.get(f'/customer/{customer_id}')
@@ -24,7 +24,7 @@ def test_customer_view_call_logs_sorted(client, sample_data):
     assert b'Discussed VM migration' in response.data
 
 
-def test_topic_view_call_logs_sorted(client, sample_data):
+def test_topic_view_notes_sorted(client, sample_data):
     """Test that topic view correctly sorts eager-loaded call logs."""
     topic_id = sample_data['topic1_id']
     response = client.get(f'/topic/{topic_id}')
@@ -68,10 +68,10 @@ def test_customer_view_topics_count(client, sample_data):
     assert b'Notes' in response.data
 
 
-def test_call_log_view_topics_iteration(client, sample_data):
+def test_note_view_topics_iteration(client, sample_data):
     """Test that call log view template iterates topics correctly."""
     call_id = sample_data['call1_id']
-    response = client.get(f'/call-log/{call_id}')
+    response = client.get(f'/note/{call_id}')
     assert response.status_code == 200
     # Should not crash trying to call .all() on topics
     assert b'Azure VM' in response.data

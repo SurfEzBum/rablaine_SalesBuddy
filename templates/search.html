@@ -83,9 +83,9 @@
 </div>
 
 <!-- Results -->
-{% if call_logs %}
+{% if notes %}
     <div class="alert alert-info">
-        <i class="bi bi-info-circle"></i> Found {{ call_logs|length }} note(s)
+        <i class="bi bi-info-circle"></i> Found {{ notes|length }} note(s)
     </div>
     
     <!-- Grouped Results: Seller → Customer → Calls -->
@@ -123,7 +123,7 @@
                     
                     <div class="list-group ms-4">
                         {% for call in customer_data.calls %}
-                            <a href="{{ url_for('call_logs.call_log_view', id=call.id) }}" class="list-group-item list-group-item-action">
+                            <a href="{{ url_for('notes.note_view', id=call.id) }}" class="list-group-item list-group-item-action">
                                 <div class="d-flex w-100 justify-content-between">
                                     <h6 class="mb-1">{{ call.call_date.strftime('%b %d, %Y') }}{% if call.call_date.hour != 0 or call.call_date.minute != 0 %} {{ call.call_date.strftime('%I:%M %p') }}{% endif %}</h6>
                                 </div>

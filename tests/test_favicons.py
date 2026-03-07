@@ -354,7 +354,7 @@ class TestCustomerFaviconMacro:
         assert resp.status_code == 200
         assert b'customer-favicon' in resp.data
 
-    def test_call_logs_list_shows_favicons(self, app, client, sample_data):
+    def test_notes_list_shows_favicons(self, app, client, sample_data):
         """Call logs list page renders favicon next to customer name."""
         with app.app_context():
             from app.models import db, Customer
@@ -362,11 +362,11 @@ class TestCustomerFaviconMacro:
             c.favicon_b64 = base64.b64encode(b"calllog-test-png").decode()
             db.session.commit()
 
-        resp = client.get('/call-logs')
+        resp = client.get('/notes')
         assert resp.status_code == 200
         assert b'customer-favicon' in resp.data
 
-    def test_call_log_view_shows_favicon(self, app, client, sample_data):
+    def test_note_view_shows_favicon(self, app, client, sample_data):
         """Individual call log view renders favicon next to customer."""
         with app.app_context():
             from app.models import db, Customer
@@ -374,7 +374,7 @@ class TestCustomerFaviconMacro:
             c.favicon_b64 = base64.b64encode(b"view-test-png").decode()
             db.session.commit()
 
-        resp = client.get(f'/call-log/{sample_data["call1_id"]}')
+        resp = client.get(f'/note/{sample_data["call1_id"]}')
         assert resp.status_code == 200
         assert b'customer-favicon' in resp.data
 

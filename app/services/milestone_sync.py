@@ -518,7 +518,7 @@ def _apply_customer_milestones(
             if existing.msx_status not in ACTIVE_STATUSES:
                 continue
             if msx_id not in seen_msx_ids:
-                if existing.call_logs:
+                if existing.notes:
                     existing.last_synced_at = now
                     continue
                 existing.msx_status = "Completed"

@@ -356,17 +356,17 @@ class TestConnectImpactUI:
         assert switch_match is not None
         assert 'checked' in switch_match.group(0)
 
-    def test_call_log_form_has_inline_toggle(self, client, app, sample_data):
+    def test_note_form_has_inline_toggle(self, client, app, sample_data):
         """Call log form should include the inline impact extraction checkbox."""
-        response = client.get(f'/call-log/new?customer_id={sample_data["customer1_id"]}')
+        response = client.get(f'/note/new?customer_id={sample_data["customer1_id"]}')
         assert response.status_code == 200
         html = response.data.decode()
         assert 'meetingConnectImpact' in html
         assert 'Extract impact signals' in html
 
-    def test_call_log_form_has_impact_js_variable(self, client, app, sample_data):
+    def test_note_form_has_impact_js_variable(self, client, app, sample_data):
         """Call log form should have the connectImpactEnabled JS variable."""
-        response = client.get(f'/call-log/new?customer_id={sample_data["customer1_id"]}')
+        response = client.get(f'/note/new?customer_id={sample_data["customer1_id"]}')
         html = response.data.decode()
         assert 'connectImpactEnabled' in html
 

@@ -7,13 +7,13 @@ with zero external API calls.
 
 The backup path is derived automatically from ``data/backup_config.json``
 (the DB backup config written by ``scripts/server.ps1``) or auto-detected
-from OneDrive for Business.  There is no separate call-log-specific config
+from OneDrive for Business.  There is no separate note-specific config
 file -- if DB backups are configured, call log backups use the same path.
 
 Folder structure::
 
     {BACKUP_ROOT}/
-        call_logs/
+        notes/
             {seller_name}/
                 {tpid}.json
             Unassigned/
@@ -30,12 +30,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.models import CallLog, Customer, db
+from app.models import Note, Customer, db
 
 logger = logging.getLogger(__name__)
 
 # Subfolder inside the configured backup root
-_CALL_LOGS_DIR = "call_logs"
+_NOTES_DIR = "notes"
+# Legacy subfolder name (checked during read operations for backward compatibility)
+_LEGACY_NOTES_DIR = "call_logs"
 
 # The specific org name to match for OneDrive for Business.  Employees may
 # have multiple OneDrive for Business accounts (e.g. from consultancies or
@@ -230,7 +232,7 @@ def _get_backup_root() -> Optional[str]:
        is set, use that.
     2. Auto-detect from OneDrive for Business (``get_auto_detected_backup_path``).
 
-    No separate call-log config file is needed.
+    No separate note config file is needed.
     """
     db_cfg = _load_db_backup_config()
     if db_cfg.get("enabled") and db_cfg.get("backup_dir"):
@@ -265,8 +267,8 @@ def _customer_to_dict(customer: Customer) -> Dict[str, Any]:
     Returns:
         Dictionary ready for JSON serialization.
     """
-    call_logs: List[CallLog] = sorted(
-        customer.call_logs, key=lambda cl: cl.call_date, reverse=True
+    notes: List[Note] = sorted(
+        customer.notes, key=lambda cl: cl.call_date, reverse=True
     )
 
     return {
@@ -278,12 +280,12 @@ def _customer_to_dict(customer: Customer) -> Dict[str, Any]:
             "nickname": customer.nickname,
             "tpid": customer.tpid,
             "tpid_url": customer.tpid_url,
-            "notes": customer.notes,
+            "overview": customer.overview,
             "seller_name": customer.seller.name if customer.seller else None,
             "territory_name": customer.territory.name if customer.territory else None,
             "verticals": [v.name for v in customer.verticals],
         },
-        "call_logs": [
+        "notes": [
             {
                 "call_date": cl.call_date.isoformat(),
                 "content": cl.content,
@@ -292,7 +294,7 @@ def _customer_to_dict(customer: Customer) -> Dict[str, Any]:
                 "topics": [t.name for t in cl.topics],
                 "partners": [p.name for p in cl.partners],
             }
-            for cl in call_logs
+            for cl in notes
         ],
     }
 
@@ -300,7 +302,7 @@ def _customer_to_dict(customer: Customer) -> Dict[str, Any]:
 def backup_customer(customer_id: int) -> bool:
     """Write the backup JSON file for a single customer.
 
-    The file is written to ``{backup_root}/call_logs/{seller}/{tpid}.json``.
+    The file is written to ``{backup_root}/notes/{seller}/{tpid}.json``.
     If the customer has no TPID, the customer's DB id is used as the filename.
 
     Args:
@@ -319,8 +321,8 @@ def backup_customer(customer_id: int) -> bool:
             db.joinedload(Customer.seller),
             db.joinedload(Customer.territory),
             db.joinedload(Customer.verticals),
-            db.joinedload(Customer.call_logs).joinedload(CallLog.topics),
-            db.joinedload(Customer.call_logs).joinedload(CallLog.partners),
+            db.joinedload(Customer.notes).joinedload(Note.topics),
+            db.joinedload(Customer.notes).joinedload(Note.partners),
         )
         .filter_by(id=customer_id)
         .first()
@@ -331,7 +333,7 @@ def backup_customer(customer_id: int) -> bool:
 
     # Determine folder and filename
     seller_name = customer.seller.name if customer.seller else "Unassigned"
-    folder = os.path.join(backup_root, _CALL_LOGS_DIR, _sanitize_folder_name(seller_name))
+    folder = os.path.join(backup_root, _NOTES_DIR, _sanitize_folder_name(seller_name))
     filename = f"{customer.tpid}.json" if customer.tpid else f"id_{customer.id}.json"
     filepath = os.path.join(folder, filename)
 
@@ -362,13 +364,13 @@ def backup_all_customers() -> Dict[str, int]:
 
     customers = (
         Customer.query
-        .filter(Customer.call_logs.any())
+        .filter(Customer.notes.any())
         .options(
             db.joinedload(Customer.seller),
             db.joinedload(Customer.territory),
             db.joinedload(Customer.verticals),
-            db.joinedload(Customer.call_logs).joinedload(CallLog.topics),
-            db.joinedload(Customer.call_logs).joinedload(CallLog.partners),
+            db.joinedload(Customer.notes).joinedload(Note.topics),
+            db.joinedload(Customer.notes).joinedload(Note.partners),
         )
         .all()
     )
@@ -377,7 +379,7 @@ def backup_all_customers() -> Dict[str, int]:
     failed = 0
     for customer in customers:
         seller_name = customer.seller.name if customer.seller else "Unassigned"
-        folder = os.path.join(backup_root, _CALL_LOGS_DIR, _sanitize_folder_name(seller_name))
+        folder = os.path.join(backup_root, _NOTES_DIR, _sanitize_folder_name(seller_name))
         filename = f"{customer.tpid}.json" if customer.tpid else f"id_{customer.id}.json"
         filepath = os.path.join(folder, filename)
 
@@ -397,47 +399,52 @@ def backup_all_customers() -> Dict[str, int]:
 
 
 def find_backup_folder() -> Optional[str]:
-    """Find the call_logs backup folder, trying config first then auto-detect.
+    """Find the notes backup folder, trying config first then auto-detect.
+
+    Checks both the new folder name (``notes``) and the legacy name
+    (``call_logs``) for backward compatibility.
 
     Returns:
-        Absolute path to the ``call_logs`` subfolder, or None if not found.
+        Absolute path to the backup subfolder, or None if not found.
     """
     # 1. Try _get_backup_root (reads backup_config.json, then auto-detects)
     backup_root = _get_backup_root()
     if backup_root:
-        call_logs_dir = os.path.join(backup_root, _CALL_LOGS_DIR)
-        if os.path.isdir(call_logs_dir):
-            return call_logs_dir
+        for dirname in (_NOTES_DIR, _LEGACY_NOTES_DIR):
+            notes_dir = os.path.join(backup_root, dirname)
+            if os.path.isdir(notes_dir):
+                return notes_dir
 
     # 2. Walk all candidates as last resort
     for candidate in detect_onedrive_paths():
-        call_logs_dir = os.path.join(candidate["suggested_path"], _CALL_LOGS_DIR)
-        if os.path.isdir(call_logs_dir):
-            return call_logs_dir
+        for dirname in (_NOTES_DIR, _LEGACY_NOTES_DIR):
+            notes_dir = os.path.join(candidate["suggested_path"], dirname)
+            if os.path.isdir(notes_dir):
+                return notes_dir
 
     return None
 
 
-def restore_all_from_folder(call_logs_dir: Optional[str] = None) -> Dict[str, Any]:
+def restore_all_from_folder(notes_dir: Optional[str] = None) -> Dict[str, Any]:
     """Restore all call logs from a backup folder.
 
-    Walks ``{call_logs_dir}/{seller}/`` subfolders, reads every ``.json``
+    Walks ``{notes_dir}/{seller}/`` subfolders, reads every ``.json``
     file, and calls ``restore_from_backup()`` for each.
 
     Args:
-        call_logs_dir: Path to the ``call_logs`` folder.  If None, will
+        notes_dir: Path to the ``notes`` folder.  If None, will
             auto-detect using ``find_backup_folder()``.
 
     Returns:
         Result dict with aggregate success/failure counts.
     """
-    if call_logs_dir is None:
-        call_logs_dir = find_backup_folder()
+    if notes_dir is None:
+        notes_dir = find_backup_folder()
 
-    if not call_logs_dir or not os.path.isdir(call_logs_dir):
+    if not notes_dir or not os.path.isdir(notes_dir):
         return {
             "success": False,
-            "error": "Could not find call_logs backup folder. "
+            "error": "Could not find notes backup folder. "
                      "Enable backup or verify OneDrive path.",
         }
 
@@ -448,8 +455,8 @@ def restore_all_from_folder(call_logs_dir: Optional[str] = None) -> Dict[str, An
     customers_restored = []
     errors = []
 
-    for seller_folder in sorted(os.listdir(call_logs_dir)):
-        seller_path = os.path.join(call_logs_dir, seller_folder)
+    for seller_folder in sorted(os.listdir(notes_dir)):
+        seller_path = os.path.join(notes_dir, seller_folder)
         if not os.path.isdir(seller_path):
             continue
 
@@ -488,7 +495,7 @@ def restore_all_from_folder(call_logs_dir: Optional[str] = None) -> Dict[str, An
         "total_logs_skipped": total_logs_skipped,
         "customers_restored": customers_restored,
         "errors": errors[:20],  # Cap error list to avoid huge response
-        "backup_folder": call_logs_dir,
+        "backup_folder": notes_dir,
     }
 
 
@@ -523,7 +530,7 @@ def restore_from_backup(data: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     existing_dates = set()
-    for cl in customer.call_logs:
+    for cl in customer.notes:
         # Normalize to UTC-aware datetime then compare as isoformat
         dt = cl.call_date
         if dt.tzinfo is None:
@@ -532,7 +539,7 @@ def restore_from_backup(data: Dict[str, Any]) -> Dict[str, Any]:
     logs_created = 0
     logs_skipped = 0
 
-    for cl_data in data.get("call_logs", []):
+    for cl_data in data.get("notes") or data.get("call_logs", []):
         call_date_str = cl_data.get("call_date")
         if not call_date_str:
             logs_skipped += 1
@@ -550,7 +557,7 @@ def restore_from_backup(data: Dict[str, Any]) -> Dict[str, Any]:
             logs_skipped += 1
             continue
 
-        call_log = CallLog(
+        note = Note(
             customer_id=customer.id,
             call_date=call_date,
             content=cl_data.get("content", ""),
@@ -562,7 +569,7 @@ def restore_from_backup(data: Dict[str, Any]) -> Dict[str, Any]:
                 topic = Topic(name=topic_name)
                 db.session.add(topic)
                 db.session.flush()
-            call_log.topics.append(topic)
+            note.topics.append(topic)
 
         for partner_name in cl_data.get("partners", []):
             partner = Partner.query.filter_by(name=partner_name).first()
@@ -570,18 +577,18 @@ def restore_from_backup(data: Dict[str, Any]) -> Dict[str, Any]:
                 partner = Partner(name=partner_name)
                 db.session.add(partner)
                 db.session.flush()
-            call_log.partners.append(partner)
+            note.partners.append(partner)
 
-        db.session.add(call_log)
+        db.session.add(note)
         existing_dates.add(normalized.isoformat())
         logs_created += 1
 
     db.session.commit()
 
-    # Restore customer notes if present in backup and customer has no notes yet
-    backup_notes = cust_data.get("notes")
-    if backup_notes and not customer.notes:
-        customer.notes = backup_notes
+    # Restore customer overview if present in backup and customer has no notes yet
+    backup_notes = cust_data.get("overview") or cust_data.get("notes")
+    if backup_notes and not customer.overview:
+        customer.overview = backup_notes
         db.session.commit()
 
     return {

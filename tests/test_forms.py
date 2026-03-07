@@ -90,25 +90,25 @@ def test_topic_edit_form_loads(client, sample_data):
     assert b'Azure VM' in response.data
 
 
-def test_call_log_create_form_loads(client, sample_data):
+def test_note_create_form_loads(client, sample_data):
     """Test call log creation form loads (without customer_id shows general note form)."""
     # Without customer_id, should load as general note form
-    response = client.get('/call-log/new')
+    response = client.get('/note/new')
     assert response.status_code == 200
     assert b'General Note' in response.data
     
     # With customer_id, should load form with customer context
     customer_id = sample_data['customer1_id']
-    response = client.get(f'/call-log/new?customer_id={customer_id}')
+    response = client.get(f'/note/new?customer_id={customer_id}')
     assert response.status_code == 200
     assert b'New Note' in response.data
     assert b'Acme Corp' in response.data  # Customer dropdown
 
 
-def test_call_log_create_with_customer_preselect(client, sample_data):
+def test_note_create_with_customer_preselect(client, sample_data):
     """Test call log form with customer pre-selected."""
     customer_id = sample_data['customer1_id']
-    response = client.get(f'/call-log/new?customer_id={customer_id}')
+    response = client.get(f'/note/new?customer_id={customer_id}')
     assert response.status_code == 200
     assert b'Acme Corp' in response.data
     # Auto-selected seller
@@ -116,28 +116,28 @@ def test_call_log_create_with_customer_preselect(client, sample_data):
     # Territory may or may not be auto-selected depending on logic
 
 
-def test_call_log_create_with_date_param(client, sample_data):
+def test_note_create_with_date_param(client, sample_data):
     """Test call log form with date pre-filled from URL parameter."""
     customer_id = sample_data['customer1_id']
-    response = client.get(f'/call-log/new?customer_id={customer_id}&date=2026-02-03')
+    response = client.get(f'/note/new?customer_id={customer_id}&date=2026-02-03')
     assert response.status_code == 200
     # The date should be pre-filled in the form
     assert b'2026-02-03' in response.data
 
 
-def test_call_log_create_with_invalid_date_param(client, sample_data):
+def test_note_create_with_invalid_date_param(client, sample_data):
     """Test call log form falls back to today with invalid date."""
     customer_id = sample_data['customer1_id']
-    response = client.get(f'/call-log/new?customer_id={customer_id}&date=invalid-date')
+    response = client.get(f'/note/new?customer_id={customer_id}&date=invalid-date')
     assert response.status_code == 200
     # Should still load successfully (falls back to today)
     assert b'New Note' in response.data
 
 
-def test_call_log_edit_form_loads(client, sample_data):
+def test_note_edit_form_loads(client, sample_data):
     """Test call log edit form loads."""
     call_id = sample_data['call1_id']
-    response = client.get(f'/call-log/{call_id}/edit')
+    response = client.get(f'/note/{call_id}/edit')
     assert response.status_code == 200
     assert b'Edit Note' in response.data
     assert b'Discussed VM migration' in response.data

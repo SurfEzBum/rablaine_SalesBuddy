@@ -18,11 +18,11 @@ import requests
 from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, jsonify, g
 
 from app.models import (
-    db, User, POD, Territory, Seller, Customer, Topic, CallLog, AIQueryLog,
+    db, User, POD, Territory, Seller, Customer, Topic, Note, AIQueryLog,
     RevenueImport, CustomerRevenueData, ProductRevenueData, RevenueAnalysis,
     RevenueConfig, RevenueEngagement, Milestone, Opportunity, MsxTask,
     SolutionEngineer, SyncStatus, UserPreference, UsageEvent, DailyFeatureStats,
-    call_logs_milestones, utc_now
+    notes_milestones, utc_now
 )
 
 # Create blueprint
@@ -37,7 +37,7 @@ def admin_panel():
     
     # Get system-wide statistics
     stats = {
-        'total_call_logs': CallLog.query.count(),
+        'total_notes': Note.query.count(),
         'total_customers': Customer.query.count(),
         'total_sellers': Seller.query.count(),
         'total_solution_engineers': SolutionEngineer.query.count(),
@@ -154,8 +154,8 @@ def api_clear_milestone_data():
     try:
         deleted = {}
         # Clear associations first (FK constraints)
-        deleted['call_log_links'] = db.session.execute(
-            call_logs_milestones.delete()
+        deleted['note_links'] = db.session.execute(
+            notes_milestones.delete()
         ).rowcount
         deleted['tasks'] = MsxTask.query.delete()
         deleted['milestones'] = Milestone.query.delete()

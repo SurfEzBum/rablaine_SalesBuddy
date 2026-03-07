@@ -20,7 +20,7 @@ from flask import (
 )
 
 from app.models import (
-    CallLog, ConnectExport, Customer, Milestone, db,
+    Note, ConnectExport, Customer, Milestone, db,
 )
 from app.routes.ai import is_ai_enabled
 
@@ -148,19 +148,19 @@ def _build_export_data(start_date: date, end_date: date) -> dict[str, Any]:
     end_dt = datetime.combine(end_date, datetime.max.time())
 
     # Query call logs in range with eager loading
-    call_logs = (
-        CallLog.query
+    notes = (
+        Note.query
         .filter(
-            CallLog.call_date >= start_dt,
-            CallLog.call_date <= end_dt,
+            Note.call_date >= start_dt,
+            Note.call_date <= end_dt,
         )
         .options(
-            joinedload(CallLog.customer).joinedload(Customer.seller),
-            joinedload(CallLog.customer).joinedload(Customer.territory),
-            joinedload(CallLog.topics),
-            joinedload(CallLog.milestones),
+            joinedload(Note.customer).joinedload(Customer.seller),
+            joinedload(Note.customer).joinedload(Customer.territory),
+            joinedload(Note.topics),
+            joinedload(Note.milestones),
         )
-        .order_by(CallLog.call_date.asc())
+        .order_by(Note.call_date.asc())
         .all()
     )
 
@@ -169,7 +169,7 @@ def _build_export_data(start_date: date, end_date: date) -> dict[str, Any]:
     topic_counts: dict[str, dict] = {}  # topic_name -> {count, customers set}
     general_notes: list[dict] = []  # Notes not associated with a customer
 
-    for cl in call_logs:
+    for cl in notes:
         cust = cl.customer
         if not cust:
             # General note (not customer-associated)
@@ -197,7 +197,7 @@ def _build_export_data(start_date: date, end_date: date) -> dict[str, Any]:
                 'tpid': cust.tpid,
                 'seller': cust.seller.name if cust.seller else None,
                 'territory': cust.territory.name if cust.territory else None,
-                'call_logs': [],
+                'notes': [],
                 'topics': set(),
                 'milestone_revenue': 0.0,
                 'milestone_count': 0,
@@ -205,7 +205,7 @@ def _build_export_data(start_date: date, end_date: date) -> dict[str, Any]:
 
         # Add call log
         topics_list = [t.name for t in cl.topics]
-        customers_map[cust_id]['call_logs'].append({
+        customers_map[cust_id]['notes'].append({
             'id': cl.id,
             'date': cl.call_date.strftime('%Y-%m-%d'),
             'content': cl.content,
@@ -245,7 +245,7 @@ def _build_export_data(start_date: date, end_date: date) -> dict[str, Any]:
     # Sort customers by call log count descending
     customers_list = sorted(
         customers_map.values(),
-        key=lambda c: len(c['call_logs']),
+        key=lambda c: len(c['notes']),
         reverse=True,
     )
 
@@ -273,7 +273,7 @@ def _build_export_data(start_date: date, end_date: date) -> dict[str, Any]:
     summary = {
         'start_date': start_date.isoformat(),
         'end_date': end_date.isoformat(),
-        'total_call_logs': len(call_logs),
+        'total_notes': len(notes),
         'unique_customers': unique_customer_count,
         'unique_topics': unique_topic_count,
         'general_notes_count': len(general_notes),
@@ -310,7 +310,7 @@ def _build_text_export(data: dict, name: str) -> str:
     lines.append(f"Period: {summary['start_date']} to {summary['end_date']}")
     lines.append(f"{'=' * 60}")
     lines.append("")
-    lines.append(f"{summary['total_call_logs']} notes across "
+    lines.append(f"{summary['total_notes']} notes across "
                  f"{summary['unique_customers']} customers")
 
     if summary['total_milestone_revenue'] > 0:
@@ -340,7 +340,7 @@ def _build_text_export(data: dict, name: str) -> str:
 
     for cust in customers:
         lines.append("")
-        lines.append(f"--- {cust['name']} ({len(cust['call_logs'])} notes) ---")
+        lines.append(f"--- {cust['name']} ({len(cust['notes'])} notes) ---")
         if cust['seller']:
             lines.append(f"Seller: {cust['seller']}")
         if cust['territory']:
@@ -355,7 +355,7 @@ def _build_text_export(data: dict, name: str) -> str:
             )
         lines.append("")
 
-        for cl in cust['call_logs']:
+        for cl in cust['notes']:
             topic_str = f" [{', '.join(cl['topics'])}]" if cl['topics'] else ""
             lines.append(f"  [{cl['date']}]{topic_str}")
             # Indent call log content
@@ -404,7 +404,7 @@ def _build_markdown_export(data: dict, name: str) -> str:
     lines.append(f"# {name}")
     lines.append(f"**Period:** {summary['start_date']} to {summary['end_date']}")
     lines.append("")
-    lines.append(f"{summary['total_call_logs']} notes across "
+    lines.append(f"{summary['total_notes']} notes across "
                  f"{summary['unique_customers']} customers")
 
     if summary['total_milestone_revenue'] > 0:
@@ -435,7 +435,7 @@ def _build_markdown_export(data: dict, name: str) -> str:
 
     for cust in customers:
         lines.append("")
-        lines.append(f"### {cust['name']} ({len(cust['call_logs'])} notes)")
+        lines.append(f"### {cust['name']} ({len(cust['notes'])} notes)")
         lines.append("")
         meta_parts = []
         if cust['seller']:
@@ -455,7 +455,7 @@ def _build_markdown_export(data: dict, name: str) -> str:
             )
             lines.append("")
 
-        for cl in cust['call_logs']:
+        for cl in cust['notes']:
             topic_str = f" *[{', '.join(cl['topics'])}]*" if cl['topics'] else ""
             lines.append(f"**{cl['date']}**{topic_str}")
             lines.append("")
@@ -494,7 +494,7 @@ def _build_summary_header(data: dict) -> str:
     summary = data['summary']
     lines = [
         f"Period: {summary['start_date']} to {summary['end_date']}",
-        f"Total notes: {summary['total_call_logs']}",
+        f"Total notes: {summary['total_notes']}",
         f"Unique customers: {summary['unique_customers']}",
         f"Unique topics: {summary['unique_topics']}",
     ]
@@ -513,7 +513,7 @@ def _build_summary_header(data: dict) -> str:
 def _build_customer_text_block(cust: dict) -> str:
     """Build the text block for a single customer (for chunking)."""
     lines = []
-    lines.append(f"--- {cust['name']} ({len(cust['call_logs'])} notes) ---")
+    lines.append(f"--- {cust['name']} ({len(cust['notes'])} notes) ---")
     if cust.get('seller'):
         lines.append(f"Seller: {cust['seller']}")
     if cust.get('territory'):
@@ -527,7 +527,7 @@ def _build_customer_text_block(cust: dict) -> str:
             f"({cust['milestone_count']} milestones)"
         )
     lines.append("")
-    for cl in cust['call_logs']:
+    for cl in cust['notes']:
         topic_str = f" [{', '.join(cl['topics'])}]" if cl['topics'] else ""
         lines.append(f"  [{cl['date']}]{topic_str}")
         for content_line in cl.get('content_text', '').splitlines():
@@ -794,7 +794,7 @@ def generate_connect_export():
         name=name,
         start_date=start_date,
         end_date=end_date,
-        call_log_count=data['summary']['total_call_logs'],
+        note_count=data['summary']['total_notes'],
         customer_count=data['summary']['unique_customers'],
     )
     db.session.add(export_record)

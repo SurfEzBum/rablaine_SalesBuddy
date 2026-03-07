@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}{{ 'Edit' if call_log else 'New' }} Note - NoteHelper{% endblock %}
+{% block title %}{{ 'Edit' if note else 'New' }} Note - NoteHelper{% endblock %}
 
 {% block extra_css %}
 <!-- Quill Rich Text Editor -->
 <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
-{% if not call_log and previous_calls %}
+{% if not note and previous_calls %}
 <style>
     /* Override container for full-width layout when showing previous calls */
     main.container {
@@ -30,27 +30,27 @@
 
 {% block content %}
 
-{% set is_general_note = not preselect_customer_id and not (call_log and call_log.customer_id) %}
+{% set is_general_note = not preselect_customer_id and not (note and note.customer_id) %}
 
 {% if not is_general_note %}
 {% include 'partials/msx_auth_banner.html' %}
 {% endif %}
 
 <div class="row">
-    <div class="col-md-{% if not call_log and previous_calls %}6{% else %}10{% endif %}">
+    <div class="col-md-{% if not note and previous_calls %}6{% else %}10{% endif %}">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h1 class="mb-0">
                 {% if is_general_note %}
-                    <i class="bi bi-journal-text"></i> {{ 'Edit' if call_log else 'New' }} General Note
+                    <i class="bi bi-journal-text"></i> {{ 'Edit' if note else 'New' }} General Note
                 {% else %}
-                    {{ 'Edit' if call_log else 'New' }} Note{% if not call_log and preselect_customer %} - {{ preselect_customer.name }}{% endif %}
+                    {{ 'Edit' if note else 'New' }} Note{% if not note and preselect_customer %} - {{ preselect_customer.name }}{% endif %}
                 {% endif %}
             </h1>
             <div class="d-flex align-items-center gap-3">
                 <div id="draftSaveIndicator" class="text-muted small" style="opacity: 0; transition: opacity 0.3s;">
                     <i class="bi bi-check-circle text-success"></i> Draft saved
                 </div>
-                {% if not call_log and ai_enabled %}
+                {% if not note and ai_enabled %}
                 <button type="button" class="btn btn-success" id="autoFillBtn" onclick="startAutoFill()" title="Auto-fill from meeting transcript">
                     <i class="bi bi-magic"></i> Auto-fill
                 </button>
@@ -59,7 +59,7 @@
         </div>
 
         <!-- Auto-fill Progress Panel -->
-        {% if not call_log %}
+        {% if not note %}
         <div id="autoFillProgress" class="alert alert-info mb-4" style="display: none;">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h5 class="mb-0"><i class="bi bi-magic"></i> Auto-fill in Progress</h5>
@@ -96,7 +96,7 @@
 
         <div class="card">
             <div class="card-body">
-                <form method="POST" id="callLogForm">
+                <form method="POST" id="noteForm">
                     <input type="hidden" name="referrer" value="{{ referrer if referrer else '' }}">
                     
                     <!-- Customer (full width) -->
@@ -109,20 +109,20 @@
                     {% else %}
                     <div class="mb-3">
                         <label for="customer_id" class="form-label">Customer *</label>
-                        <select class="form-select" id="customer_id" name="customer_id" required {% if not call_log and preselect_customer_id %}disabled{% endif %}>
+                        <select class="form-select" id="customer_id" name="customer_id" required {% if not note and preselect_customer_id %}disabled{% endif %}>
                             <option value="">-- Select customer --</option>
                             {% for customer in customers %}
                                 <option value="{{ customer.id }}"
-                                    {% if (call_log and call_log.customer_id == customer.id) or (preselect_customer_id and preselect_customer_id == customer.id) %}selected{% endif %}>
+                                    {% if (note and note.customer_id == customer.id) or (preselect_customer_id and preselect_customer_id == customer.id) %}selected{% endif %}>
                                     {{ customer.name }} ({{ customer.tpid }})
                                 </option>
                             {% endfor %}
                         </select>
-                        {% if not call_log and preselect_customer_id %}
+                        {% if not note and preselect_customer_id %}
                             <input type="hidden" name="customer_id" value="{{ preselect_customer_id }}">
                         {% endif %}
-                        {% if call_log and call_log.customer and call_log.customer.seller %}
-                            <div class="form-text">Seller: <strong>{{ call_log.customer.seller.name }}</strong></div>
+                        {% if note and note.customer and note.customer.seller %}
+                            <div class="form-text">Seller: <strong>{{ note.customer.seller.name }}</strong></div>
                         {% elif preselect_customer and preselect_customer.seller %}
                             <div class="form-text">Seller: <strong>{{ preselect_customer.seller.name }}</strong></div>
                         {% endif %}
@@ -135,10 +135,10 @@
                             <label for="call_date" class="form-label">Call Date & Time *</label>
                             <div class="d-flex gap-2">
                                 <input type="date" class="form-control" id="call_date" name="call_date" 
-                                       value="{% if call_log %}{{ call_log.call_date.strftime('%Y-%m-%d') }}{% else %}{{ today }}{% endif %}" 
+                                       value="{% if note %}{{ note.call_date.strftime('%Y-%m-%d') }}{% else %}{{ today }}{% endif %}" 
                                        required style="flex: 1;">
                                 <input type="time" class="form-control" id="call_time" name="call_time" 
-                                       value="{% if call_log and (call_log.call_date.hour != 0 or call_log.call_date.minute != 0) %}{{ call_log.call_date.strftime('%H:%M') }}{% else %}{{ now_time }}{% endif %}" 
+                                       value="{% if note and (note.call_date.hour != 0 or note.call_date.minute != 0) %}{{ note.call_date.strftime('%H:%M') }}{% else %}{{ now_time }}{% endif %}" 
                                        style="width: 130px;">
                             </div>
                         </div>
@@ -150,8 +150,8 @@
                             <div id="partner_dropdown" class="list-group mt-1" style="display: none; position: absolute; z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
                             
                             <div id="selected_partners" class="mt-2 d-flex flex-wrap gap-2">
-                                {% if call_log %}
-                                    {% for partner in call_log.partners %}
+                                {% if note %}
+                                    {% for partner in note.partners %}
                                         <span class="badge d-flex align-items-center" style="background-color: #6f42c1;" data-partner-id="{{ partner.id }}">
                                             <i class="bi bi-building me-1"></i> {{ partner.name }}
                                             <button type="button" class="btn-close btn-close-white ms-2" style="font-size: 0.7rem;" onclick="removePartner({{ partner.id }})"></button>
@@ -177,8 +177,8 @@
                         <div id="topic_dropdown" class="list-group mt-1" style="display: none; position: absolute; z-index: 1000; max-height: 200px; overflow-y: auto;"></div>
                         
                         <div id="selected_topics" class="mt-2 d-flex flex-wrap gap-2">
-                            {% if call_log %}
-                                {% for topic in call_log.topics %}
+                            {% if note %}
+                                {% for topic in note.topics %}
                                     <span class="badge bg-warning text-dark d-flex align-items-center" data-topic-id="{{ topic.id }}">
                                         <i class="bi bi-tag me-1"></i> {{ topic.name }}
                                         <button type="button" class="btn-close btn-close-white ms-2" style="font-size: 0.7rem;" onclick="removeTopic({{ topic.id }})"></button>
@@ -204,13 +204,13 @@
                     <div class="mb-3">
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <label class="form-label mb-0">Notes *</label>
-                            {% if not call_log %}
+                            {% if not note %}
                             <button type="button" class="btn btn-sm btn-outline-info" id="importMeetingBtn" onclick="openMeetingImport()">
                                 <i class="bi bi-calendar-event"></i> Import from Meeting
                             </button>
                             {% endif %}
                         </div>
-                        <div id="editor" style="height: 400px;">{{ call_log.content|safe if call_log else '' }}</div>
+                        <div id="editor" style="height: 400px;">{{ note.content|safe if note else '' }}</div>
                         <textarea name="content" id="content" style="display:none;"></textarea>
                         <div class="form-text">Use rich formatting to capture call details, action items, and follow-ups</div>
                     </div>
@@ -265,8 +265,8 @@
                         </div>
                         
                         <div id="selected_milestone" class="mt-2">
-                            {% if call_log and call_log.milestones %}
-                                {% for milestone in call_log.milestones %}
+                            {% if note and note.milestones %}
+                                {% for milestone in note.milestones %}
                                 <div class="card border-success" data-milestone-id="{{ milestone.id }}" data-msx-milestone-id="{{ milestone.msx_milestone_id }}">
                                     <div class="card-body py-2 px-3">
                                         <div class="d-flex justify-content-between align-items-start">
@@ -371,13 +371,13 @@
                             <button type="submit" class="btn btn-success">
                                 <i class="bi bi-check-circle"></i> Save Note
                             </button>
-                            {% if not call_log %}
+                            {% if not note %}
                             <button type="button" class="btn btn-outline-danger ms-2" onclick="discardDraft()">
                                 <i class="bi bi-trash"></i> Discard Draft
                             </button>
                             {% endif %}
                         </div>
-                        <a href="{{ url_for('call_logs.call_logs_list') }}" class="btn btn-secondary">
+                        <a href="{{ url_for('notes.notes_list') }}" class="btn btn-secondary">
                             <i class="bi bi-x-circle"></i> Cancel
                         </a>
                     </div>
@@ -386,7 +386,7 @@
         </div>
     </div>
     
-    {% if not call_log and previous_calls %}
+    {% if not note and previous_calls %}
     <div class="col-md-6">
         <div class="card previous-calls-card">
             <div class="card-header">
@@ -397,7 +397,7 @@
                     <div class="mb-4 pb-3 {% if not loop.last %}border-bottom{% endif %}">
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <h6 class="mb-0">{{ call.call_date.strftime('%b %d, %Y') }}{% if call.call_date.hour != 0 or call.call_date.minute != 0 %} {{ call.call_date.strftime('%I:%M %p') }}{% endif %}</h6>
-                            <a href="{{ url_for('call_logs.call_log_view', id=call.id) }}" class="btn btn-sm btn-outline-secondary" target="_blank">
+                            <a href="{{ url_for('notes.note_view', id=call.id) }}" class="btn btn-sm btn-outline-secondary" target="_blank">
                                 <i class="bi bi-box-arrow-up-right"></i> View
                             </a>
                         </div>
@@ -418,7 +418,7 @@
 </div>
 
 <!-- Meeting Import Modal -->
-{% if not call_log %}
+{% if not note %}
 <div class="modal fade" id="meetingImportModal" tabindex="-1" aria-labelledby="meetingImportModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -518,7 +518,7 @@ var quill = new Quill('#editor', {
 });
 
 // Sync editor content to hidden textarea on form submit
-document.getElementById('callLogForm').onsubmit = function(e) {
+document.getElementById('noteForm').onsubmit = function(e) {
     var content = document.querySelector('textarea[name=content]');
     content.value = quill.root.innerHTML;
     
@@ -1245,7 +1245,7 @@ function renderMilestoneDropdown() {
         const oppName = milestone.opportunity_name || '';
         const workload = milestone.workload || '';
         const monthlyUsage = milestone.monthly_usage;
-        const usedIn = milestone.used_in_call_logs || 0;
+        const usedIn = milestone.used_in_notes || 0;
         const statusClass = getStatusBadgeClass(status);
         
         // Format monthly usage as currency
@@ -1710,7 +1710,7 @@ function saveDraft() {
         milestone: milestoneData,
         task: taskData,
         pendingTaskSuggestion: pendingTaskSuggestion || null,
-        call_log_id: {% if call_log %}{{ call_log.id }}{% else %}null{% endif %},
+        note_id: {% if note %}{{ note.id }}{% else %}null{% endif %},
         timestamp: Date.now()
     };
     
@@ -1826,11 +1826,11 @@ function restoreDraft() {
             }
         }
         
-        // If draft has a call_log_id, we need to update the form action to edit that log
-        if (draft.call_log_id) {
-            const form = document.getElementById('callLogForm');
-            form.action = `/call-log/${draft.call_log_id}/edit`;
-            console.log('Draft restored for editing call log', draft.call_log_id);
+        // If draft has a note_id, we need to update the form action to edit that log
+        if (draft.note_id) {
+            const form = document.getElementById('noteForm');
+            form.action = `/note/${draft.note_id}/edit`;
+            console.log('Draft restored for editing call log', draft.note_id);
         }
         
         return true;
@@ -1981,7 +1981,7 @@ window.addEventListener('beforeunload', function(e) {
 });
 
 // Clear draft only after successful form submission
-document.getElementById('callLogForm').addEventListener('submit', async function(e) {
+document.getElementById('noteForm').addEventListener('submit', async function(e) {
     e.preventDefault(); // Prevent default form submission
     
     const form = e.target;
@@ -2133,7 +2133,7 @@ function discardDraft() {
 }
 
 // Set current date as default if creating new call log (only if not already set by server)
-{% if not call_log %}
+{% if not note %}
 document.addEventListener('DOMContentLoaded', function() {
     var dateInput = document.getElementById('call_date');
     // Only set to today if the server didn't provide a date
@@ -2178,7 +2178,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // =============================================================================
 // Meeting Import Functions
 // =============================================================================
-{% if not call_log %}
+{% if not note %}
 var meetingImportModal = null;
 var selectedMeetingIndex = null;
 var loadedMeetings = [];

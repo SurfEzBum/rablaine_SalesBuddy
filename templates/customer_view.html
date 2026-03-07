@@ -16,7 +16,7 @@
         </h1>
     </div>
     <div class="flex-shrink-0 d-flex gap-2">
-        <a href="{{ url_for('call_logs.call_log_create') }}?customer_id={{ customer.id }}" class="btn btn-success text-nowrap">
+        <a href="{{ url_for('notes.note_create') }}?customer_id={{ customer.id }}" class="btn btn-success text-nowrap">
             <i class="bi bi-plus-circle"></i> New Note
         </a>
         <a href="{{ url_for('customers.customer_edit', id=customer.id) }}" class="btn btn-primary text-nowrap">
@@ -63,10 +63,10 @@
                         {% endfor %}
                     </p>
                 {% endif %}
-                <p><strong>Total Calls:</strong> {{ call_logs|length }}</p>
+                <p><strong>Total Calls:</strong> {{ notes|length }}</p>
                 
                 {% set partner_dict = {} %}
-                {% for call in call_logs %}
+                {% for call in notes %}
                     {% for partner in call.partners %}
                         {% if partner.id not in partner_dict %}
                             {% set _ = partner_dict.update({partner.id: partner}) %}
@@ -86,7 +86,7 @@
         </div>
         
         {% set milestone_dict = {} %}
-        {% for call in call_logs %}
+        {% for call in notes %}
             {% for milestone in call.milestones %}
                 {% if milestone.id not in milestone_dict %}
                     {% set _ = milestone_dict.update({milestone.id: milestone}) %}
@@ -149,36 +149,36 @@
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-sticky"></i> Notes</h5>
                 <div class="d-flex gap-2">
-                    {% if ai_enabled and call_logs %}
+                    {% if ai_enabled and notes %}
                     <button type="button" class="btn btn-sm btn-outline-success" id="generateNotesBtn" onclick="generateEngagementSummary()" title="Use AI to generate an engagement summary from all notes">
                         <i class="bi bi-stars"></i> Generate
                     </button>
                     {% endif %}
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="editNotesBtn" onclick="toggleNotesEdit()">
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="editOverviewBtn" onclick="toggleOverviewEdit()">
                         <i class="bi bi-pencil"></i> Edit
                     </button>
                 </div>
             </div>
             <div class="card-body">
-                <div id="notesDisplay" {% if not customer.notes %}style="display: none;"{% endif %}>
-                    <p class="mb-0" style="white-space: pre-wrap;">{{ customer.notes or '' }}</p>
+                <div id="overviewDisplay" {% if not customer.overview %}style="display: none;"{% endif %}>
+                    <p class="mb-0" style="white-space: pre-wrap;">{{ customer.overview or '' }}</p>
                 </div>
-                <div id="notesEmpty" {% if customer.notes %}style="display: none;"{% endif %}>
+                <div id="overviewEmpty" {% if customer.overview %}style="display: none;"{% endif %}>
                     <p class="text-muted mb-0">No notes yet. Click Edit to add notes about opportunities or milestones.</p>
                 </div>
-                <div id="notesGenerating" style="display: none;">
+                <div id="overviewGenerating" style="display: none;">
                     <div class="d-flex align-items-center gap-2 text-muted">
                         <div class="spinner-border spinner-border-sm" role="status"></div>
-                        <span>Analyzing {{ call_logs|length }} note{{ 's' if call_logs|length != 1 else '' }}...</span>
+                        <span>Analyzing {{ notes|length }} note{{ 's' if notes|length != 1 else '' }}...</span>
                     </div>
                 </div>
-                <form id="notesForm" action="{{ url_for('customers.customer_update_notes', id=customer.id) }}" method="post" style="display: none;">
-                    <textarea class="form-control mb-2" name="notes" id="notesTextarea" rows="10" placeholder="Track opportunities, milestones, key contacts, etc.">{{ customer.notes or '' }}</textarea>
+                <form id="overviewForm" action="{{ url_for('customers.customer_update_overview', id=customer.id) }}" method="post" style="display: none;">
+                    <textarea class="form-control mb-2" name="overview" id="overviewTextarea" rows="10" placeholder="Track opportunities, milestones, key contacts, etc.">{{ customer.overview or '' }}</textarea>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-sm btn-primary">
                             <i class="bi bi-check-lg"></i> Save
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="cancelNotesEdit()">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="cancelOverviewEdit()">
                             Cancel
                         </button>
                     </div>
@@ -247,7 +247,7 @@
                 <h5 class="mb-0">Notes (most recent first)</h5>
             </div>
             <div class="card-body">
-                {% if call_logs %}
+                {% if notes %}
                     <style>
                         .clickable-call {
                             cursor: pointer;
@@ -265,10 +265,10 @@
                         }
                     </style>
                     {# Check if all call logs are with the same seller as the customer's seller #}
-                    {% set all_same_seller = call_logs|selectattr('seller.id', 'equalto', customer.seller.id)|list|length == call_logs|length if customer.seller else false %}
+                    {% set all_same_seller = notes|selectattr('seller.id', 'equalto', customer.seller.id)|list|length == notes|length if customer.seller else false %}
                     <div class="list-group">
-                        {% for call in call_logs %}
-                            <div class="list-group-item clickable-call" onclick="window.location.href='{{ url_for('call_logs.call_log_view', id=call.id) }}';">
+                        {% for call in notes %}
+                            <div class="list-group-item clickable-call" onclick="window.location.href='{{ url_for('notes.note_view', id=call.id) }}';">
                                 <div class="d-flex w-100 justify-content-between mb-2">
                                     <h6 class="mb-0">{{ call.call_date.strftime('%b %d, %Y') }}{% if call.call_date.hour != 0 or call.call_date.minute != 0 %} {{ call.call_date.strftime('%I:%M %p') }}{% endif %}</h6>
                                     {% if call.seller and not all_same_seller %}
@@ -310,41 +310,41 @@
 
 {% block extra_js %}
 <script>
-function toggleNotesEdit() {
-    document.getElementById('notesDisplay').style.display = 'none';
-    document.getElementById('notesEmpty').style.display = 'none';
-    document.getElementById('notesForm').style.display = 'block';
-    document.getElementById('editNotesBtn').style.display = 'none';
-    document.getElementById('notesTextarea').focus();
+function toggleOverviewEdit() {
+    document.getElementById('overviewDisplay').style.display = 'none';
+    document.getElementById('overviewEmpty').style.display = 'none';
+    document.getElementById('overviewForm').style.display = 'block';
+    document.getElementById('editOverviewBtn').style.display = 'none';
+    document.getElementById('overviewTextarea').focus();
 }
 
-function cancelNotesEdit() {
-    const textarea = document.getElementById('notesTextarea');
+function cancelOverviewEdit() {
+    const textarea = document.getElementById('overviewTextarea');
     const hasNotes = textarea.defaultValue.trim().length > 0;
     
     // Reset textarea to original value
     textarea.value = textarea.defaultValue;
     
-    document.getElementById('notesForm').style.display = 'none';
-    document.getElementById('editNotesBtn').style.display = 'inline-block';
+    document.getElementById('overviewForm').style.display = 'none';
+    document.getElementById('editOverviewBtn').style.display = 'inline-block';
     const genBtn = document.getElementById('generateNotesBtn');
     if (genBtn) genBtn.style.display = 'inline-block';
     
     if (hasNotes) {
-        document.getElementById('notesDisplay').style.display = 'block';
-        document.getElementById('notesEmpty').style.display = 'none';
+        document.getElementById('overviewDisplay').style.display = 'block';
+        document.getElementById('overviewEmpty').style.display = 'none';
     } else {
-        document.getElementById('notesDisplay').style.display = 'none';
-        document.getElementById('notesEmpty').style.display = 'block';
+        document.getElementById('overviewDisplay').style.display = 'none';
+        document.getElementById('overviewEmpty').style.display = 'block';
     }
 }
 
 function generateEngagementSummary() {
     const btn = document.getElementById('generateNotesBtn');
-    const editBtn = document.getElementById('editNotesBtn');
-    const generating = document.getElementById('notesGenerating');
-    const display = document.getElementById('notesDisplay');
-    const empty = document.getElementById('notesEmpty');
+    const editBtn = document.getElementById('editOverviewBtn');
+    const generating = document.getElementById('overviewGenerating');
+    const display = document.getElementById('overviewDisplay');
+    const empty = document.getElementById('overviewEmpty');
 
     // Show loading state
     btn.disabled = true;
@@ -363,17 +363,17 @@ function generateEngagementSummary() {
         generating.style.display = 'none';
         if (data.success) {
             // Open the edit form with the generated summary pre-filled
-            const textarea = document.getElementById('notesTextarea');
+            const textarea = document.getElementById('overviewTextarea');
             textarea.value = data.summary;
             textarea.rows = Math.max(10, data.summary.split('\n').length + 2);
-            document.getElementById('notesForm').style.display = 'block';
+            document.getElementById('overviewForm').style.display = 'block';
             btn.style.display = 'none';
             editBtn.style.display = 'none';
             textarea.focus();
         } else {
             alert('Failed to generate summary: ' + (data.error || 'Unknown error'));
             // Restore original display
-            const hasNotes = document.getElementById('notesTextarea').defaultValue.trim().length > 0;
+            const hasNotes = document.getElementById('overviewTextarea').defaultValue.trim().length > 0;
             if (hasNotes) display.style.display = 'block';
             else empty.style.display = 'block';
         }
@@ -383,7 +383,7 @@ function generateEngagementSummary() {
     .catch(err => {
         generating.style.display = 'none';
         alert('Error: ' + err.message);
-        const hasNotes = document.getElementById('notesTextarea').defaultValue.trim().length > 0;
+        const hasNotes = document.getElementById('overviewTextarea').defaultValue.trim().length > 0;
         if (hasNotes) display.style.display = 'block';
         else empty.style.display = 'block';
         btn.disabled = false;

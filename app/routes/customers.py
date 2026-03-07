@@ -5,7 +5,7 @@ Handles customer listing, creation, viewing, editing, and TPID workflow.
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, g
 from sqlalchemy import func, or_
 
-from app.models import db, Customer, Seller, Territory, CallLog, UserPreference
+from app.models import db, Customer, Seller, Territory, Note, UserPreference
 from app.services.backup import backup_customer as _backup_customer
 
 # Create blueprint
@@ -28,7 +28,7 @@ def customers_list():
     if sort_by == 'grouped':
         # Grouped view - get all sellers with their customers
         sellers = Seller.query.options(
-            db.joinedload(Seller.customers).joinedload(Customer.call_logs),
+            db.joinedload(Seller.customers).joinedload(Customer.notes),
             db.joinedload(Seller.customers).joinedload(Customer.territory),
             db.joinedload(Seller.territories)
         ).order_by(Seller.name).all()
@@ -40,7 +40,7 @@ def customers_list():
             
             # Filter out customers without calls if preference is False
             if not show_customers_without_calls:
-                customers = [c for c in customers if len(c.call_logs) > 0]
+                customers = [c for c in customers if len(c.notes) > 0]
             
             if customers:
                 grouped_customers.append({
@@ -50,13 +50,13 @@ def customers_list():
         
         # Get customers without a seller
         customers_without_seller_query = Customer.query.options(
-            db.joinedload(Customer.call_logs),
+            db.joinedload(Customer.notes),
             db.joinedload(Customer.territory)
         ).filter_by(seller_id=None).order_by(Customer.name)
         
         # Filter out customers without calls if preference is False
         if not show_customers_without_calls:
-            customers_without_seller = [c for c in customers_without_seller_query.all() if len(c.call_logs) > 0]
+            customers_without_seller = [c for c in customers_without_seller_query.all() if len(c.notes) > 0]
         else:
             customers_without_seller = customers_without_seller_query.all()
         
@@ -71,15 +71,15 @@ def customers_list():
         customers_query = Customer.query.options(
             db.joinedload(Customer.seller),
             db.joinedload(Customer.territory),
-            db.joinedload(Customer.call_logs)
-        ).outerjoin(CallLog).group_by(Customer.id).order_by(
-            func.count(CallLog.id).desc(),
+            db.joinedload(Customer.notes)
+        ).outerjoin(Note).group_by(Customer.id).order_by(
+            func.count(Note.id).desc(),
             Customer.name
         )
         
         # Filter out customers without calls if preference is False
         if not show_customers_without_calls:
-            customers = [c for c in customers_query.all() if len(c.call_logs) > 0]
+            customers = [c for c in customers_query.all() if len(c.notes) > 0]
         else:
             customers = customers_query.all()
         
@@ -90,12 +90,12 @@ def customers_list():
         customers_query = Customer.query.options(
             db.joinedload(Customer.seller),
             db.joinedload(Customer.territory),
-            db.joinedload(Customer.call_logs)
+            db.joinedload(Customer.notes)
         ).order_by(Customer.name)
         
         # Filter out customers without calls if preference is False
         if not show_customers_without_calls:
-            customers = [c for c in customers_query.all() if len(c.call_logs) > 0]
+            customers = [c for c in customers_query.all() if len(c.notes) > 0]
         else:
             customers = customers_query.all()
         
@@ -184,8 +184,8 @@ def customer_create():
 def customer_view(id):
     """View customer details (FR008)."""
     customer = Customer.query.filter_by(id=id).first_or_404()
-    # Sort call logs by date (descending) - customer.call_logs is already loaded as a list
-    call_logs = sorted(customer.call_logs, key=lambda c: c.call_date, reverse=True)
+    # Sort call logs by date (descending) - customer.notes is already loaded as a list
+    notes = sorted(customer.notes, key=lambda c: c.call_date, reverse=True)
     
     # Get revenue analysis for this customer if available
     from app.models import RevenueAnalysis
@@ -198,7 +198,7 @@ def customer_view(id):
 
     return render_template('customer_view.html', 
                           customer=customer, 
-                          call_logs=call_logs,
+                          notes=notes,
                           revenue_analyses=revenue_analyses,
                           ai_enabled=ai_enabled)
 
@@ -289,13 +289,13 @@ def api_save_tpid_url(customer_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@customers_bp.route('/customer/<int:id>/notes', methods=['POST'])
-def customer_update_notes(id):
-    """Update customer notes via AJAX or form POST."""
+@customers_bp.route('/customer/<int:id>/overview', methods=['POST'])
+def customer_update_overview(id):
+    """Update customer overview via AJAX or form POST."""
     customer = Customer.query.filter_by(id=id).first_or_404()
     
-    notes = request.form.get('notes', '').strip()
-    customer.notes = notes if notes else None
+    overview = request.form.get('overview', '').strip()
+    customer.overview = overview if overview else None
     
     db.session.commit()
 
@@ -307,7 +307,7 @@ def customer_update_notes(id):
     
     # Check if AJAX request
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return jsonify({'success': True, 'notes': customer.notes})
+        return jsonify({'success': True, 'overview': customer.overview})
     
     flash('Notes updated successfully.', 'success')
     return redirect(url_for('customers.customer_view', id=id))

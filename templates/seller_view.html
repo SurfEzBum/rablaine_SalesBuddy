@@ -151,14 +151,14 @@
                                             <div class="d-flex justify-content-between align-items-center">
                                                 <div>
                                                     {% if customer_data.last_call %}
-                                                        <a href="{{ url_for('call_logs.call_log_view', id=customer_data.last_call.id) }}">
+                                                        <a href="{{ url_for('notes.note_view', id=customer_data.last_call.id) }}">
                                                             {{ customer_data.last_call.call_date.strftime('%b %d, %Y') }}{% if customer_data.last_call.call_date.hour != 0 or customer_data.last_call.call_date.minute != 0 %} {{ customer_data.last_call.call_date.strftime('%I:%M %p') }}{% endif %}
                                                         </a>
                                                     {% else %}
                                                         <span class="text-muted">No calls yet</span>
                                                     {% endif %}
                                                 </div>
-                                                <a href="{{ url_for('call_logs.call_log_create', customer_id=customer_data.customer.id) }}" class="btn btn-sm btn-success ms-2">
+                                                <a href="{{ url_for('notes.note_create', customer_id=customer_data.customer.id) }}" class="btn btn-sm btn-success ms-2">
                                                     <i class="bi bi-plus-circle"></i> New Note
                                                 </a>
                                             </div>

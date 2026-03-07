@@ -351,11 +351,11 @@ def get_milestones(account_id: str):
         if msx_milestone_id:
             # Check if any milestone in our DB has this MSX ID
             existing = Milestone.query.filter_by(msx_milestone_id=msx_milestone_id).first()
-            if existing and existing.call_logs:
-                milestone_data["used_in_call_logs"] = len(existing.call_logs)
+            if existing and existing.notes:
+                milestone_data["used_in_notes"] = len(existing.notes)
                 milestone_data["local_milestone_id"] = existing.id
             else:
-                milestone_data["used_in_call_logs"] = 0
+                milestone_data["used_in_notes"] = 0
                 milestone_data["local_milestone_id"] = existing.id if existing else None
     
     return jsonify(result)
@@ -408,11 +408,11 @@ def get_milestones_for_customer(customer_id: int):
         msx_milestone_id = milestone_data.get("id")
         if msx_milestone_id:
             existing = Milestone.query.filter_by(msx_milestone_id=msx_milestone_id).first()
-            if existing and existing.call_logs:
-                milestone_data["used_in_call_logs"] = len(existing.call_logs)
+            if existing and existing.notes:
+                milestone_data["used_in_notes"] = len(existing.notes)
                 milestone_data["local_milestone_id"] = existing.id
             else:
-                milestone_data["used_in_call_logs"] = 0
+                milestone_data["used_in_notes"] = 0
                 milestone_data["local_milestone_id"] = existing.id if existing else None
             # Use live MSX team membership if available, fall back to local record
             if my_team_ids:
