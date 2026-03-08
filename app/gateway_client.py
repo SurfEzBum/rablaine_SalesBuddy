@@ -41,6 +41,17 @@ def is_gateway_enabled() -> bool:
     return True
 
 
+def clear_token_cache() -> None:
+    """Clear the cached credential and token.
+
+    Called after ``az login`` completes so the new consent is picked up.
+    """
+    global _credential, _cached_token, _token_expiry
+    _credential = None
+    _cached_token = None
+    _token_expiry = 0
+
+
 def _get_token() -> str:
     """Acquire a JWT for the gateway audience. Caches until near expiry."""
     import time

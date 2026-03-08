@@ -303,8 +303,8 @@ def az_login_status():
 def az_login_complete():
     """Called by the frontend once polling detects a successful login.
 
-    Sets the subscription and refreshes the CRM token so subsequent
-    API calls work immediately.
+    Sets the subscription, refreshes the CRM token, and clears the
+    AI gateway token cache so the new consent is picked up immediately.
     """
     status = get_az_cli_status()
     if not status.get("logged_in"):
@@ -312,6 +312,11 @@ def az_login_complete():
 
     set_subscription()
     token_ok = refresh_token()
+
+    # Clear gateway token cache so fresh consent is used
+    from app.gateway_client import clear_token_cache as clear_gw_cache
+    clear_gw_cache()
+
     auth = get_msx_auth_status()
 
     # Serialise datetimes
