@@ -888,19 +888,20 @@ def import_accounts():
         
         db.session.flush()  # Flush to get IDs for the territories and sellers
         
-        # 2. Create customers from accounts
+        # 2. Upsert customers from accounts
+        customers_updated = 0
         seen_tpids = set()  # In-memory dedup for same-TPID accounts in batch
 
-        # Pre-load existing TPIDs to avoid per-row DB queries.
+        # Pre-load existing customers keyed by TPID for upsert comparison.
         # Normalize to int -- old imports may have stored TPIDs as strings.
-        existing_tpids = set()
-        for row in db.session.query(Customer.tpid).all():
+        existing_customers_by_tpid: dict = {}
+        for cust in Customer.query.all():
             try:
-                val = int(row[0]) if row[0] is not None else None
+                val = int(cust.tpid) if cust.tpid is not None else None
             except (ValueError, TypeError):
-                val = row[0]
+                val = cust.tpid
             if val is not None:
-                existing_tpids.add(val)
+                existing_customers_by_tpid[val] = cust
 
         with db.session.no_autoflush:
             for acct in accounts:
@@ -924,7 +925,28 @@ def import_accounts():
                 seen_tpids.add(tpid)
 
                 # Check if customer already exists by TPID
-                if tpid in existing_tpids:
+                if tpid in existing_customers_by_tpid:
+                    # --- Upsert existing customer ---
+                    cust = existing_customers_by_tpid[tpid]
+                    changed = False
+
+                    if customer_name and cust.name != customer_name:
+                        cust.name = customer_name
+                        changed = True
+
+                    new_territory = territory_map.get(territory_name) if territory_name else None
+                    if new_territory and cust.territory != new_territory:
+                        cust.territory = new_territory
+                        changed = True
+
+                    new_seller = seller_map.get(seller_name) if seller_name else None
+                    if new_seller and cust.seller != new_seller:
+                        cust.seller = new_seller
+                        changed = True
+
+                    if changed:
+                        customers_updated += 1
+
                     customers_skipped += 1
                     continue
 
@@ -940,10 +962,10 @@ def import_accounts():
 
                 # Associate with seller if we have it
                 if seller_name and seller_name in seller_map:
-                    customer.sellers.append(seller_map[seller_name])
+                    customer.seller = seller_map[seller_name]
 
                 db.session.add(customer)
-                existing_tpids.add(tpid)
+                existing_customers_by_tpid[tpid] = customer
                 customers_created += 1
 
         db.session.commit()
@@ -951,17 +973,18 @@ def import_accounts():
         SyncStatus.mark_completed(
             'accounts', success=True,
             items_synced=customers_created,
-            details=f'{customers_created} created, {customers_skipped} skipped',
+            details=f'{customers_created} created, {customers_skipped} skipped, {customers_updated} updated',
         )
         
-        logger.info(f"API Import complete: {territories_created} territories, {sellers_created} sellers, {customers_created} customers created, {customers_skipped} skipped")
+        logger.info(f"API Import complete: {territories_created} territories, {sellers_created} sellers, {customers_created} customers created, {customers_updated} updated, {customers_skipped} skipped")
         
         return jsonify({
             "success": True,
             "territories_created": territories_created,
             "sellers_created": sellers_created,
             "customers_created": customers_created,
-            "customers_skipped": customers_skipped
+            "customers_skipped": customers_skipped,
+            "customers_updated": customers_updated,
         })
         
     except Exception as e:
@@ -1422,8 +1445,15 @@ def import_stream():
                     pods_created += 1
             db.session.flush()
 
+            # Clear all POD associations so they get rebuilt fresh from MSX
+            # This prevents stale memberships from accumulating over time.
+            for pod in pods_map.values():
+                pod.territories = []
+                pod.solution_engineers = []
+            db.session.flush()
+
             yield _sse({
-                "message": f"Created {pods_created} new PODs",
+                "message": f"Created {pods_created} new PODs (rebuilding associations)",
                 "progress": 88,
             })
 
@@ -1436,7 +1466,8 @@ def import_stream():
                     name=terr_name).first()
                 if existing:
                     territories_map[terr_name] = existing
-                    if not existing.pod and terr_info.get("pod_name"):
+                    # Always update pod assignment from MSX (authoritative)
+                    if terr_info.get("pod_name"):
                         existing.pod = pods_map.get(terr_info["pod_name"])
                 else:
                     territory = Territory(name=terr_name)
@@ -1456,11 +1487,26 @@ def import_stream():
             yield _sse({"message": "Creating sellers...", "progress": 91})
             sellers_map = {}
             sellers_created = 0
+            sellers_updated = 0
             for seller_name, seller_info in sellers_seen.items():
                 existing = Seller.query.filter_by(
                     name=seller_name).first()
                 if existing:
                     sellers_map[seller_name] = existing
+                    # Update seller_type and alias from MSX (authoritative)
+                    seller_changed = False
+                    new_type = seller_info.get("type", "Growth")
+                    if new_type and existing.seller_type != new_type:
+                        existing.seller_type = new_type
+                        seller_changed = True
+                    systemuser_id = seller_info.get("user_id")
+                    if systemuser_id and not existing.alias:
+                        new_alias = get_user_alias(systemuser_id)
+                        if new_alias:
+                            existing.alias = new_alias
+                            seller_changed = True
+                    if seller_changed:
+                        sellers_updated += 1
                 else:
                     seller_type = seller_info.get("type", "Growth")
                     systemuser_id = seller_info.get("user_id")
@@ -1486,7 +1532,7 @@ def import_stream():
             db.session.flush()
 
             yield _sse({
-                "message": f"Created {sellers_created} new sellers",
+                "message": f"Created {sellers_created} new sellers, updated {sellers_updated}",
                 "progress": 92,
             })
 
@@ -1557,7 +1603,7 @@ def import_stream():
 
             # Customers
             SyncStatus.mark_started('accounts')
-            yield _sse({"message": "Creating customers...", "progress": 97})
+            yield _sse({"message": "Syncing customers...", "progress": 97})
             customers_created = 0
             customers_skipped = 0
             customers_updated = 0
@@ -1572,27 +1618,17 @@ def import_stream():
                 except (ValueError, TypeError):
                     return val
 
-            existing_tpids = set()
-            for row in db.session.query(Customer.tpid).all():
-                normalized = _safe_int(row[0])
+            # Pre-load existing customers keyed by TPID for upsert comparison
+            existing_customers_by_tpid: dict = {}
+            for cust in Customer.query.all():
+                normalized = _safe_int(cust.tpid)
                 if normalized is not None:
-                    existing_tpids.add(normalized)
-
-            # Also grab customers missing tpid_url or website for update
-            missing_url_tpids = {}
-            missing_website_tpids = {}
-            for row in db.session.query(Customer.tpid, Customer.id, Customer.tpid_url, Customer.website).all():
-                normalized = _safe_int(row[0])
-                if normalized is not None:
-                    if not row[2]:  # tpid_url is null/empty
-                        missing_url_tpids[normalized] = row[1]
-                    if not row[3]:  # website is null/empty
-                        missing_website_tpids[normalized] = row[1]
+                    existing_customers_by_tpid[normalized] = cust
 
             with db.session.no_autoflush:
                 logger.info(
                     "Customer import: %d existing TPIDs in DB, %d accounts to process",
-                    len(existing_tpids), len(accounts_data),
+                    len(existing_customers_by_tpid), len(accounts_data),
                 )
                 for idx, ad in enumerate(accounts_data, 1):
                     if idx % 50 == 0:
@@ -1613,22 +1649,74 @@ def import_stream():
                         continue
                     seen_tpids.add(tpid)
 
-                    if tpid in existing_tpids:
-                        customers_skipped += 1
-                        # Backfill missing tpid_url
-                        if tpid in missing_url_tpids and ad.get("url"):
-                            cust = db.session.get(Customer, missing_url_tpids[tpid])
-                            if cust:
-                                cust.tpid_url = ad["url"]
-                                customers_updated += 1
-                        # Backfill missing website
-                        if tpid in missing_website_tpids and ad.get("website"):
-                            cust = db.session.get(Customer, missing_website_tpids[tpid])
-                            if cust:
-                                cust.website = ad["website"]
-                                customers_updated += 1
+                    if tpid in existing_customers_by_tpid:
+                        # --- Upsert existing customer ---
+                        cust = existing_customers_by_tpid[tpid]
+                        changed = False
+
+                        # Update name (could be rebrand — log it)
+                        if customer_name and cust.name != customer_name:
+                            logger.info(
+                                "Customer name changed for TPID %s: '%s' -> '%s'",
+                                tpid, cust.name, customer_name,
+                            )
+                            cust.name = customer_name
+                            changed = True
+
+                        # Backfill tpid_url
+                        if ad.get("url") and not cust.tpid_url:
+                            cust.tpid_url = ad["url"]
+                            changed = True
+
+                        # Backfill website
+                        if ad.get("website") and not cust.website:
+                            cust.website = ad["website"]
+                            changed = True
+
+                        # Update territory (MSX is authoritative)
+                        territory_name = ad.get("territory_name")
+                        new_territory = territories_map.get(territory_name) if territory_name else None
+                        if new_territory and cust.territory != new_territory:
+                            logger.info(
+                                "Territory changed for '%s' (TPID %s): '%s' -> '%s'",
+                                cust.name, tpid,
+                                cust.territory.name if cust.territory else None,
+                                new_territory.name,
+                            )
+                            cust.territory = new_territory
+                            changed = True
+
+                        # Update seller (MSX is authoritative)
+                        seller_name = ad.get("seller_name")
+                        new_seller = sellers_map.get(seller_name) if seller_name else None
+                        if new_seller and cust.seller != new_seller:
+                            logger.info(
+                                "Seller changed for '%s' (TPID %s): '%s' -> '%s'",
+                                cust.name, tpid,
+                                cust.seller.name if cust.seller else None,
+                                new_seller.name,
+                            )
+                            cust.seller = new_seller
+                            changed = True
+
+                        # Update verticals (replace with current MSX verticals)
+                        new_verticals = []
+                        if ad.get("vertical") and ad["vertical"] in verticals_map:
+                            new_verticals.append(verticals_map[ad["vertical"]])
+                        if ad.get("vertical_category") and ad["vertical_category"] in verticals_map:
+                            vert = verticals_map[ad["vertical_category"]]
+                            if vert not in new_verticals:
+                                new_verticals.append(vert)
+                        if set(new_verticals) != set(cust.verticals):
+                            cust.verticals = new_verticals
+                            changed = True
+
+                        if changed:
+                            customers_updated += 1
+
                         continue
 
+                    # --- Create new customer ---
                     customer = Customer(
                         name=customer_name, tpid=tpid,
                         tpid_url=ad.get("url"),
@@ -1647,7 +1735,7 @@ def import_stream():
                         if vert not in customer.verticals:
                             customer.verticals.append(vert)
                     db.session.add(customer)
-                    existing_tpids.add(tpid)  # Track so later dupes in batch skip
+                    existing_customers_by_tpid[tpid] = customer
                     customers_created += 1
 
             try:
@@ -1708,10 +1796,12 @@ def import_stream():
                     "pods_created": pods_created,
                     "territories_created": territories_created,
                     "sellers_created": sellers_created,
+                    "sellers_updated": sellers_updated,
                     "solution_engineers_created": ses_created,
                     "verticals_created": verticals_created,
                     "customers_created": customers_created,
                     "customers_skipped": customers_skipped,
+                    "customers_updated": customers_updated,
                     "duration": duration,
                 },
             })
@@ -1719,9 +1809,10 @@ def import_stream():
             logger.info(
                 f"Parallel MSX Import complete in {duration}s: "
                 f"{pods_created} PODs, {territories_created} territories, "
-                f"{sellers_created} sellers, {ses_created} SEs, "
+                f"{sellers_created} sellers ({sellers_updated} updated), {ses_created} SEs, "
                 f"{verticals_created} verticals, "
-                f"{customers_created} customers created, {customers_skipped} skipped"
+                f"{customers_created} customers created, {customers_updated} updated, "
+                f"{customers_skipped} skipped"
             )
 
         except Exception as e:
