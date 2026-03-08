@@ -24,6 +24,73 @@ class TestGatewayClientModule:
         from app.gateway_client import is_gateway_enabled
         assert is_gateway_enabled() is True
 
+    def test_verify_tenant_rejects_wrong_tenant(self):
+        """_verify_tenant raises GatewayConsentError for non-Microsoft tenants."""
+        import base64
+        import json as _json
+        from app.gateway_client import _verify_tenant, GatewayConsentError
+
+        # Build a fake JWT with wrong tenant
+        header = base64.urlsafe_b64encode(b'{"alg":"RS256"}').rstrip(b"=").decode()
+        payload_data = {"tid": "96d12531-723e-46c1-842b-0480739c7419", "aud": "test"}
+        payload = base64.urlsafe_b64encode(
+            _json.dumps(payload_data).encode()
+        ).rstrip(b"=").decode()
+        fake_jwt = f"{header}.{payload}.fakesig"
+
+        with pytest.raises(GatewayConsentError, match="non-Microsoft account"):
+            _verify_tenant(fake_jwt)
+
+    def test_verify_tenant_accepts_microsoft_tenant(self):
+        """_verify_tenant passes silently for Microsoft corporate tenant."""
+        import base64
+        import json as _json
+        from app.gateway_client import _verify_tenant
+
+        header = base64.urlsafe_b64encode(b'{"alg":"RS256"}').rstrip(b"=").decode()
+        payload_data = {"tid": "72f988bf-86f1-41af-91ab-2d7cd011db47", "aud": "test"}
+        payload = base64.urlsafe_b64encode(
+            _json.dumps(payload_data).encode()
+        ).rstrip(b"=").decode()
+        fake_jwt = f"{header}.{payload}.fakesig"
+
+        # Should not raise
+        _verify_tenant(fake_jwt)
+
+    def test_check_consent_wrong_tenant_returns_needs_relogin(self):
+        """check_ai_consent returns needs_relogin when logged into wrong tenant."""
+        import base64
+        import json as _json
+        from app.gateway_client import check_ai_consent
+
+        header = base64.urlsafe_b64encode(b'{"alg":"RS256"}').rstrip(b"=").decode()
+        payload_data = {"tid": "96d12531-723e-46c1-842b-0480739c7419"}
+        payload = base64.urlsafe_b64encode(
+            _json.dumps(payload_data).encode()
+        ).rstrip(b"=").decode()
+        fake_jwt = f"{header}.{payload}.fakesig"
+
+        mock_token = MagicMock()
+        mock_token.token = fake_jwt
+        mock_token.expires_on = 9999999999.0
+
+        with patch("app.gateway_client.AzureCliCredential") as mock_cred_cls:
+            mock_cred = MagicMock()
+            mock_cred.get_token.return_value = mock_token
+            mock_cred_cls.return_value = mock_cred
+
+            # Clear any cached state
+            import app.gateway_client as gc
+            gc._credential = None
+            gc._cached_token = None
+            gc._token_expiry = 0
+
+            result = check_ai_consent()
+
+        assert result["consented"] is False
+        assert result["needs_relogin"] is True
+        assert "non-Microsoft" in result["error"]
+
 
 class TestIsAIEnabledGatewayMode:
     """Verify is_ai_enabled returns True when gateway is available."""

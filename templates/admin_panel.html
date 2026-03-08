@@ -1309,7 +1309,7 @@ async function checkAiConsent() {
             statusDiv.innerHTML = '<span class="text-success small"><i class="bi bi-check-circle-fill"></i> AI gateway consent granted</span>';
             reloginBtn.classList.add('d-none');
         } else if (data.needs_relogin) {
-            statusDiv.innerHTML = '<span class="text-warning small"><i class="bi bi-exclamation-triangle-fill"></i> AI consent required &mdash; sign out and sign back in to grant permission</span>';
+            statusDiv.innerHTML = `<span class="text-warning small"><i class="bi bi-exclamation-triangle-fill"></i> ${data.error || 'AI consent required &mdash; sign out and sign back in to grant permission'}</span>`;
             reloginBtn.classList.remove('d-none');
         } else {
             statusDiv.innerHTML = `<span class="text-danger small"><i class="bi bi-x-circle-fill"></i> ${data.error || 'Unable to check AI consent'}</span>`;

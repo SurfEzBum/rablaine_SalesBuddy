@@ -30,6 +30,9 @@ _GATEWAY_URL = "https://apim-notehelper.azure-api.net/ai"
 # Entra app registration client ID — the audience for JWT tokens
 _GATEWAY_APP_ID = "api://0f6db4af-332c-4fd5-b894-77fadb181e5c"
 
+# Microsoft corporate tenant — must match the APIM JWT policy
+_REQUIRED_TENANT_ID = "72f988bf-86f1-41af-91ab-2d7cd011db47"
+
 # Cached credential + token
 _credential = None
 _cached_token: str | None = None
@@ -93,7 +96,46 @@ def _get_token() -> str:
 
     _cached_token = token_obj.token
     _token_expiry = token_obj.expires_on
+
+    # Verify the token comes from the expected Microsoft tenant
+    _verify_tenant(_cached_token)
+
     return _cached_token
+
+
+def _verify_tenant(token: str) -> None:
+    """Decode the JWT and verify the ``tid`` claim matches Microsoft corp.
+
+    Raises:
+        GatewayConsentError: If the user is signed in with a non-Microsoft account.
+    """
+    import base64
+    import json as _json
+
+    try:
+        # JWT is header.payload.signature — we only need the payload
+        payload_b64 = token.split(".")[1]
+        # Add padding if needed
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += "=" * padding
+        payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
+        tid = payload.get("tid", "")
+    except Exception:
+        # If we can't decode, let APIM decide
+        return
+
+    if tid and tid != _REQUIRED_TENANT_ID:
+        # Clear the cached token so the next attempt can try again
+        global _cached_token, _token_expiry, _credential
+        _cached_token = None
+        _token_expiry = 0
+        _credential = None
+        raise GatewayConsentError(
+            "You are signed in with a non-Microsoft account. "
+            "Please sign out and sign back in with your "
+            "Microsoft corporate (@microsoft.com) account."
+        )
 
 
 def _is_consent_error(exc: Exception) -> bool:
