@@ -510,13 +510,18 @@ def az_logout() -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-def start_az_login() -> Dict[str, Any]:
+def start_az_login(scope: str | None = None) -> Dict[str, Any]:
     """Launch ``az login --tenant <TENANT>`` in a visible console window.
 
     The ``--tenant`` flag scopes the browser auth to the Microsoft
     corporate tenant.  If the user picks a non-Microsoft account the
     browser will reject it.  The frontend polls ``az account show`` and
     uses a short timeout to catch any failures.
+
+    Args:
+        scope: Optional OAuth scope to include in the login command.
+            When provided (e.g. ``api://…/.default``), ``az login`` will
+            also trigger user consent for that resource.
 
     Returns:
         Dict with success, message, error.
@@ -534,9 +539,13 @@ def start_az_login() -> Dict[str, Any]:
 
     try:
         # Login scoped to the Microsoft corporate tenant.
-        # AI gateway consent is handled separately by AzureCliCredential
-        # when gateway_client._get_token() is first called.
+        # If a scope is provided, include it so the browser flow also
+        # triggers user consent for that resource (e.g. the AI gateway).
         cmd = f'az login --tenant {TENANT_ID}'
+        args = ["az", "login", "--tenant", TENANT_ID]
+        if scope:
+            cmd += f' --scope {scope}'
+            args.extend(["--scope", scope])
 
         if IS_WINDOWS:
             import subprocess as _sp
@@ -548,7 +557,7 @@ def start_az_login() -> Dict[str, Any]:
         else:
             # On Linux/Mac, launch in background
             process = subprocess.Popen(
-                ["az", "login", "--tenant", TENANT_ID],
+                args,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )

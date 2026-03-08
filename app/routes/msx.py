@@ -268,10 +268,14 @@ def az_cli_status():
 def az_login_start():
     """Launch ``az login --tenant ...`` in a visible console window.
 
-    The frontend should poll ``/api/msx/az-status`` afterwards to
-    detect when the user completes sign-in.
+    Accepts an optional JSON body ``{"scope": "api://…/.default"}``
+    to include an OAuth scope in the login command, which triggers
+    user consent for that resource (e.g. the AI gateway).
     """
-    result = start_az_login()
+    scope = None
+    if request.is_json and request.json:
+        scope = request.json.get("scope")
+    result = start_az_login(scope=scope)
 
     # If already logged in, also set subscription and grab a CRM token
     if result.get("success"):

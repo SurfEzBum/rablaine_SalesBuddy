@@ -1331,7 +1331,11 @@ if (aiReloginBtn) {
         try {
             await fetch('/api/msx/az-logout', { method: 'POST' });
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Opening login...';
-            const resp = await fetch('/api/msx/az-login/start', { method: 'POST' });
+            const resp = await fetch('/api/msx/az-login/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scope: 'api://0f6db4af-332c-4fd5-b894-77fadb181e5c/.default' })
+            });
             const data = await resp.json();
             if (data.success) {
                 btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Waiting for sign-in...';
