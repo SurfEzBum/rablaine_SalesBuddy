@@ -244,11 +244,9 @@
                                     {% endfor %}
                                 </select>
                                 {% endif %}
-                                {% if not note %}
                                 <button type="button" class="btn btn-sm btn-outline-info" id="importMeetingBtn" onclick="openMeetingImport()">
                                     <i class="bi bi-calendar-event"></i> Import from Meeting
                                 </button>
-                                {% endif %}
                             </div>
                         </div>
                         <div id="editor" style="height: 400px;">{{ note.content|safe if note else '' }}</div>
