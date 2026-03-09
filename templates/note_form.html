@@ -244,11 +244,9 @@
                                     {% endfor %}
                                 </select>
                                 {% endif %}
-                                {% if not note %}
                                 <button type="button" class="btn btn-sm btn-outline-info" id="importMeetingBtn" onclick="openMeetingImport()">
                                     <i class="bi bi-calendar-event"></i> Import from Meeting
                                 </button>
-                                {% endif %}
                             </div>
                         </div>
                         <div id="editor" style="height: 400px;">{{ note.content|safe if note else '' }}</div>
@@ -457,7 +455,6 @@
 </div>
 
 <!-- Meeting Import Modal -->
-{% if not note %}
 <div class="modal fade" id="meetingImportModal" tabindex="-1" aria-labelledby="meetingImportModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -533,7 +530,6 @@
         </div>
     </div>
 </div>
-{% endif %}
 
 <!-- Template Apply Modal (Replace / Prepend / Cancel) -->
 <div class="modal fade" id="templateApplyModal" tabindex="-1">
@@ -2359,7 +2355,6 @@ document.addEventListener('DOMContentLoaded', function() {
 // =============================================================================
 // Meeting Import Functions
 // =============================================================================
-{% if not note %}
 var meetingImportModal = null;
 var selectedMeetingIndex = null;
 var loadedMeetings = [];
@@ -3099,7 +3094,6 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
-{% endif %}
 </script>
 {% endblock %}
 

@@ -442,6 +442,12 @@ def note_edit(id):
     # Get note templates for the template selector dropdown
     templates = NoteTemplate.query.order_by(NoteTemplate.name).all()
     
+    # Get user's custom WorkIQ prompt (for meeting import modal)
+    from app.services.workiq_service import DEFAULT_SUMMARY_PROMPT
+    pref = UserPreference.query.first()
+    user_prompt = pref.workiq_summary_prompt if pref and pref.workiq_summary_prompt else DEFAULT_SUMMARY_PROMPT
+    connect_impact_enabled = pref.workiq_connect_impact if pref else True
+    
     return render_template('note_form.html',
                          note=note,
                          customers=customers,
@@ -451,7 +457,9 @@ def note_edit(id):
                          templates=templates,
                          preselect_customer_id=None,
                          preselect_topic_id=None,
-                         workiq_connect_impact=True)
+                         workiq_prompt=user_prompt,
+                         default_workiq_prompt=DEFAULT_SUMMARY_PROMPT,
+                         workiq_connect_impact=connect_impact_enabled)
 
 
 @notes_bp.route('/note/<int:id>/delete', methods=['POST'])
