@@ -482,13 +482,17 @@ def get_az_cli_status() -> Dict[str, Any]:
 
 
 def az_logout() -> Dict[str, Any]:
-    """Run ``az logout`` to clear the current Azure CLI session.
+    """Clear ALL Azure CLI cached accounts and tokens.
+
+    Uses ``az account clear`` instead of ``az logout`` so that non-default
+    accounts (e.g. a personal tenant) don't survive and interfere with
+    the next ``az login --tenant``.
 
     Returns:
         Dict with success, message.
     """
     try:
-        cmd = "az logout" if IS_WINDOWS else ["az", "logout"]
+        cmd = "az account clear" if IS_WINDOWS else ["az", "account", "clear"]
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -497,22 +501,45 @@ def az_logout() -> Dict[str, Any]:
             shell=IS_WINDOWS,
         )
         if result.returncode == 0:
-            logger.info("Azure CLI logged out")
-            return {"success": True, "message": "Logged out"}
-        logger.warning(f"az logout failed: {result.stderr}")
-        return {"success": True, "message": "Logout completed"}  # non-zero is OK if already logged out
+            logger.info("Azure CLI accounts cleared")
+            return {"success": True, "message": "All accounts cleared"}
+        logger.warning(f"az account clear failed: {result.stderr}")
+        return {"success": True, "message": "Logout completed"}
     except Exception as e:
-        logger.warning(f"Error during az logout: {e}")
+        logger.warning(f"Error during az account clear: {e}")
         return {"success": False, "error": str(e)}
 
 
-def start_az_login() -> Dict[str, Any]:
+def kill_az_login_process() -> None:
+    """Kill any running ``az login`` process spawned by :func:`start_az_login`.
+
+    Called after we've confirmed the token is valid and set the subscription,
+    because ``az login`` keeps running indefinitely waiting for the user to
+    pick a subscription in the console window.  We don't need it anymore.
+    """
+    global _az_login_state
+    proc = _az_login_state.get("process")
+    if proc is not None:
+        try:
+            proc.kill()
+            logger.info("Killed lingering az login process (pid=%s)", proc.pid)
+        except OSError:
+            pass  # already dead
+    _az_login_state = {"active": False, "process": None, "started_at": None}
+
+
+def start_az_login(scope: str | None = None) -> Dict[str, Any]:
     """Launch ``az login --tenant <TENANT>`` in a visible console window.
 
     The ``--tenant`` flag scopes the browser auth to the Microsoft
     corporate tenant.  If the user picks a non-Microsoft account the
     browser will reject it.  The frontend polls ``az account show`` and
     uses a short timeout to catch any failures.
+
+    Args:
+        scope: Optional OAuth scope to include in the login command.
+            When provided (e.g. ``api://…/.default``), ``az login`` will
+            also trigger user consent for that resource.
 
     Returns:
         Dict with success, message, error.
@@ -529,7 +556,14 @@ def start_az_login() -> Dict[str, Any]:
             pass  # already dead
 
     try:
-        cmd = f"az login --tenant {TENANT_ID}"
+        # Login scoped to the Microsoft corporate tenant.
+        # If a scope is provided, include it so the browser flow also
+        # triggers user consent for that resource (e.g. the AI gateway).
+        cmd = f'az login --tenant {TENANT_ID}'
+        args = ["az", "login", "--tenant", TENANT_ID]
+        if scope:
+            cmd += f' --scope {scope}'
+            args.extend(["--scope", scope])
 
         if IS_WINDOWS:
             import subprocess as _sp
@@ -541,7 +575,7 @@ def start_az_login() -> Dict[str, Any]:
         else:
             # On Linux/Mac, launch in background
             process = subprocess.Popen(
-                ["az", "login", "--tenant", TENANT_ID],
+                args,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )

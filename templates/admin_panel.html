@@ -81,11 +81,11 @@
             </div>
         </div>
 
-        <!-- MSX Integration + AI Integration side by side -->
+        <!-- MSX Integration + Updates / Favicons side by side -->
         <div class="row mb-4">
             <div class="col-md-6 d-flex flex-column mb-4 mb-md-0">
                 <!-- MSX Integration -->
-                <div class="card mb-4">
+                <div class="card flex-grow-1">
                     <div class="card-header">
                         <h5 class="mb-0"><i class="bi bi-link-45deg"></i> MSX Integration</h5>
                     </div>
@@ -207,8 +207,29 @@
 
                     </div>
                 </div>
+            </div>
+            <div class="col-md-6 d-flex flex-column">
+                <!-- Update Check -->
+                <div class="card mb-4{{ ' border-danger' if update_available else '' }}" id="updateCheckCard">
+                    <div class="card-header{{ ' bg-danger text-white' if update_available else '' }}">
+                        <h5 class="mb-0"><i class="bi bi-cloud-download"></i> Updates{{ ' <span class="badge bg-light text-danger">New</span>' | safe if update_available else '' }}</h5>
+                    </div>
+                    <div class="card-body d-flex align-items-center">
+                        <div id="updateCheckContent" class="w-100">
+                            <div class="d-flex align-items-center gap-3">
+                                <div id="updateStatus" class="flex-grow-1">
+                                    <span class="text-muted">Checking for updates...</span>
+                                </div>
+                                <button class="btn btn-outline-secondary btn-sm" id="updateCheckBtn" onclick="checkForUpdates(true)">
+                                    <i class="bi bi-arrow-clockwise"></i> Check Now
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Customer Favicons -->
-                <div class="card">
+                <div class="card flex-grow-1">
                     <div class="card-header">
                         <h5 class="mb-0 d-flex justify-content-between align-items-center">
                             <span><i class="bi bi-image"></i> Customer Favicons</span>
@@ -246,128 +267,10 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-6 d-flex flex-column">
-                <!-- AI Integration -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-stars"></i> AI Integration</h5>
-                    </div>
-                    <div class="card-body">
-                        <!-- Config checklist -->
-                        <table class="table-sm mb-2 w-100" style="border-collapse: collapse;">
-                            <tbody>
-                                <tr>
-                                    <td class="ps-0 py-1" style="width: 24px;">
-                                        <i class="bi bi-{{ 'check-circle-fill text-success' if ai_config.endpoint_ok else 'x-circle-fill text-danger' }}"></i>
-                                    </td>
-                                    <td class="py-1"><small class="text-muted">AZURE_OPENAI_ENDPOINT</small></td>
-                                    <td class="text-end text-muted small py-1">
-                                        {% if ai_config.endpoint_ok %}
-                                            {{ ai_config.endpoint | truncate(35, True) }}
-                                        {% elif ai_config.endpoint %}
-                                            <span class="text-danger">placeholder</span>
-                                        {% else %}
-                                            not set
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td class="ps-0 py-1">
-                                        <i class="bi bi-{{ 'check-circle-fill text-success' if ai_config.deployment_ok else 'x-circle-fill text-danger' }}"></i>
-                                    </td>
-                                    <td class="py-1"><small class="text-muted">AZURE_OPENAI_DEPLOYMENT</small></td>
-                                    <td class="text-end text-muted small py-1">
-                                        {% if ai_config.deployment_ok %}
-                                            {{ ai_config.deployment }}
-                                        {% elif ai_config.deployment %}
-                                            <span class="text-danger">placeholder</span>
-                                        {% else %}
-                                            not set
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td class="ps-0 py-1">
-                                        <i class="bi bi-{{ 'check-circle-fill text-success' if ai_config.client_id_ok else 'x-circle-fill text-danger' }}"></i>
-                                    </td>
-                                    <td class="py-1"><small class="text-muted">AZURE_CLIENT_ID</small></td>
-                                    <td class="text-end text-muted small py-1">
-                                        {% if ai_config.client_id_ok %}
-                                            set
-                                        {% else %}
-                                            <span class="text-danger">{{ 'invalid' if ai_config.endpoint else 'not set' }}</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td class="ps-0 py-1">
-                                        <i class="bi bi-{{ 'check-circle-fill text-success' if ai_config.client_secret_ok else 'x-circle-fill text-danger' }}"></i>
-                                    </td>
-                                    <td class="py-1"><small class="text-muted">AZURE_CLIENT_SECRET</small></td>
-                                    <td class="text-end text-muted small py-1">
-                                        {% if ai_config.client_secret_ok %}
-                                            set
-                                        {% else %}
-                                            <span class="text-danger">{{ 'invalid' if ai_config.endpoint else 'not set' }}</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td class="ps-0 py-1">
-                                        <i class="bi bi-{{ 'check-circle-fill text-success' if ai_config.tenant_id_ok else 'x-circle-fill text-danger' }}"></i>
-                                    </td>
-                                    <td class="py-1"><small class="text-muted">AZURE_TENANT_ID</small></td>
-                                    <td class="text-end text-muted small py-1">
-                                        {% if ai_config.tenant_id_ok %}
-                                            set
-                                        {% else %}
-                                            <span class="text-danger">{{ 'invalid' if ai_config.endpoint else 'not set' }}</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        <div class="d-flex align-items-center justify-content-between">
-                            {% if ai_config.all_configured %}
-                            <button class="btn btn-outline-success btn-sm" id="aiTestBtn">
-                                <i class="bi bi-lightning"></i> Test Connection
-                            </button>
-                            {% else %}
-                            <span class="text-muted small">
-                                <a href="https://github.com/rablaine/NoteHelper#ai-features-optional" target="_blank">Setup guide</a>
-                            </span>
-                            <button class="btn btn-outline-secondary btn-sm" disabled>
-                                <i class="bi bi-lightning"></i> Test Connection
-                            </button>
-                            {% endif %}
-                        </div>
-                        <div id="aiTestResult" class="mt-2"></div>
-                    </div>
-                </div>
-
-                <!-- Update Check -->
-                <div class="card flex-grow-1 d-flex flex-column{{ ' border-danger' if update_available else '' }}" id="updateCheckCard">
-                    <div class="card-header{{ ' bg-danger text-white' if update_available else '' }}">
-                        <h5 class="mb-0"><i class="bi bi-cloud-download"></i> Updates{{ ' <span class="badge bg-light text-danger">New</span>' | safe if update_available else '' }}</h5>
-                    </div>
-                    <div class="card-body d-flex align-items-center">
-                        <div id="updateCheckContent" class="w-100">
-                            <div class="d-flex align-items-center gap-3">
-                                <div id="updateStatus" class="flex-grow-1">
-                                    <span class="text-muted">Checking for updates...</span>
-                                </div>
-                                <button class="btn btn-outline-secondary btn-sm" id="updateCheckBtn" onclick="checkForUpdates(true)">
-                                    <i class="bi bi-arrow-clockwise"></i> Check Now
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- Setup Wizard (shown here when incomplete, moves to bottom when done) -->
-        {% set setup_complete = has_customers and has_milestones and has_revenue %}
+        {% set setup_complete = accounts_synced and has_milestones and has_revenue %}
         {% if not setup_complete %}
         <div class="card mb-4">
             <div class="card-header">
@@ -380,7 +283,7 @@
                     <p class="text-muted small mb-3">Re-run the initial setup wizard to check your progress or complete any remaining steps.</p>
                     <div class="row text-center mb-3">
                         <div class="col">
-                            <i class="bi bi-{% if has_customers %}check-circle-fill text-success{% else %}circle text-muted{% endif %} fs-4"></i>
+                            <i class="bi bi-{% if accounts_synced %}check-circle-fill text-success{% else %}circle text-muted{% endif %} fs-4"></i>
                             <div class="small mt-1">Accounts</div>
                         </div>
                         <div class="col">
@@ -1369,49 +1272,6 @@ document.getElementById('adminRerunWizardBtn').addEventListener('click', async f
         alert('Failed to launch setup wizard: ' + err.message);
     }
 });
-
-// AI Connection Test
-const aiTestBtn = document.getElementById('aiTestBtn');
-if (aiTestBtn) {
-    aiTestBtn.addEventListener('click', async function() {
-        const btn = this;
-        const resultDiv = document.getElementById('aiTestResult');
-        const originalHtml = btn.innerHTML;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Testing...';
-        btn.disabled = true;
-        
-        try {
-            const response = await fetch('/api/admin/ai-config/test', { method: 'POST' });
-            const data = await response.json();
-            
-            if (data.success) {
-                resultDiv.innerHTML = `
-                    <div class="alert alert-success py-2">
-                        <i class="bi bi-check-circle-fill"></i> <strong>Connection successful!</strong><br>
-                        <small class="text-muted">Response: ${data.response}</small>
-                    </div>
-                `;
-            } else {
-                resultDiv.innerHTML = `
-                    <div class="alert alert-danger py-2">
-                        <i class="bi bi-x-circle-fill"></i> <strong>Connection failed</strong><br>
-                        <small>${data.error}</small>
-                    </div>
-                `;
-            }
-        } catch (err) {
-            resultDiv.innerHTML = `
-                <div class="alert alert-danger py-2">
-                    <i class="bi bi-x-circle-fill"></i> <strong>Error</strong><br>
-                    <small>${err.message}</small>
-                </div>
-            `;
-        } finally {
-            btn.innerHTML = originalHtml;
-            btn.disabled = false;
-        }
-    });
-}
 
 // MSX Import Accounts (SSE streaming)
 document.getElementById('importFromMsxBtn').addEventListener('click', async function() {

@@ -30,6 +30,7 @@ from app.services.msx_auth import (
     get_az_cli_status,
     start_az_login,
     get_az_login_process_status,
+    kill_az_login_process,
     set_subscription,
     az_logout,
     is_vpn_blocked,
@@ -268,10 +269,14 @@ def az_cli_status():
 def az_login_start():
     """Launch ``az login --tenant ...`` in a visible console window.
 
-    The frontend should poll ``/api/msx/az-status`` afterwards to
-    detect when the user completes sign-in.
+    Accepts an optional JSON body ``{"scope": "api://…/.default"}``
+    to include an OAuth scope in the login command, which triggers
+    user consent for that resource (e.g. the AI gateway).
     """
-    result = start_az_login()
+    scope = None
+    if request.is_json and request.json:
+        scope = request.json.get("scope")
+    result = start_az_login(scope=scope)
 
     # If already logged in, also set subscription and grab a CRM token
     if result.get("success"):
@@ -303,8 +308,8 @@ def az_login_status():
 def az_login_complete():
     """Called by the frontend once polling detects a successful login.
 
-    Sets the subscription and refreshes the CRM token so subsequent
-    API calls work immediately.
+    Sets the subscription, refreshes the CRM token, and clears the
+    AI gateway token cache so the new consent is picked up immediately.
     """
     status = get_az_cli_status()
     if not status.get("logged_in"):
@@ -312,6 +317,15 @@ def az_login_complete():
 
     set_subscription()
     token_ok = refresh_token()
+
+    # Kill the az login process — it's still running in a console window
+    # waiting for subscription selection, and we don't need it anymore.
+    kill_az_login_process()
+
+    # Clear gateway token cache so fresh consent is used
+    from app.gateway_client import clear_token_cache as clear_gw_cache
+    clear_gw_cache()
+
     auth = get_msx_auth_status()
 
     # Serialise datetimes
