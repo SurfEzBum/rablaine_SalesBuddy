@@ -30,35 +30,56 @@ def get_client() -> AzureOpenAI:
 
 
 def get_deployment() -> str:
-    """Return the configured deployment name."""
+    """Return the default deployment name."""
     return os.environ["AZURE_OPENAI_DEPLOYMENT"]
+
+
+def get_connect_deployment() -> str:
+    """Return the deployment name for Connect evaluations (GPT-5.3-chat).
+
+    Falls back to the default deployment if not set.
+    """
+    return os.environ.get("AZURE_OPENAI_CONNECT_DEPLOYMENT", get_deployment())
 
 
 def chat_completion(
     system_prompt: str,
     user_prompt: str,
     max_tokens: int = 2000,
+    deployment: str | None = None,
+    temperature: float | None = None,
 ) -> dict:
     """Make a chat completion call and return structured result.
+
+    Args:
+        system_prompt: The system message content.
+        user_prompt: The user message content.
+        max_tokens: Maximum tokens for the completion.
+        deployment: Override deployment name (defaults to AZURE_OPENAI_DEPLOYMENT).
+        temperature: Override temperature (omitted if None, letting API use default).
 
     Returns:
         dict with keys `text` (str) and `usage` (dict with model/token counts).
     """
     client = get_client()
-    deployment = get_deployment()
+    model = deployment or get_deployment()
 
-    response = client.chat.completions.create(
-        messages=[
+    kwargs: dict = {
+        "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        max_tokens=max_tokens,
-        model=deployment,
-    )
+        "max_tokens": max_tokens,
+        "model": model,
+    }
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+
+    response = client.chat.completions.create(**kwargs)
 
     text = response.choices[0].message.content or ""
     usage = {
-        "model": response.model or deployment,
+        "model": response.model or model,
         "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
         "completion_tokens": response.usage.completion_tokens if response.usage else 0,
         "total_tokens": response.usage.total_tokens if response.usage else 0,

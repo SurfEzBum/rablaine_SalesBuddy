@@ -18,6 +18,10 @@
       "type": "string",
       "defaultValue": "gpt-4o-mini"
     },
+    "openaiConnectDeployment": {
+      "type": "string",
+      "defaultValue": "gpt-5.3-chat"
+    },
     "openaiApiVersion": {
       "type": "string",
       "defaultValue": "2025-01-01-preview"
@@ -69,6 +73,10 @@
             {
               "name": "AZURE_OPENAI_DEPLOYMENT",
               "value": "[parameters('openaiDeployment')]"
+            },
+            {
+              "name": "AZURE_OPENAI_CONNECT_DEPLOYMENT",
+              "value": "[parameters('openaiConnectDeployment')]"
             },
             {
               "name": "AZURE_OPENAI_API_VERSION",

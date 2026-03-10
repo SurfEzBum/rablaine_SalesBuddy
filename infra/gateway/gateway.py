@@ -15,7 +15,7 @@ import re
 
 from flask import Flask, request, jsonify
 
-from openai_client import chat_completion
+from openai_client import chat_completion, get_connect_deployment
 from prompts import (
     TOPIC_SUGGESTION_PROMPT,
     MILESTONE_MATCH_PROMPT,
@@ -25,6 +25,9 @@ from prompts import (
     CONNECT_SUMMARY_SYSTEM_PROMPT,
     CONNECT_CHUNK_SYSTEM_PROMPT,
     CONNECT_SYNTHESIS_SYSTEM_PROMPT,
+    CONNECT_USER_PROMPT_SINGLE,
+    CONNECT_USER_PROMPT_CHUNK,
+    CONNECT_USER_PROMPT_SYNTHESIS,
 )
 
 # ---------------------------------------------------------------------------
@@ -124,11 +127,57 @@ def suggest_topics():
 
 
 # ---------------------------------------------------------------------------
+# Milestone status tiers for prioritised matching
+# ---------------------------------------------------------------------------
+_MILESTONE_STATUS_TIERS = [
+    {"On Track"},
+    {"At Risk"},
+    {"Blocked"},
+]
+
+
+def _try_match_milestones(call_notes: str, milestones: list) -> dict | None:
+    """Attempt to AI-match call notes against a list of milestones.
+
+    Returns the parsed result dict if a match was found, or None.
+    """
+    milestone_list = "\n".join([
+        f"- ID: {m.get('id')}, Name: {m.get('name')}, "
+        f"Status: {m.get('status')}, "
+        f"Opportunity: {m.get('opportunity', '')}, "
+        f"Workload: {m.get('workload', '')}"
+        for m in milestones
+    ])
+    user_prompt = (
+        f"Call Notes:\n{call_notes[:2000]}\n\n"
+        f"Available Milestones:\n{milestone_list}\n\n"
+        "Which milestone best matches what was discussed in the call?"
+    )
+
+    result = chat_completion(
+        MILESTONE_MATCH_PROMPT, user_prompt, max_tokens=150,
+    )
+    parsed = _parse_json_object(result["text"])
+    if parsed.get("milestone_id"):
+        return {
+            "success": True,
+            "milestone_id": parsed["milestone_id"],
+            "reason": parsed.get("reason", ""),
+            "usage": result["usage"],
+        }
+    return None
+
+
+# ---------------------------------------------------------------------------
 # POST /v1/match-milestone
 # ---------------------------------------------------------------------------
 @app.route("/v1/match-milestone", methods=["POST"])
 def match_milestone():
-    """Match call notes to the best milestone from a provided list."""
+    """Match call notes to the best milestone, preferring active statuses.
+
+    Tries milestones in priority order: On Track → At Risk → Blocked → rest.
+    Stops on the first tier that produces a match.
+    """
     try:
         body = request.get_json(force=True)
         call_notes = (body.get("call_notes") or "").strip()
@@ -139,34 +188,36 @@ def match_milestone():
         if not milestones:
             return _error("milestones list is required")
 
-        milestone_list = "\n".join([
-            f"- ID: {m.get('id')}, Name: {m.get('name')}, "
-            f"Status: {m.get('status')}, "
-            f"Opportunity: {m.get('opportunity', '')}, "
-            f"Workload: {m.get('workload', '')}"
-            for m in milestones
-        ])
-        user_prompt = (
-            f"Call Notes:\n{call_notes[:2000]}\n\n"
-            f"Available Milestones:\n{milestone_list}\n\n"
-            "Which milestone best matches what was discussed in the call?"
-        )
+        # Build status tiers + a catch-all for remaining statuses
+        active_statuses = set().union(*_MILESTONE_STATUS_TIERS)
+        tiers = [
+            [m for m in milestones if m.get("status") in tier]
+            for tier in _MILESTONE_STATUS_TIERS
+        ]
+        tiers.append([m for m in milestones if m.get("status") not in active_statuses])
 
-        result = chat_completion(
-            MILESTONE_MATCH_PROMPT, user_prompt, max_tokens=150,
-        )
-        parsed = _parse_json_object(result["text"])
+        aggregated_usage: dict = {}
 
+        for tier_milestones in tiers:
+            if not tier_milestones:
+                continue
+            try:
+                match = _try_match_milestones(call_notes, tier_milestones)
+                if match:
+                    return jsonify(match)
+                # Track usage even on non-match (last call's usage is fine)
+            except json.JSONDecodeError:
+                logger.warning("match-milestone: bad JSON from AI in tier")
+                continue
+
+        # No match in any tier
         return jsonify({
             "success": True,
-            "milestone_id": parsed.get("milestone_id"),
-            "reason": parsed.get("reason", ""),
-            "usage": result["usage"],
+            "milestone_id": None,
+            "reason": "No milestone matches the call discussion",
+            "usage": aggregated_usage,
         })
 
-    except json.JSONDecodeError:
-        logger.warning("match-milestone: could not parse AI response as JSON")
-        return _error("AI returned invalid response format", 502)
     except Exception as exc:
         logger.exception("match-milestone error")
         return _error(f"Internal error: {exc}", 500)
@@ -306,26 +357,31 @@ def engagement_story():
 # ---------------------------------------------------------------------------
 @app.route("/v1/connect-summary", methods=["POST"])
 def connect_summary():
-    """Generate Connect self-evaluation narrative.
+    """Generate Connect self-evaluation narrative using GPT-5.3-chat.
+
+    Uses the evidence scaffolding prompt pattern for better synthesis.
 
     Supports three modes:
       - single:    Full export → single summary
-      - chunk:     Per-customer-group partial summary
-      - synthesis: Combine chunk summaries into final output
+      - chunk:     Per-customer-group evidence extraction
+      - synthesis: Combine chunk evidence into final output
     """
     try:
         body = request.get_json(force=True)
         mode = body.get("mode", "single")
+        deployment = get_connect_deployment()
 
         if mode == "single":
             text_export = body.get("text_export", "")
-            user_prompt = (
-                "Here is my note data for this Connect period.  "
-                "Please write my Connect self-evaluation.\n\n"
-                f"{text_export}"
+            user_prompt = CONNECT_USER_PROMPT_SINGLE.format(
+                text_export=text_export,
             )
             result = chat_completion(
-                CONNECT_SUMMARY_SYSTEM_PROMPT, user_prompt, max_tokens=2000,
+                CONNECT_SUMMARY_SYSTEM_PROMPT,
+                user_prompt,
+                max_tokens=3000,
+                deployment=deployment,
+                temperature=0.2,
             )
 
         elif mode == "chunk":
@@ -334,13 +390,19 @@ def connect_summary():
             general_notes_text = body.get("general_notes_text", "")
             chunk_index = body.get("chunk_index", 1)
             chunk_count = body.get("chunk_count", 1)
-            user_prompt = (
-                f"Overall period stats:\n{header}\n\n"
-                f"Customer details (chunk {chunk_index} of {chunk_count}):\n\n"
-                f"{customer_text}{general_notes_text}"
+            user_prompt = CONNECT_USER_PROMPT_CHUNK.format(
+                header=header,
+                customer_text=customer_text,
+                general_notes_text=general_notes_text,
+                chunk_index=chunk_index,
+                chunk_count=chunk_count,
             )
             result = chat_completion(
-                CONNECT_CHUNK_SYSTEM_PROMPT, user_prompt, max_tokens=1500,
+                CONNECT_CHUNK_SYSTEM_PROMPT,
+                user_prompt,
+                max_tokens=2000,
+                deployment=deployment,
+                temperature=0.2,
             )
 
         elif mode == "synthesis":
@@ -351,13 +413,17 @@ def connect_summary():
                 f"### Chunk {i + 1}\n{s}"
                 for i, s in enumerate(partial_summaries)
             )
-            user_prompt = (
-                f"Overall period stats:\n{header}\n\n"
-                f"Here are partial summaries from {chunk_count} "
-                f"customer groups:\n\n{combined}"
+            user_prompt = CONNECT_USER_PROMPT_SYNTHESIS.format(
+                header=header,
+                chunk_count=chunk_count,
+                combined=combined,
             )
             result = chat_completion(
-                CONNECT_SYNTHESIS_SYSTEM_PROMPT, user_prompt, max_tokens=2000,
+                CONNECT_SYNTHESIS_SYSTEM_PROMPT,
+                user_prompt,
+                max_tokens=3000,
+                deployment=deployment,
+                temperature=0.2,
             )
 
         else:
