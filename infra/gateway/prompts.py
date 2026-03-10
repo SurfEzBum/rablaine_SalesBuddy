@@ -28,6 +28,10 @@ MILESTONE_MATCH_PROMPT = (
     "You are an expert at matching customer call notes to sales milestones.\n"
     "Your task is to identify which milestone best matches the topics discussed "
     "in the call notes.\n\n"
+    "IMPORTANT: All milestones provided are pre-filtered to the highest-priority "
+    "status tier. Pick the best content match from this list. If none of the "
+    "milestones are relevant to what was discussed in the call, respond with "
+    "milestone_id null — do NOT force a match.\n\n"
     'Respond with ONLY a JSON object in this exact format (no markdown, no explanation):\n'
     '{"milestone_id": "THE_MATCHED_ID", "reason": "Brief explanation of why this milestone matches"}\n\n'
     "If no milestone is a good match, respond with:\n"
@@ -73,14 +77,75 @@ ENGAGEMENT_SUMMARY_PROMPT = (
 )
 
 # ---------------------------------------------------------------------------
-# Connect export — single / full  (from app/routes/connect_export.py)
+# Connect export — single / full  (GPT-5.3-chat with evidence scaffolding)
 # ---------------------------------------------------------------------------
 CONNECT_SUMMARY_SYSTEM_PROMPT = (
-    "You are an expert at writing Microsoft Connect self-evaluations for "
-    "Azure technical sellers. You will receive structured note data "
-    "covering a specific date range. Your job is to produce content the "
-    "seller can paste directly into their Connect form.\n\n"
-    "The Connect form has 3 fields. Write each as a separate Markdown section:\n\n"
+    "You are an analytical assistant helping generate a professional self-evaluation "
+    "for a Microsoft Azure technical seller.\n\n"
+    "Your task is to analyze work notes and extract concrete evidence of "
+    "accomplishments, impact, collaboration, and growth.\n\n"
+    "Rules:\n"
+    "- Use only information present in the notes.\n"
+    "- Do not invent accomplishments.\n"
+    "- Prefer concrete examples over general summaries.\n"
+    "- If evidence is weak or missing, say so.\n"
+)
+
+# ---------------------------------------------------------------------------
+# Connect export — chunk  (GPT-5.3-chat with evidence scaffolding)
+# ---------------------------------------------------------------------------
+CONNECT_CHUNK_SYSTEM_PROMPT = (
+    "You are an analytical assistant helping generate a professional self-evaluation "
+    "for a Microsoft Azure technical seller.\n\n"
+    "You will receive a subset of note data for specific customers. "
+    "Your job is to extract structured evidence from these notes.\n\n"
+    "Rules:\n"
+    "- Use only information present in the notes.\n"
+    "- Do not invent accomplishments.\n"
+    "- Prefer concrete examples over general summaries.\n"
+    "- If evidence is weak or missing, say so.\n"
+)
+
+# ---------------------------------------------------------------------------
+# Connect export — synthesis  (GPT-5.3-chat with evidence scaffolding)
+# ---------------------------------------------------------------------------
+CONNECT_SYNTHESIS_SYSTEM_PROMPT = (
+    "You are an analytical assistant helping generate a professional self-evaluation "
+    "for a Microsoft Azure technical seller.\n\n"
+    "You will receive multiple partial evidence summaries that each cover a subset "
+    "of customers, plus overall statistics. Combine them into a single Connect "
+    "form response.\n\n"
+    "Rules:\n"
+    "- Use only information present in the partial summaries.\n"
+    "- Do not invent accomplishments.\n"
+    "- Prefer concrete examples over general summaries.\n"
+    "- If evidence is weak or missing, say so.\n"
+)
+
+# ---------------------------------------------------------------------------
+# Connect export — user prompt templates (evidence scaffolding pipeline)
+# ---------------------------------------------------------------------------
+CONNECT_USER_PROMPT_SINGLE = (
+    "You will analyze the following work notes and generate a Connect "
+    "self-evaluation.\n\n"
+    "Follow these steps.\n\n"
+    "STEP 1 — Evidence extraction\n"
+    "Extract distinct work activities from the notes.\n\n"
+    "Return a table with columns:\n"
+    "- activity\n"
+    "- impact\n"
+    "- category (technical / customer / leadership / collaboration / learning)\n"
+    "- supporting evidence from the notes\n\n"
+    "Capture as many meaningful activities as possible.\n\n"
+    "STEP 2 — Theme identification\n"
+    "Group the activities into 3–6 major themes representing the primary "
+    "types of work performed.\n\n"
+    "STEP 3 — Deduplication\n"
+    "Merge overlapping or repeated activities into concise representative "
+    "accomplishments.\n\n"
+    "STEP 4 — Evaluation answers\n"
+    "Using the themes and evidence, write each of these 3 sections as "
+    "separate Markdown headings:\n\n"
     "## What results did you deliver, and how did you do it?\n"
     "- Focus on IMPACT, not just activity. Highlight outcomes and results.\n"
     "- Use specific examples with metrics where possible.\n"
@@ -91,44 +156,67 @@ CONNECT_SUMMARY_SYSTEM_PROMPT = (
     "## What are your priorities going forward?\n"
     "- Base these on patterns you see in the data.\n"
     "- Suggest concrete next steps, not vague aspirations.\n\n"
+    "STEP 5 — Final review\n"
+    "Before writing the final answers, briefly review the extracted evidence "
+    "to ensure no significant accomplishments were overlooked.\n\n"
     "Tips (follow these strictly):\n"
     "- Be concise. Use bullet points, not paragraphs.\n"
     "- Quantify your impact wherever you can.\n"
     "- Avoid routine tasks. Focus on outcomes that moved the needle.\n"
     "- Write in first person ('I engaged...', 'I helped...').\n"
-    "- Do not invent information that isn't in the data.\n"
+    "- Do not invent information that isn't in the data.\n\n"
+    "The notes below may contain repeated or partial entries. Focus on "
+    "identifying meaningful work outcomes and impact rather than listing "
+    "every activity.\n\n"
+    "NOTES:\n"
+    "{text_export}"
 )
 
-# ---------------------------------------------------------------------------
-# Connect export — chunk  (from app/routes/connect_export.py)
-# ---------------------------------------------------------------------------
-CONNECT_CHUNK_SYSTEM_PROMPT = (
-    "You are an expert at writing Microsoft Connect self-evaluations for "
-    "Azure technical sellers. You will receive a subset of note data for "
-    "specific customers. Summarize the engagements for ONLY the customers in "
-    "this chunk.\n\n"
+CONNECT_USER_PROMPT_CHUNK = (
+    "You will analyze the following customer notes and extract structured "
+    "evidence for a Connect self-evaluation.\n\n"
+    "Follow these steps.\n\n"
+    "STEP 1 — Evidence extraction\n"
+    "Extract distinct work activities from the notes.\n\n"
+    "Return a table with columns:\n"
+    "- activity\n"
+    "- impact\n"
+    "- people involved\n"
+    "- category (technical / customer / leadership / collaboration / learning)\n"
+    "- supporting evidence from the notes\n\n"
+    "STEP 2 — Theme identification\n"
+    "Group the activities into major themes.\n\n"
+    "STEP 3 — Summary\n"
     "Write concise bullet points covering:\n"
     "- Key results and impact per customer (with metrics where available)\n"
     "- Technologies discussed and outcomes\n"
     "- Revenue impact where applicable\n"
-    "- Any gaps or areas for improvement you can identify\n\n"
-    "Tips (follow these strictly):\n"
+    "- Any gaps or areas for improvement\n\n"
+    "Tips:\n"
     "- Be concise. Use bullet points, not paragraphs.\n"
     "- Quantify impact wherever you can.\n"
-    "- Focus on outcomes that moved the needle, not routine tasks.\n"
     "- Write in first person.\n"
-    "- Do not invent information that isn't in the data.\n"
+    "- Do not invent information that isn't in the data.\n\n"
+    "The notes below may contain repeated or partial entries. Focus on "
+    "identifying meaningful work outcomes and impact rather than listing "
+    "every activity.\n\n"
+    "Overall period stats:\n{header}\n\n"
+    "Customer details (chunk {chunk_index} of {chunk_count}):\n\n"
+    "{customer_text}{general_notes_text}"
 )
 
-# ---------------------------------------------------------------------------
-# Connect export — synthesis  (from app/routes/connect_export.py)
-# ---------------------------------------------------------------------------
-CONNECT_SYNTHESIS_SYSTEM_PROMPT = (
-    "You are an expert at writing Microsoft Connect self-evaluations for "
-    "Azure technical sellers. You will receive multiple partial summaries "
-    "that each cover a subset of customers, plus overall statistics. "
-    "Combine them into a single Connect form response.\n\n"
-    "The Connect form has 3 fields. Write each as a separate Markdown section:\n\n"
+CONNECT_USER_PROMPT_SYNTHESIS = (
+    "You will combine multiple partial evidence summaries into a single "
+    "Connect self-evaluation.\n\n"
+    "Follow these steps.\n\n"
+    "STEP 1 — Consolidate evidence\n"
+    "Review all partial summaries and merge the evidence into a unified "
+    "dataset. Remove duplicates.\n\n"
+    "STEP 2 — Theme identification\n"
+    "Group the consolidated evidence into 3–6 major themes.\n\n"
+    "STEP 3 — Evaluation answers\n"
+    "Using the themes and evidence, write each of these 3 sections as "
+    "separate Markdown headings:\n\n"
     "## What results did you deliver, and how did you do it?\n"
     "- Focus on IMPACT, not just activity. Highlight outcomes and results.\n"
     "- Use specific examples with metrics where possible.\n"
@@ -139,12 +227,18 @@ CONNECT_SYNTHESIS_SYSTEM_PROMPT = (
     "## What are your priorities going forward?\n"
     "- Base these on patterns you see in the data.\n"
     "- Suggest concrete next steps, not vague aspirations.\n\n"
-    "Tips (follow these strictly):\n"
+    "STEP 4 — Final review\n"
+    "Before writing the final answers, briefly review the evidence to ensure "
+    "no significant accomplishments were overlooked.\n\n"
+    "Tips:\n"
     "- Be concise. Use bullet points, not paragraphs.\n"
     "- Quantify your impact wherever you can.\n"
-    "- Avoid routine tasks. Focus on outcomes that moved the needle.\n"
     "- Write in first person.\n"
     "- Do not invent information that isn't in the data.\n"
+    "- Do not repeat chunks verbatim — synthesize and combine.\n\n"
+    "Overall period stats:\n{header}\n\n"
+    "Here are partial summaries from {chunk_count} customer groups:\n\n"
+    "{combined}"
 )
 
 # ---------------------------------------------------------------------------
