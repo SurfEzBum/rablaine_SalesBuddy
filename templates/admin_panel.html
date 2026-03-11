@@ -92,8 +92,8 @@
                         <!-- Action buttons (shown when connected) -->
                         <div id="msxConnectedActions" class="d-none">
                             <div class="d-flex gap-2 mb-3">
-                                <button type="button" class="btn btn-sm btn-primary" id="msxRefreshBtn">
-                                    <i class="bi bi-arrow-clockwise"></i> Refresh Token
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="msxRefreshBtn">
+                                    <i class="bi bi-arrow-clockwise"></i> Check Status
                                 </button>
                                 <button type="button" class="btn btn-sm btn-outline-success" id="msxTestBtn">
                                     <i class="bi bi-lightning"></i> Test Connection
@@ -879,7 +879,7 @@ async function loadMsxStatus() {
 
         if (data.authenticated) {
             // Show connected, but verify we can actually reach MSX in the background
-            updateMsxStatusDisplay('connected', `Token expires in ${data.expires_in_minutes} minutes`);
+            updateMsxStatusDisplay('connected', `Token expires in ${data.expires_in_minutes} min (auto-refreshes)`);
 
             // Quick connectivity check - if VPN is off, the token is useless
             try {
@@ -888,7 +888,7 @@ async function loadMsxStatus() {
                 if (testData.vpn_blocked) {
                     updateMsxStatusDisplay('vpn');
                 } else if (!testData.success) {
-                    updateMsxStatusDisplay('connected', `Token expires in ${data.expires_in_minutes} minutes (connection issue)`);
+                    updateMsxStatusDisplay('connected', `Token expires in ${data.expires_in_minutes} min (connection issue)`);
                 }
             } catch (e) {
                 // Network error - likely VPN is off
@@ -1122,7 +1122,7 @@ document.getElementById('adminAuthNoCliRetryBtn').addEventListener('click', asyn
 document.getElementById('msxRefreshBtn').addEventListener('click', async function() {
     const btn = this;
     const originalHtml = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Refreshing...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking...';
     btn.disabled = true;
     
     try {
