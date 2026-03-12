@@ -37,7 +37,7 @@
             <div class="card text-center h-100" style="cursor: pointer; transition: transform 0.2s;">
                 <div class="card-body">
                     <i class="bi bi-building text-success" style="font-size: 3rem;"></i>
-                    <h5 class="card-title mt-3">Customers</h5>
+                    <p class="h5 card-title mt-3 mb-0">Customers</p>
                     <p class="card-text text-muted">{{ stats.customers }} total</p>
                 </div>
             </div>
@@ -48,7 +48,7 @@
             <div class="card text-center h-100" style="cursor: pointer; transition: transform 0.2s;">
                 <div class="card-body">
                     <i class="bi bi-people text-info" style="font-size: 3rem;"></i>
-                    <h5 class="card-title mt-3">Sellers</h5>
+                    <p class="h5 card-title mt-3 mb-0">Sellers</p>
                     <p class="card-text text-muted">{{ stats.sellers }} total</p>
                 </div>
             </div>
@@ -59,7 +59,7 @@
             <div class="card text-center h-100" style="cursor: pointer; transition: transform 0.2s;">
                 <div class="card-body">
                     <i class="bi bi-flag-fill" style="font-size: 3rem; color: #c49000;"></i>
-                    <h5 class="card-title mt-3">Milestone Tracker</h5>
+                    <p class="h5 card-title mt-3 mb-0">Milestone Tracker</p>
                     <p class="card-text text-muted">Track customer milestones</p>
                 </div>
             </div>
@@ -70,7 +70,7 @@
             <div class="card text-center h-100" style="cursor: pointer; transition: transform 0.2s;">
                 <div class="card-body">
                     <i class="bi bi-graph-up-arrow" style="font-size: 3rem; color: #742774;"></i>
-                    <h5 class="card-title mt-3">Revenue Analyzer</h5>
+                    <p class="h5 card-title mt-3 mb-0">Revenue Analyzer</p>
                     <p class="card-text text-muted">Trends & service breakdowns</p>
                 </div>
             </div>
@@ -225,7 +225,7 @@
                 {% if has_engagements %}
                 <li class="nav-item" role="presentation">
                     <button class="nav-link" id="engagements-tab" data-bs-toggle="pill" data-bs-target="#engagements-view" type="button" role="tab" aria-controls="engagements-view" aria-selected="false">
-                        <i class="bi bi-kanban"></i> Engagements <span class="text-muted fw-normal" id="engagements-count" style="font-size:0.8em;">({{ engagement_count }})</span>
+                        <i class="bi bi-kanban"></i> Engagements <span class="fw-normal" id="engagements-count" style="font-size:0.8em; opacity:0.85;">({{ engagement_count }})</span>
                     </button>
                 </li>
                 {% endif %}
