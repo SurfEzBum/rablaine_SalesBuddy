@@ -178,32 +178,34 @@ class TestCustomerViewTemplate:
         assert b'DAE (Account Owner)' in resp.data
 
     def test_csam_dropdown_rendered(self, client, csam_data):
-        """Test CSAM dropdown renders when multiple CSAMs available."""
+        """Test CSAM dropdown renders when multiple CSAMs available and none selected."""
         cid = csam_data['customer1_id']
         resp = client.get(f'/customer/{cid}')
         assert resp.status_code == 200
         assert b'csamSelect' in resp.data
         assert b'Carol CSAM' in resp.data
         assert b'Dave CSAM' in resp.data
+        assert b'Select CSAM' in resp.data
+        assert b'No CSAM' in resp.data
 
     def test_single_csam_has_dropdown_with_no_csam_option(self, client, csam_data):
-        """Test single CSAM renders a dropdown with a 'No CSAM' option."""
+        """Test single CSAM renders a dropdown with 'Select CSAM' and 'No CSAM' options."""
         cid = csam_data['customer2_id']
         resp = client.get(f'/customer/{cid}')
         assert resp.status_code == 200
         assert b'Eve CSAM' in resp.data
         assert b'csamSelect' in resp.data
-        assert 'No CSAM'.encode() in resp.data
+        assert b'Select CSAM' in resp.data
+        assert b'No CSAM' in resp.data
 
     def test_no_csam_no_section(self, client, csam_data):
         """Test no CSAM section when customer has no available CSAMs."""
         cid = csam_data['customer3_id']
         resp = client.get(f'/customer/{cid}')
         assert resp.status_code == 200
-        # Customer3 has no CSAMs, so CSAM label shouldn't appear
-        # (checking that the label only appears in csam sections)
+        # Customer3 has no CSAMs, so CSAM section shouldn't appear
         html = resp.data.decode()
-        assert 'csamSelect' not in html
+        assert 'id="csamSection"' not in html
 
     def test_no_dae_no_section(self, client, csam_data):
         """Test DAE section hidden when customer has no DAE."""
@@ -212,8 +214,8 @@ class TestCustomerViewTemplate:
         assert resp.status_code == 200
         assert b'DAE (Account Owner)' not in resp.data
 
-    def test_csam_preselected(self, app, client, csam_data):
-        """Test dropdown shows correct CSAM as selected."""
+    def test_csam_preselected_shows_tag(self, app, client, csam_data):
+        """Test selected CSAM shows as a badge tag, not a dropdown."""
         cid = csam_data['customer1_id']
         with app.app_context():
             customer = db.session.get(Customer, cid)
@@ -222,5 +224,7 @@ class TestCustomerViewTemplate:
 
         resp = client.get(f'/customer/{cid}')
         html = resp.data.decode()
-        # The selected option should have 'selected' attribute
-        assert f'value="{csam_data["csam1_id"]}" selected' in html
+        # Should show CSAM as a badge tag, not a dropdown
+        assert 'badge bg-secondary' in html
+        assert 'Carol CSAM' in html
+        assert '<select id="csamSelect"' not in html
