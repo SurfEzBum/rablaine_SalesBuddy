@@ -158,6 +158,13 @@ def run_migrations(db):
     # Migration: Add website and favicon_b64 columns to partners
     _migrate_partner_favicon_columns(db, inspector)
 
+    # Migration: Add DAE (account owner) columns to customers
+    _add_column_if_not_exists(db, inspector, 'customers', 'dae_name', 'VARCHAR(200)')
+    _add_column_if_not_exists(db, inspector, 'customers', 'dae_alias', 'VARCHAR(100)')
+
+    # Migration: Add CSAM table and customer FK
+    _migrate_csam_support(db, inspector)
+
     # =========================================================================
     # End migrations
     # =========================================================================
@@ -1035,3 +1042,42 @@ def _migrate_opportunity_details_columns(db, inspector):
     _add_column_if_not_exists(db, inspector, 'user_preferences', 'fy_transition_started', 'DATETIME')
     _add_column_if_not_exists(db, inspector, 'user_preferences', 'fy_sync_complete', 'BOOLEAN DEFAULT 0 NOT NULL')
     _add_column_if_not_exists(db, inspector, 'user_preferences', 'fy_last_completed', 'VARCHAR(10)')
+
+
+def _migrate_csam_support(db, inspector):
+    """Add customer_csams table, customers_csams M2M table, and csam_id FK to customers.
+
+    The customer_csams table stores CSAM records from MSX. The customers_csams
+    table is the M2M association showing which CSAMs MSX lists for each customer.
+    The csam_id FK on customers is the user's chosen primary CSAM.
+    """
+    # customer_csams table (created by db.create_all() but we guard for safety)
+    if not _table_exists(inspector, 'customer_csams'):
+        with db.engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE customer_csams (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(200) NOT NULL,
+                    alias VARCHAR(100),
+                    created_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+                )
+            """))
+            conn.commit()
+        print("  Created table 'customer_csams'")
+
+    # customers_csams M2M association table
+    if not _table_exists(inspector, 'customers_csams'):
+        with db.engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE customers_csams (
+                    customer_id INTEGER NOT NULL REFERENCES customers(id),
+                    csam_id INTEGER NOT NULL REFERENCES customer_csams(id),
+                    PRIMARY KEY (customer_id, csam_id)
+                )
+            """))
+            conn.commit()
+        print("  Created table 'customers_csams'")
+
+    # csam_id FK on customers
+    _add_column_if_not_exists(db, inspector, 'customers', 'csam_id',
+                              'INTEGER REFERENCES customer_csams(id) ON DELETE SET NULL')

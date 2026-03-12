@@ -64,10 +64,11 @@ from app.services.msx_api import (
     batch_query_accounts,
     batch_query_territories,
     batch_query_account_teams,
+    batch_query_account_csams,
     build_account_url,
     get_user_alias,
 )
-from app.models import Customer, Milestone, Territory, Seller, POD, SolutionEngineer, SyncStatus, Vertical, db
+from app.models import Customer, CustomerCSAM, Milestone, Territory, Seller, POD, SolutionEngineer, SyncStatus, Vertical, db
 
 logger = logging.getLogger(__name__)
 
@@ -1069,7 +1070,7 @@ def _par_query_accounts(account_ids, batch_size, progress_q, worker_id):
             select=["accountid", "name", "msp_mstopparentid",
                     "_territoryid_value", "msp_verticalcode",
                     "msp_verticalcategorycode", "websiteurl",
-                    "msp_parentinglevelcode"],
+                    "msp_parentinglevelcode", "_ownerid_value"],
             filter_query=" or ".join(filter_parts),
             top=batch_size + 5,
         )
@@ -1123,6 +1124,25 @@ def _par_query_teams(account_ids, batch_size, progress_q, worker_id):
     return {"account_sellers": account_sellers,
             "unique_sellers": unique_sellers,
             "account_ses": account_ses}
+
+
+_CSAM_BATCH = 10  # CSAMs are rare (~0-3 per account), safe to batch more
+
+
+def _par_query_csams(account_ids, batch_size, progress_q, worker_id):
+    """Worker: query CSAM team members for a chunk of account IDs."""
+    account_csams: dict = {}
+    unique_csams: dict = {}
+    batches = math.ceil(len(account_ids) / batch_size) if account_ids else 0
+    for batch_num, i in enumerate(range(0, len(account_ids), batch_size), start=1):
+        batch = account_ids[i:i + batch_size]
+        csam_result = batch_query_account_csams(batch, batch_size=len(batch))
+        if csam_result.get("success"):
+            account_csams.update(csam_result.get("account_csams", {}))
+            unique_csams.update(csam_result.get("unique_csams", {}))
+        progress_q.put({"worker": worker_id, "batch": batch_num,
+                        "total_batches": batches, "csams_found": len(unique_csams)})
+    return {"account_csams": account_csams, "unique_csams": unique_csams}
 
 
 @msx_bp.route('/import-stream')
@@ -1350,6 +1370,7 @@ def import_stream():
                     "seller_name": None,
                     "seller_type": None,
                     "pod_name": pod_name,
+                    "owner_id": acct.get("_ownerid_value"),
                 }
                 accounts_data.append(account_data)
 
@@ -1426,6 +1447,36 @@ def import_stream():
                     sellers_seen.update(r["unique_sellers"])
                     account_ses.update(r["account_ses"])
 
+            # ----------------------------------------------------------
+            # Phase 4b: Parallel CSAM queries (3 workers)
+            # ----------------------------------------------------------
+            phase = "querying CSAMs"
+            csam_chunks = _split_chunks(all_ids, _PARALLEL_WORKERS)
+            csam_total = sum(
+                math.ceil(len(c) / _CSAM_BATCH) for c in csam_chunks if c
+            )
+            csam_done = 0
+
+            account_csams: dict = {}    # account_id -> [{name, user_id}]
+            csams_seen: dict = {}       # name -> {name, user_id}
+
+            with ThreadPoolExecutor(max_workers=_PARALLEL_WORKERS) as pool:
+                futures = [
+                    pool.submit(_par_query_csams, chunk, _CSAM_BATCH,
+                                progress_q, idx + 1)
+                    for idx, chunk in enumerate(csam_chunks) if chunk
+                ]
+                while not all(f.done() for f in futures):
+                    time.sleep(0.3)
+                    for evt in _drain(progress_q):
+                        csam_done += 1
+                for evt in _drain(progress_q):
+                    csam_done += 1
+                for f in futures:
+                    r = f.result()
+                    account_csams.update(r["account_csams"])
+                    csams_seen.update(r["unique_csams"])
+
             # Populate seller info on accounts
             accounts_with_sellers = 0
             for ad in accounts_data:
@@ -1450,7 +1501,8 @@ def import_stream():
 
             yield _sse({
                 "message": (
-                    f"Found {len(sellers_seen)} sellers for "
+                    f"Found {len(sellers_seen)} sellers, "
+                    f"{len(csams_seen)} CSAMs for "
                     f"{accounts_with_sellers}/{len(accounts_data)} accounts"
                 ),
                 "progress": 86,
@@ -1610,6 +1662,36 @@ def import_stream():
                 "progress": 94,
             })
 
+            # CSAMs
+            csam_map: dict = {}  # name -> CustomerCSAM
+            csams_created = 0
+            for csam_name, csam_info in csams_seen.items():
+                existing = CustomerCSAM.query.filter_by(name=csam_name).first()
+                if existing:
+                    csam_map[csam_name] = existing
+                    # Backfill alias if missing
+                    if not existing.alias and csam_info.get("user_id"):
+                        alias = get_user_alias(csam_info["user_id"])
+                        if alias:
+                            existing.alias = alias
+                else:
+                    systemuser_id = csam_info.get("user_id")
+                    alias = get_user_alias(systemuser_id) if systemuser_id else None
+                    csam = CustomerCSAM(name=csam_name, alias=alias)
+                    db.session.add(csam)
+                    csam_map[csam_name] = csam
+                    csams_created += 1
+            db.session.flush()
+
+            # Resolve DAE aliases for accounts that have an owner_id.
+            # We batch-collect unique owner IDs first to avoid duplicate lookups.
+            owner_ids = {
+                ad["owner_id"] for ad in accounts_data if ad.get("owner_id")
+            }
+            owner_alias_cache: dict = {}  # systemuser_id -> alias
+            for oid in owner_ids:
+                owner_alias_cache[oid] = get_user_alias(oid)
+
             # Verticals
             yield _sse({"message": "Creating verticals...", "progress": 95})
             verticals_map = {}
@@ -1742,6 +1824,29 @@ def import_stream():
                             cust.verticals = new_verticals
                             changed = True
 
+                        # Update DAE (account owner) from MSX
+                        owner_id = ad.get("owner_id")
+                        if owner_id:
+                            alias = owner_alias_cache.get(owner_id)
+                            if alias and cust.dae_alias != alias:
+                                cust.dae_alias = alias
+                                changed = True
+                            # Resolve DAE display name from fullname on the account
+                            # (owner name not in accounts query — use alias as fallback)
+                            if alias and not cust.dae_name:
+                                cust.dae_name = alias
+                                changed = True
+
+                        # Update available CSAMs (M2M) from MSX
+                        acct_csam_list = account_csams.get(ad["id"], [])
+                        new_csam_objs = [
+                            csam_map[c["name"]]
+                            for c in acct_csam_list if c["name"] in csam_map
+                        ]
+                        if set(new_csam_objs) != set(cust.available_csams):
+                            cust.available_csams = new_csam_objs
+                            changed = True
+
                         if changed:
                             customers_updated += 1
                         else:
@@ -1767,6 +1872,19 @@ def import_stream():
                         vert = verticals_map[ad["vertical_category"]]
                         if vert not in customer.verticals:
                             customer.verticals.append(vert)
+                    # DAE
+                    owner_id = ad.get("owner_id")
+                    if owner_id:
+                        alias = owner_alias_cache.get(owner_id)
+                        if alias:
+                            customer.dae_alias = alias
+                            customer.dae_name = alias
+                    # Available CSAMs (M2M)
+                    acct_csam_list = account_csams.get(ad["id"], [])
+                    for c in acct_csam_list:
+                        csam_obj = csam_map.get(c["name"])
+                        if csam_obj:
+                            customer.available_csams.append(csam_obj)
                     db.session.add(customer)
                     existing_customers_by_tpid[tpid] = customer
                     customers_created += 1
@@ -1840,6 +1958,7 @@ def import_stream():
                     "sellers_created": sellers_created,
                     "sellers_updated": sellers_updated,
                     "solution_engineers_created": ses_created,
+                    "csams_created": csams_created,
                     "verticals_created": verticals_created,
                     "customers_created": customers_created,
                     "customers_skipped": customers_skipped,
@@ -1853,7 +1972,7 @@ def import_stream():
                 f"Parallel MSX Import complete in {duration}s: "
                 f"{pods_created} PODs, {territories_created} territories, "
                 f"{sellers_created} sellers ({sellers_updated} updated), {ses_created} SEs, "
-                f"{verticals_created} verticals, "
+                f"{csams_created} CSAMs, {verticals_created} verticals, "
                 f"{customers_created} customers created, {customers_updated} updated, "
                 f"{customers_unchanged} unchanged, {customers_skipped} skipped"
             )

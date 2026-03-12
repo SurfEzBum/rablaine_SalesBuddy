@@ -5,7 +5,7 @@ Handles customer listing, creation, viewing, editing, and TPID workflow.
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, g
 from sqlalchemy import func, or_
 
-from app.models import db, Customer, Seller, Territory, Note, UserPreference
+from app.models import db, Customer, CustomerCSAM, Seller, Territory, Note, UserPreference
 from app.services.backup import backup_customer as _backup_customer
 
 # Create blueprint
@@ -313,6 +313,27 @@ def api_save_tpid_url(customer_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@customers_bp.route('/customer/<int:id>/csam', methods=['POST'])
+def customer_update_csam(id):
+    """Update customer's selected primary CSAM via AJAX."""
+    customer = Customer.query.filter_by(id=id).first_or_404()
+    data = request.get_json(silent=True) or {}
+    csam_id = data.get('csam_id')
+
+    if csam_id is not None and csam_id != '':
+        csam_id = int(csam_id)
+        # Validate the CSAM is in this customer's available list
+        available_ids = {c.id for c in customer.available_csams}
+        if csam_id not in available_ids:
+            return jsonify({'success': False, 'error': 'Invalid CSAM selection'}), 400
+        customer.csam_id = csam_id
+    else:
+        customer.csam_id = None
+
+    db.session.commit()
+    return jsonify({'success': True, 'csam_id': customer.csam_id})
 
 
 @customers_bp.route('/customer/<int:id>/overview', methods=['POST'])
