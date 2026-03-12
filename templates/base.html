@@ -273,6 +273,15 @@
             outline-color: #c084c0;
             background-color: #3a3f44;
         }
+        /* Highlight for Enter-to-select target */
+        .list-group-item-action.enter-target {
+            background-color: #e9ecef;
+            border-left: 3px solid #742774;
+        }
+        [data-bs-theme="dark"] .list-group-item-action.enter-target {
+            background-color: #3a3f44;
+            border-left: 3px solid #c084c0;
+        }
         
         /* Skip to main content link - accessibility */
         .skip-link {
@@ -2220,10 +2229,11 @@
                     customerResults.innerHTML = '<div class="list-group-item text-muted">No customers found</div>';
                     return;
                 }
-                html += customers.map(c => {
+                html += customers.map((c, i) => {
                     const displayName = c.nickname ? `${c.name} (${c.nickname})` : c.name;
                     const tpidBadge = c.tpid ? `<span class="badge bg-secondary ms-2">TPID: ${c.tpid}</span>` : '';
-                    return `<a href="${baseUrl}${c.id}${suffix}" class="list-group-item list-group-item-action"><i class="bi bi-building"></i> ${displayName}${tpidBadge}</a>`;
+                    const highlight = (i === 0 && customerSearch.value.trim()) ? ' enter-target' : '';
+                    return `<a href="${baseUrl}${c.id}${suffix}" class="list-group-item list-group-item-action${highlight}"><i class="bi bi-building"></i> ${displayName}${tpidBadge}</a>`;
                 }).join('');
                 customerResults.innerHTML = html;
             }
@@ -2283,6 +2293,13 @@
                     e.preventDefault();
                     if (items.length > 0) {
                         items[items.length - 1].focus();
+                    }
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (this.value.trim()) {
+                        // Select first actual customer (skip "Not Customer Associated")
+                        const firstCustomer = customerResults.querySelector('a.list-group-item-action:not(.list-group-item-light)');
+                        if (firstCustomer) firstCustomer.click();
                     }
                 }
             });
