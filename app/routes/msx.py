@@ -1714,6 +1714,12 @@ def import_stream():
             # DSSs are SolutionEngineer records linked to territories (not pods).
             dss_map: dict = {}  # (name, specialty) -> SolutionEngineer
             dss_created = 0
+            dss_total = len(dss_seen)
+
+            yield _sse({
+                "message": f"Syncing digital solution specialists (0/{dss_total})...",
+                "progress": 95,
+            })
 
             # Build account_id → territory_name for DSS territory linking
             acct_territory: dict = {
@@ -1722,7 +1728,7 @@ def import_stream():
                 if ad.get("territory_name")
             }
 
-            for dss_name, dss_info in dss_seen.items():
+            for dss_idx, (dss_name, dss_info) in enumerate(dss_seen.items(), 1):
                 specialty = dss_info.get("specialty", "")
                 dss_key = (dss_name, specialty)
                 existing = SolutionEngineer.query.filter_by(
@@ -1744,6 +1750,11 @@ def import_stream():
                     db.session.add(se)
                     dss_map[dss_key] = se
                     dss_created += 1
+                if dss_idx % 5 == 0 or dss_idx == dss_total:
+                    yield _sse({
+                        "message": f"Syncing DSSs ({dss_idx}/{dss_total})...",
+                        "progress": 95,
+                    })
             db.session.flush()
 
             # Link DSSs to territories based on which accounts they cover
@@ -1759,10 +1770,22 @@ def import_stream():
                         se.territories.append(territory)
             db.session.flush()
 
+            yield _sse({
+                "message": f"Created {dss_created} new DSSs, linked to territories",
+                "progress": 95,
+            })
+
             # CSAMs
             csam_map: dict = {}  # name -> CustomerCSAM
             csams_created = 0
-            for csam_name, csam_info in csams_seen.items():
+            csam_total = len(csams_seen)
+
+            yield _sse({
+                "message": f"Syncing CSAMs (0/{csam_total})...",
+                "progress": 96,
+            })
+
+            for csam_idx, (csam_name, csam_info) in enumerate(csams_seen.items(), 1):
                 existing = CustomerCSAM.query.filter_by(name=csam_name).first()
                 if existing:
                     csam_map[csam_name] = existing
@@ -1778,7 +1801,17 @@ def import_stream():
                     db.session.add(csam)
                     csam_map[csam_name] = csam
                     csams_created += 1
+                if csam_idx % 5 == 0 or csam_idx == csam_total:
+                    yield _sse({
+                        "message": f"Syncing CSAMs ({csam_idx}/{csam_total})...",
+                        "progress": 96,
+                    })
             db.session.flush()
+
+            yield _sse({
+                "message": f"Created {csams_created} new CSAMs",
+                "progress": 96,
+            })
 
             # Resolve DAE aliases for accounts that have an owner_id.
             # We batch-collect unique owner IDs first to avoid duplicate lookups.
@@ -1786,11 +1819,23 @@ def import_stream():
                 ad["owner_id"] for ad in accounts_data if ad.get("owner_id")
             }
             owner_alias_cache: dict = {}  # systemuser_id -> alias
-            for oid in owner_ids:
+            dae_total = len(owner_ids)
+
+            yield _sse({
+                "message": f"Resolving account owner aliases (0/{dae_total})...",
+                "progress": 97,
+            })
+
+            for dae_idx, oid in enumerate(owner_ids, 1):
                 owner_alias_cache[oid] = get_user_alias(oid)
+                if dae_idx % 5 == 0 or dae_idx == dae_total:
+                    yield _sse({
+                        "message": f"Resolving account owner aliases ({dae_idx}/{dae_total})...",
+                        "progress": 97,
+                    })
 
             # Verticals
-            yield _sse({"message": "Creating verticals...", "progress": 95})
+            yield _sse({"message": "Creating verticals...", "progress": 97})
             verticals_map = {}
             verticals_created = 0
             for vn in verticals_seen:
@@ -1807,12 +1852,12 @@ def import_stream():
 
             yield _sse({
                 "message": f"Created {verticals_created} new verticals",
-                "progress": 96,
+                "progress": 97,
             })
 
             # Customers
             SyncStatus.mark_started('accounts')
-            yield _sse({"message": "Syncing customers...", "progress": 97})
+            yield _sse({"message": "Syncing customers...", "progress": 98})
             customers_created = 0
             customers_skipped = 0
             customers_updated = 0
@@ -1844,7 +1889,7 @@ def import_stream():
                     if idx % 50 == 0:
                         yield _sse({
                             "message": f"Processing customer {idx}/{len(accounts_data)}...",
-                            "progress": 97 + int((idx / len(accounts_data)) * 2),
+                            "progress": 98 + int((idx / len(accounts_data)) * 1),
                         })
 
                     tpid = ad.get("tpid")
