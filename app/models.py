@@ -94,6 +94,20 @@ solution_engineers_pods = db.Table(
     db.Column('pod_id', db.Integer, db.ForeignKey('pods.id'), primary_key=True)
 )
 
+# Association table for many-to-many relationship between SolutionEngineer and Territory
+solution_engineers_territories = db.Table(
+    'solution_engineers_territories',
+    db.Column('solution_engineer_id', db.Integer, db.ForeignKey('solution_engineers.id'), primary_key=True),
+    db.Column('territory_id', db.Integer, db.ForeignKey('territories.id'), primary_key=True)
+)
+
+# Association table for many-to-many relationship between Customer and CustomerCSAM
+customers_csams = db.Table(
+    'customers_csams',
+    db.Column('customer_id', db.Integer, db.ForeignKey('customers.id'), primary_key=True),
+    db.Column('csam_id', db.Integer, db.ForeignKey('customer_csams.id'), primary_key=True)
+)
+
 
 # =============================================================================
 # User and Authentication Models
@@ -200,6 +214,12 @@ class SolutionEngineer(db.Model):
         back_populates='solution_engineers',
         lazy='select'
     )
+    territories = db.relationship(
+        'Territory',
+        secondary=solution_engineers_territories,
+        back_populates='solution_engineers',
+        lazy='select'
+    )
     
     def __repr__(self) -> str:
         return f'<SolutionEngineer {self.name} ({self.specialty})>'
@@ -209,6 +229,31 @@ class SolutionEngineer(db.Model):
         if self.alias:
             return f"{self.alias}@microsoft.com"
         return None
+
+
+class TerritoryDSSSelection(db.Model):
+    """Tracks which DSS is selected per territory per specialty.
+
+    Similar to how CustomerCSAM tracks the user-selected primary CSAM for a
+    customer, this records which Digital Solution Specialist the user has
+    chosen for a given specialty within a territory.
+    """
+    __tablename__ = 'territory_dss_selections'
+
+    id = db.Column(db.Integer, primary_key=True)
+    territory_id = db.Column(db.Integer, db.ForeignKey('territories.id'), nullable=False)
+    specialty = db.Column(db.String(100), nullable=False)
+    solution_engineer_id = db.Column(db.Integer, db.ForeignKey('solution_engineers.id'), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('territory_id', 'specialty', name='uq_territory_specialty'),
+    )
+
+    territory = db.relationship('Territory', back_populates='dss_selections')
+    solution_engineer = db.relationship('SolutionEngineer')
+
+    def __repr__(self) -> str:
+        return f'<TerritoryDSSSelection territory={self.territory_id} specialty={self.specialty}>'
 
 
 class Vertical(db.Model):
@@ -249,6 +294,18 @@ class Territory(db.Model):
         lazy='select'
     )
     customers = db.relationship('Customer', back_populates='territory', lazy='select')
+    solution_engineers = db.relationship(
+        'SolutionEngineer',
+        secondary=solution_engineers_territories,
+        back_populates='territories',
+        lazy='select'
+    )
+    dss_selections = db.relationship(
+        'TerritoryDSSSelection',
+        back_populates='territory',
+        lazy='select',
+        cascade='all, delete-orphan'
+    )
     
     def __repr__(self) -> str:
         return f'<Territory {self.name}>'
@@ -290,6 +347,40 @@ class Seller(db.Model):
 # Customer and Call Log Models
 # =============================================================================
 
+class CustomerCSAM(db.Model):
+    """Customer Success Account Manager (CSAM) from MSX account team.
+    
+    Multiple CSAMs can be assigned to an account in MSX but there's no
+    API-level way to determine which is primary. The user picks the correct
+    one via a dropdown on the customer view page.
+    """
+    __tablename__ = 'customer_csams'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    alias = db.Column(db.String(100), nullable=True)  # Microsoft email alias
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+
+    # Relationships — `customers` is the M2M of all customers linked to this CSAM from MSX,
+    # while `selected_customers` is the 1:M of customers who picked this CSAM as primary.
+    customers = db.relationship(
+        'Customer',
+        secondary='customers_csams',
+        back_populates='available_csams',
+        lazy='select'
+    )
+    selected_customers = db.relationship('Customer', back_populates='csam', foreign_keys='Customer.csam_id')
+
+    def get_email(self) -> Optional[str]:
+        """Get email address from alias."""
+        if self.alias:
+            return f"{self.alias}@microsoft.com"
+        return None
+
+    def __repr__(self) -> str:
+        return f'<CustomerCSAM {self.name}>'
+
+
 class Customer(db.Model):
     """Customer account that can be associated with call logs."""
     __tablename__ = 'customers'
@@ -304,11 +395,21 @@ class Customer(db.Model):
     account_context = db.Column(db.Text, nullable=True)  # Persistent freeform account notes
     territory_id = db.Column(db.Integer, db.ForeignKey('territories.id'), nullable=True)
     seller_id = db.Column(db.Integer, db.ForeignKey('sellers.id'), nullable=True)
+    dae_name = db.Column(db.String(200), nullable=True)  # DAE (account owner) display name from MSX
+    dae_alias = db.Column(db.String(100), nullable=True)  # DAE email alias (part before @microsoft.com)
+    csam_id = db.Column(db.Integer, db.ForeignKey('customer_csams.id'), nullable=True)  # User-selected primary CSAM
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
 
     # Relationships
     seller = db.relationship('Seller', back_populates='customers')
     territory = db.relationship('Territory', back_populates='customers')
+    csam = db.relationship('CustomerCSAM', back_populates='selected_customers', foreign_keys=[csam_id])
+    available_csams = db.relationship(
+        'CustomerCSAM',
+        secondary='customers_csams',
+        back_populates='customers',
+        lazy='select'
+    )
     notes = db.relationship('Note', back_populates='customer', lazy='select')
     engagements = db.relationship('Engagement', back_populates='customer', lazy='select',
                                   order_by='Engagement.created_at.desc()')

@@ -34,6 +34,12 @@ REQUEST_TIMEOUT = 45
 MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = [1, 3, 5]  # Wait between retries
 
+# Thread-local storage for optional retry callback.
+# Callers can set msx_retry_state.callback to a function(attempt, max_retries, wait_secs, error_type)
+# to receive notifications when _msx_request retries a transient failure.
+import threading
+msx_retry_state = threading.local()
+
 # Standard headers for OData requests
 def _get_headers(token: str) -> Dict[str, str]:
     return {
@@ -108,6 +114,7 @@ def _msx_request(
             return False
     
     # Retry loop for transient failures (timeouts, connection errors)
+    retry_cb = getattr(msx_retry_state, 'callback', None)
     last_exception = None
     for attempt in range(MAX_RETRIES):
         try:
@@ -122,6 +129,8 @@ def _msx_request(
                     f"MSX request {method} attempt {attempt + 1}/{MAX_RETRIES} failed "
                     f"({type(e).__name__}), retrying in {wait}s..."
                 )
+                if retry_cb:
+                    retry_cb(attempt + 1, MAX_RETRIES, wait, type(e).__name__)
                 time.sleep(wait)
             else:
                 logger.error(
@@ -1850,6 +1859,166 @@ def batch_query_account_teams(
         
     except Exception as e:
         logger.exception("Error in batch account teams query")
+        return {"success": False, "error": str(e)}
+
+
+def batch_query_account_csams(
+    account_ids: List[str],
+    batch_size: int = 10
+) -> Dict[str, Any]:
+    """
+    Query msp_accountteams for CSAM (Customer Success Account Mgmt IC) members.
+
+    Uses a separate query from the seller/SE batch because the CSAM filter is
+    independent of the Cloud & AI qualifier used for sellers. CSAM records are
+    identified by ``msp_standardtitle eq 'Customer Success Account Mgmt IC'``.
+
+    With the tight title filter results are small (~0-3 per account), so a
+    batch size of 10 is safe without hitting the top-100 limit.
+
+    Args:
+        account_ids: List of account GUIDs
+        batch_size: How many accounts per query (default 10)
+
+    Returns:
+        Dict with:
+        - account_csams: {account_id: [{name, user_id}]}
+        - unique_csams: {name: {name, user_id}}
+    """
+    account_csams: Dict[str, list] = {}  # account_id -> [{name, user_id}]
+    unique_csams: Dict[str, dict] = {}   # name -> {name, user_id}
+
+    try:
+        for i in range(0, len(account_ids), batch_size):
+            batch = account_ids[i:i + batch_size]
+
+            account_filter = " or ".join(
+                [f"_msp_accountid_value eq {aid}" for aid in batch]
+            )
+            filter_query = (
+                f"({account_filter}) and "
+                "msp_standardtitle eq 'Customer Success Account Mgmt IC'"
+            )
+
+            result = query_entity(
+                "msp_accountteams",
+                select=[
+                    "_msp_accountid_value",
+                    "msp_fullname",
+                    "_msp_systemuserid_value",
+                ],
+                filter_query=filter_query,
+                top=100,
+            )
+
+            if not result.get("success"):
+                logger.warning(f"CSAM batch query failed: {result.get('error')}")
+                continue
+
+            for record in result.get("records", []):
+                acct_id = record.get("_msp_accountid_value")
+                name = record.get("msp_fullname", "")
+                user_id = record.get("_msp_systemuserid_value")
+                if not acct_id or not name:
+                    continue
+
+                account_csams.setdefault(acct_id, [])
+                # Avoid duplicates within the same account
+                if not any(c["name"] == name for c in account_csams[acct_id]):
+                    account_csams[acct_id].append({"name": name, "user_id": user_id})
+
+                if name not in unique_csams:
+                    unique_csams[name] = {"name": name, "user_id": user_id}
+
+        return {
+            "success": True,
+            "account_csams": account_csams,
+            "unique_csams": unique_csams,
+        }
+
+    except Exception as e:
+        logger.exception("Error in batch account CSAM query")
+        return {"success": False, "error": str(e)}
+
+
+def batch_query_account_dss(
+    account_ids: List[str],
+    batch_size: int = 10
+) -> Dict[str, Any]:
+    """
+    Query msp_accountteams for Digital Solution Specialists (DSS).
+
+    DSSs are identified by ``msp_standardtitle eq 'Digital Solution Area
+    Specialists IC'``.  Their specialty area comes from ``msp_qualifier2``
+    (e.g. "Security", "Modern Work", "Azure Infrastructure").
+
+    Args:
+        account_ids: List of account GUIDs
+        batch_size: How many accounts per query (default 10)
+
+    Returns:
+        Dict with:
+        - account_dss: {account_id: [{name, specialty, user_id}]}
+        - unique_dss: {name: {name, specialty, user_id}}
+    """
+    account_dss: Dict[str, list] = {}   # account_id -> [{name, specialty, user_id}]
+    unique_dss: Dict[str, dict] = {}    # name -> {name, specialty, user_id}
+
+    try:
+        for i in range(0, len(account_ids), batch_size):
+            batch = account_ids[i:i + batch_size]
+
+            account_filter = " or ".join(
+                [f"_msp_accountid_value eq {aid}" for aid in batch]
+            )
+            filter_query = (
+                f"({account_filter}) and "
+                "msp_standardtitle eq 'Digital Solution Area Specialists IC'"
+            )
+
+            result = query_entity(
+                "msp_accountteams",
+                select=[
+                    "_msp_accountid_value",
+                    "msp_fullname",
+                    "msp_qualifier2",
+                    "_msp_systemuserid_value",
+                ],
+                filter_query=filter_query,
+                top=100,
+            )
+
+            if not result.get("success"):
+                logger.warning(f"DSS batch query failed: {result.get('error')}")
+                continue
+
+            for record in result.get("records", []):
+                acct_id = record.get("_msp_accountid_value")
+                name = record.get("msp_fullname", "")
+                specialty = record.get("msp_qualifier2", "")
+                user_id = record.get("_msp_systemuserid_value")
+                if not acct_id or not name:
+                    continue
+
+                account_dss.setdefault(acct_id, [])
+                if not any(d["name"] == name for d in account_dss[acct_id]):
+                    account_dss[acct_id].append({
+                        "name": name, "specialty": specialty, "user_id": user_id,
+                    })
+
+                if name not in unique_dss:
+                    unique_dss[name] = {
+                        "name": name, "specialty": specialty, "user_id": user_id,
+                    }
+
+        return {
+            "success": True,
+            "account_dss": account_dss,
+            "unique_dss": unique_dss,
+        }
+
+    except Exception as e:
+        logger.exception("Error in batch account DSS query")
         return {"success": False, "error": str(e)}
 
 

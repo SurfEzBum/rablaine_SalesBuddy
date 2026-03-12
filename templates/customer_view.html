@@ -256,6 +256,20 @@
                                 {% endif %}
                             </div>
                         </div>
+                        {% if customer.dae_name or customer.dae_alias %}
+                        <div class="mb-2">
+                            <div class="text-muted small">DAE (Account Owner)</div>
+                            <div>
+                                {% if customer.dae_alias %}
+                                    <a href="mailto:{{ customer.dae_alias }}@microsoft.com" class="text-decoration-none">
+                                        <i class="bi bi-person-badge"></i> {{ customer.dae_name or customer.dae_alias }}
+                                    </a>
+                                {% else %}
+                                    <i class="bi bi-person-badge"></i> {{ customer.dae_name }}
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
                     <div class="col-md-6">
                         <div class="mb-2">
@@ -275,6 +289,25 @@
                                 {% for vertical in customer.verticals|sort(attribute='name') %}
                                     <span class="badge bg-primary">{{ vertical.name }}</span>
                                 {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if customer.available_csams|length > 0 %}
+                        <div class="mb-2" id="csamSection">
+                            <div class="text-muted small">CSAM</div>
+                            <div id="csamValue">
+                                {% if customer.csam %}
+                                    <span class="badge bg-secondary"><i class="bi bi-person"></i> {{ customer.csam.name }}</span>
+                                {% else %}
+                                    <select id="csamSelect" class="form-select form-select-sm d-inline-block" style="width: auto; min-width: 200px;" onchange="saveCsamSelection(this.value)">
+                                        <option value="" disabled selected>— Select CSAM —</option>
+                                        <option value="none">— No CSAM —</option>
+                                        {% for csam in customer.available_csams|sort(attribute='name') %}
+                                            <option value="{{ csam.id }}">{{ csam.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <span id="csamSaveStatus" class="ms-1 small" style="display: none;"></span>
+                                {% endif %}
                             </div>
                         </div>
                         {% endif %}
@@ -435,6 +468,46 @@ function toggleContextEdit() {
     document.getElementById('contextForm').style.display = 'block';
     document.getElementById('editContextBtn').style.display = 'none';
     document.getElementById('contextTextarea').focus();
+}
+
+function saveCsamSelection(csamId) {
+    const status = document.getElementById('csamSaveStatus');
+    const isNoCsam = csamId === 'none';
+    const actualCsamId = isNoCsam ? null : csamId;
+
+    fetch('{{ url_for("customers.customer_update_csam", id=customer.id) }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+        body: JSON.stringify({csam_id: actualCsamId})
+    }).then(r => r.json()).then(data => {
+        if (data.success) {
+            if (isNoCsam) {
+                document.getElementById('csamSection').style.display = 'none';
+            } else {
+                const select = document.getElementById('csamSelect');
+                const csamName = select.options[select.selectedIndex].text;
+                const valueDiv = document.getElementById('csamValue');
+                const badge = document.createElement('span');
+                badge.className = 'badge bg-secondary';
+                const icon = document.createElement('i');
+                icon.className = 'bi bi-person';
+                badge.appendChild(icon);
+                badge.appendChild(document.createTextNode(' ' + csamName));
+                valueDiv.textContent = '';
+                valueDiv.appendChild(badge);
+            }
+        } else {
+            status.textContent = '✗ ' + (data.error || 'Error');
+            status.className = 'ms-1 small text-danger';
+            status.style.display = 'inline';
+            setTimeout(() => { status.style.display = 'none'; }, 2000);
+        }
+    }).catch(() => {
+        status.textContent = '✗ Network error';
+        status.className = 'ms-1 small text-danger';
+        status.style.display = 'inline';
+        setTimeout(() => { status.style.display = 'none'; }, 2000);
+    });
 }
 
 function cancelContextEdit() {
