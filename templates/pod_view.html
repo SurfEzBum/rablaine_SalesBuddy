@@ -143,7 +143,7 @@
 
 {% endblock %}
 
-{% block scripts %}
+{% block extra_js %}
 <script>
 function saveDssSelection(territoryId, specialty, seId, selectEl) {
     fetch('/territory/' + territoryId + '/dss-selection', {
