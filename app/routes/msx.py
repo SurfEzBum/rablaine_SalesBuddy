@@ -1524,6 +1524,21 @@ def import_stream():
                     account_dss.update(r["account_dss"])
                     dss_seen.update(r["unique_dss"])
 
+            # Filter out broad/non-specific DSS specialties that aren't useful
+            _DSS_EXCLUDED_SPECIALTIES = {"Unified", "Cloud & AI-Acq", "Cloud & AI"}
+            dss_seen = {
+                name: info for name, info in dss_seen.items()
+                if info.get("specialty", "") not in _DSS_EXCLUDED_SPECIALTIES
+            }
+            _allowed_dss_names = set(dss_seen.keys())
+            for acct_id in list(account_dss):
+                account_dss[acct_id] = [
+                    d for d in account_dss[acct_id]
+                    if d["name"] in _allowed_dss_names
+                ]
+                if not account_dss[acct_id]:
+                    del account_dss[acct_id]
+
             # Populate seller info on accounts
             accounts_with_sellers = 0
             for ad in accounts_data:

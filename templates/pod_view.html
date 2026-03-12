@@ -106,7 +106,10 @@
             </div>
             <div class="card-body">
                 {% for terr_name, dss_list in territory_dss.items() %}
-                    <h6 class="mt-{% if not loop.first %}3{% else %}0{% endif %} mb-2">
+                    {% if not loop.first %}
+                        <hr class="my-3">
+                    {% endif %}
+                    <h6 class="mb-2 fw-bold">
                         <i class="bi bi-geo-alt"></i> {{ terr_name }}
                     </h6>
                     <ul class="list-group list-group-flush mb-2">

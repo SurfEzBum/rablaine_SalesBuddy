@@ -256,6 +256,20 @@
                                 {% endif %}
                             </div>
                         </div>
+                        {% if customer.dae_name or customer.dae_alias %}
+                        <div class="mb-2">
+                            <div class="text-muted small">DAE (Account Owner)</div>
+                            <div>
+                                {% if customer.dae_alias %}
+                                    <a href="mailto:{{ customer.dae_alias }}@microsoft.com" class="text-decoration-none">
+                                        <i class="bi bi-person-badge"></i> {{ customer.dae_name or customer.dae_alias }}
+                                    </a>
+                                {% else %}
+                                    <i class="bi bi-person-badge"></i> {{ customer.dae_name }}
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
                     <div class="col-md-6">
                         <div class="mb-2">
@@ -278,36 +292,20 @@
                             </div>
                         </div>
                         {% endif %}
-                        {% if customer.dae_name or customer.dae_alias %}
-                        <div class="mb-2">
-                            <div class="text-muted small">DAE (Account Owner)</div>
-                            <div>
-                                {% if customer.dae_alias %}
-                                    <a href="mailto:{{ customer.dae_alias }}@microsoft.com" class="text-decoration-none">
-                                        <i class="bi bi-person-badge"></i> {{ customer.dae_name or customer.dae_alias }}
-                                    </a>
-                                {% else %}
-                                    <i class="bi bi-person-badge"></i> {{ customer.dae_name }}
-                                {% endif %}
-                            </div>
-                        </div>
-                        {% endif %}
                         {% if customer.available_csams|length > 0 %}
                         <div class="mb-2">
                             <div class="text-muted small">CSAM</div>
                             <div>
                                 {% if customer.available_csams|length == 1 %}
                                     {% set only_csam = customer.available_csams[0] %}
-                                    {% if only_csam.alias %}
-                                        <a href="mailto:{{ only_csam.alias }}@microsoft.com" class="text-decoration-none">
-                                            <i class="bi bi-headset"></i> {{ only_csam.name }}
-                                        </a>
-                                    {% else %}
-                                        <i class="bi bi-headset"></i> {{ only_csam.name }}
-                                    {% endif %}
+                                    <select id="csamSelect" class="form-select form-select-sm d-inline-block" style="width: auto; min-width: 200px;" onchange="saveCsamSelection(this.value)">
+                                        <option value="">— No CSAM —</option>
+                                        <option value="{{ only_csam.id }}" {% if customer.csam_id == only_csam.id %}selected{% endif %}>{{ only_csam.name }}</option>
+                                    </select>
+                                    <span id="csamSaveStatus" class="ms-1 small" style="display: none;"></span>
                                 {% else %}
                                     <select id="csamSelect" class="form-select form-select-sm d-inline-block" style="width: auto; min-width: 200px;" onchange="saveCsamSelection(this.value)">
-                                        <option value="">— Select CSAM —</option>
+                                        <option value="">— No CSAM —</option>
                                         {% for csam in customer.available_csams|sort(attribute='name') %}
                                             <option value="{{ csam.id }}" {% if customer.csam_id == csam.id %}selected{% endif %}>{{ csam.name }}</option>
                                         {% endfor %}

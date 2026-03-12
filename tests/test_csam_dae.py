@@ -186,13 +186,14 @@ class TestCustomerViewTemplate:
         assert b'Carol CSAM' in resp.data
         assert b'Dave CSAM' in resp.data
 
-    def test_single_csam_no_dropdown(self, client, csam_data):
-        """Test single CSAM renders as plain text, no dropdown."""
+    def test_single_csam_has_dropdown_with_no_csam_option(self, client, csam_data):
+        """Test single CSAM renders a dropdown with a 'No CSAM' option."""
         cid = csam_data['customer2_id']
         resp = client.get(f'/customer/{cid}')
         assert resp.status_code == 200
         assert b'Eve CSAM' in resp.data
-        assert b'csamSelect' not in resp.data
+        assert b'csamSelect' in resp.data
+        assert 'No CSAM'.encode() in resp.data
 
     def test_no_csam_no_section(self, client, csam_data):
         """Test no CSAM section when customer has no available CSAMs."""
