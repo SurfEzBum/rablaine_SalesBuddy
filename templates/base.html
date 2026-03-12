@@ -219,23 +219,23 @@
         
         /* New Call Log button styling for navbar visibility */
         .navbar .btn-success {
-            background-color: #0e9544 !important; /* Saturated but slightly darker green */
-            border-color: #0c823b !important;
+            background-color: #0a8537 !important; /* Darker green for WCAG AA 4.5:1 contrast with white text */
+            border-color: #097a30 !important;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15) !important;
         }
         .navbar .btn-success:hover {
-            background-color: #0c7c36 !important;
-            border-color: #0a6b2f !important;
+            background-color: #097a30 !important;
+            border-color: #086b2a !important;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
         }
         [data-bs-theme="dark"] .navbar .btn-success {
-            background-color: #10a54a !important;
-            border-color: #0e9142 !important;
+            background-color: #0a8537 !important; /* WCAG AA: ~4.8:1 contrast with white text */
+            border-color: #097a30 !important;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
         }
         [data-bs-theme="dark"] .navbar .btn-success:hover {
-            background-color: #0d8d3d !important;
-            border-color: #0c7c36 !important;
+            background-color: #097a30 !important;
+            border-color: #086b2a !important;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35) !important;
         }
         
@@ -281,6 +281,21 @@
         [data-bs-theme="dark"] .list-group-item-action.enter-target {
             background-color: #3a3f44;
             border-left: 3px solid #c084c0;
+        }
+        /* Dark mode outline-success: brighten green text for WCAG AA contrast on dark bg */
+        [data-bs-theme="dark"] .btn-outline-success {
+            color: #75b798 !important;
+            border-color: #75b798 !important;
+        }
+        [data-bs-theme="dark"] .btn-outline-success:hover {
+            color: #fff !important;
+            background-color: #198754 !important;
+            border-color: #198754 !important;
+        }
+        [data-bs-theme="dark"] .btn-outline-success.active {
+            color: #fff !important;
+            background-color: #198754 !important;
+            border-color: #198754 !important;
         }
         
         /* Skip to main content link - accessibility */
