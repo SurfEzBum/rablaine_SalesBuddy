@@ -15,7 +15,7 @@ const PartnerShare = (function () {
   let onlineUsers = [];
   let pendingShareType = null;   // "directory" or "partner"
   let pendingPartnerId = null;   // set when sharing a single partner
-  let pendingRecipientSid = null;
+  let pendingRecipientEmail = null;
 
   // ── Connection ──────────────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ const PartnerShare = (function () {
 
       // Our share was accepted — send the data
       socket.on('share_accepted', async (data) => {
-        await _sendShareData(data.recipient_sid);
+        await _sendShareData(data.recipient_email);
       });
 
       // Our share was declined
@@ -71,6 +71,12 @@ const PartnerShare = (function () {
       // Incoming partner data
       socket.on('share_payload', async (data) => {
         await _receiveShareData(data);
+      });
+
+      // Another tab already handled the offer
+      socket.on('share_offer_handled', () => {
+        const container = document.getElementById('shareOfferContainer');
+        if (container) container.innerHTML = '';
       });
 
       socket.on('share_error', (data) => {
@@ -99,11 +105,11 @@ const PartnerShare = (function () {
     modal.show();
   }
 
-  function sendShareRequest(recipientSid) {
+  function sendShareRequest(recipientEmail) {
     if (!socket || !connected) return;
 
-    pendingRecipientSid = recipientSid;
-    const recipient = onlineUsers.find(u => u.sid === recipientSid);
+    pendingRecipientEmail = recipientEmail;
+    const recipient = onlineUsers.find(u => u.email === recipientEmail);
 
     // Update modal to show "waiting" state
     const body = document.getElementById('shareModalBody');
@@ -116,7 +122,7 @@ const PartnerShare = (function () {
     `;
 
     socket.emit('share_request', {
-      recipient_sid: recipientSid,
+      recipient_email: recipientEmail,
       share_type: pendingShareType,
       partner_name: pendingPartnerId ? document.title.replace(' - NoteHelper', '') : null,
     });
@@ -129,7 +135,7 @@ const PartnerShare = (function () {
 
   // ── Sending data ────────────────────────────────────────────────────
 
-  async function _sendShareData(recipientSid) {
+  async function _sendShareData(recipientEmail) {
     try {
       let url, partners;
       if (pendingShareType === 'partner' && pendingPartnerId) {
@@ -143,7 +149,7 @@ const PartnerShare = (function () {
       }
 
       socket.emit('share_data', {
-        recipient_sid: recipientSid,
+        recipient_email: recipientEmail,
         partners: partners,
       });
 
@@ -217,7 +223,7 @@ const PartnerShare = (function () {
           <i class="bi bi-share me-2"></i>
           <strong class="me-auto">Partner Share</strong>
           <button type="button" class="btn-close btn-close-white" 
-                  onclick="PartnerShare.declineOffer('${data.sender_sid}', '${offerId}')"></button>
+                  onclick="PartnerShare.declineOffer('${_esc(data.sender_email)}', '${offerId}')"></button>
         </div>
         <div class="toast-body">
           <p class="mb-2">
@@ -225,11 +231,11 @@ const PartnerShare = (function () {
           </p>
           <div class="d-flex gap-2">
             <button class="btn btn-sm btn-success" 
-                    onclick="PartnerShare.acceptOffer('${data.sender_sid}', '${offerId}')">
+                    onclick="PartnerShare.acceptOffer('${_esc(data.sender_email)}', '${offerId}')">
               <i class="bi bi-check-lg"></i> Accept
             </button>
             <button class="btn btn-sm btn-outline-secondary"
-                    onclick="PartnerShare.declineOffer('${data.sender_sid}', '${offerId}')">
+                    onclick="PartnerShare.declineOffer('${_esc(data.sender_email)}', '${offerId}')">
               Decline
             </button>
           </div>
@@ -238,14 +244,14 @@ const PartnerShare = (function () {
     `;
   }
 
-  function acceptOffer(senderSid, offerId) {
-    socket.emit('share_accept', { sender_sid: senderSid });
+  function acceptOffer(senderEmail, offerId) {
+    socket.emit('share_accept', { sender_email: senderEmail });
     document.getElementById(offerId)?.remove();
     _showToast('Accepted — waiting for data...', 'info');
   }
 
-  function declineOffer(senderSid, offerId) {
-    socket.emit('share_decline', { sender_sid: senderSid });
+  function declineOffer(senderEmail, offerId) {
+    socket.emit('share_decline', { sender_email: senderEmail });
     document.getElementById(offerId)?.remove();
   }
 
@@ -276,7 +282,7 @@ const PartnerShare = (function () {
         ${onlineUsers.map(u => `
           <button class="list-group-item list-group-item-action d-flex align-items-center share-user-item"
                   data-name="${_esc(u.name.toLowerCase())}" data-email="${_esc(u.email.toLowerCase())}"
-                  onclick="PartnerShare.sendShareRequest('${u.sid}')">
+                  onclick="PartnerShare.sendShareRequest('${_esc(u.email)}')">
             <i class="bi bi-person-circle fs-4 me-3 text-success"></i>
             <div>
               <div class="fw-semibold">${_esc(u.name)}</div>
@@ -316,7 +322,7 @@ const PartnerShare = (function () {
   function _resetShareState() {
     pendingShareType = null;
     pendingPartnerId = null;
-    pendingRecipientSid = null;
+    pendingRecipientEmail = null;
   }
 
   function _showToast(message, type) {

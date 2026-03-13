@@ -84,6 +84,45 @@ def _decode_jwt_claims(token: str) -> dict | None:
 class ShareNamespace(Namespace):
     """Socket.IO namespace for partner directory sharing."""
 
+    # ── Helpers ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _sids_for_email(email: str) -> list[str]:
+        """Return all SIDs belonging to a given email address."""
+        return [
+            sid for sid, u in _online_users.items()
+            if u["email"].lower() == email.lower()
+        ]
+
+    @staticmethod
+    def _emit_to_user(event: str, data: dict, email: str):
+        """Emit an event to ALL SIDs for a given email."""
+        for sid in ShareNamespace._sids_for_email(email):
+            emit(event, data, to=sid)
+
+    @staticmethod
+    def _unique_online_users(exclude_email: str) -> list[dict]:
+        """Build a deduplicated online user list, excluding a given email."""
+        seen = set()
+        users = []
+        for u in _online_users.values():
+            email_lower = u["email"].lower()
+            if email_lower == exclude_email.lower():
+                continue
+            if email_lower in seen:
+                continue
+            seen.add(email_lower)
+            users.append({"name": u["name"], "email": u["email"]})
+        return users
+
+    def _broadcast_online(self):
+        """Send updated online list to all connected clients."""
+        for sid, me in _online_users.items():
+            users = self._unique_online_users(me["email"])
+            emit("online_users", {"users": users}, to=sid)
+
+    # ── Connection lifecycle ─────────────────────────────────────────────
+
     def on_connect(self, auth=None):
         """Authenticate the user via JWT and track them as online."""
         token = None
@@ -126,80 +165,93 @@ class ShareNamespace(Namespace):
 
     def on_get_online_users(self):
         """Client requests the current online user list."""
-        users = [
-            {"sid": sid, "name": u["name"], "email": u["email"]}
-            for sid, u in _online_users.items()
-            if sid != request.sid  # exclude self
-        ]
+        my_email = _online_users.get(request.sid, {}).get("email", "")
+        users = self._unique_online_users(my_email)
         emit("online_users", {"users": users})
+
+    # ── Share flow (all email-based) ─────────────────────────────────────
 
     def on_share_request(self, data):
         """Sender wants to share partners with a specific recipient.
 
-        data: {recipient_sid, share_type: "directory"|"partner", partner_name?: str}
+        data: {recipient_email, share_type: "directory"|"partner", partner_name?: str}
         """
-        recipient_sid = data.get("recipient_sid")
-        if recipient_sid not in _online_users:
+        recipient_email = data.get("recipient_email", "")
+        recipient_sids = self._sids_for_email(recipient_email)
+        if not recipient_sids:
             emit("share_error", {"error": "Recipient is no longer online"})
             return
 
         sender = _online_users.get(request.sid, {})
-        emit("share_offer", {
-            "sender_sid": request.sid,
+        sender_email = sender.get("email", "")
+
+        # Notify ALL of recipient's tabs
+        self._emit_to_user("share_offer", {
+            "sender_email": sender_email,
             "sender_name": sender.get("name", "Unknown"),
-            "sender_email": sender.get("email", ""),
             "share_type": data.get("share_type", "partner"),
             "partner_name": data.get("partner_name"),
-        }, to=recipient_sid)
+        }, recipient_email)
 
     def on_share_accept(self, data):
         """Recipient accepts a share offer."""
-        sender_sid = data.get("sender_sid")
-        if sender_sid not in _online_users:
+        sender_email = data.get("sender_email", "")
+        sender_sids = self._sids_for_email(sender_email)
+        if not sender_sids:
             emit("share_error", {"error": "Sender is no longer online"})
             return
 
-        emit("share_accepted", {
-            "recipient_sid": request.sid,
-        }, to=sender_sid)
+        recipient = _online_users.get(request.sid, {})
+
+        # Notify ALL of sender's tabs
+        self._emit_to_user("share_accepted", {
+            "recipient_email": recipient.get("email", ""),
+            "recipient_name": recipient.get("name", "Unknown"),
+        }, sender_email)
+
+        # Dismiss the offer on other recipient tabs
+        recipient_email = recipient.get("email", "")
+        for sid in self._sids_for_email(recipient_email):
+            if sid != request.sid:
+                emit("share_offer_handled", {}, to=sid)
 
     def on_share_decline(self, data):
         """Recipient declines a share offer."""
-        sender_sid = data.get("sender_sid")
-        if sender_sid not in _online_users:
+        sender_email = data.get("sender_email", "")
+        sender_sids = self._sids_for_email(sender_email)
+        if not sender_sids:
             return
 
         recipient = _online_users.get(request.sid, {})
-        emit("share_declined", {
+
+        # Notify ALL of sender's tabs
+        self._emit_to_user("share_declined", {
             "recipient_name": recipient.get("name", "Unknown"),
-        }, to=sender_sid)
+        }, sender_email)
+
+        # Dismiss the offer on other recipient tabs
+        recipient_email = recipient.get("email", "")
+        for sid in self._sids_for_email(recipient_email):
+            if sid != request.sid:
+                emit("share_offer_handled", {}, to=sid)
 
     def on_share_data(self, data):
         """Sender transmits partner data to the recipient.
 
-        data: {recipient_sid, partners: [...]}
+        data: {recipient_email, partners: [...]}
         The gateway relays without inspecting the payload.
         """
-        recipient_sid = data.get("recipient_sid")
-        if recipient_sid not in _online_users:
+        recipient_email = data.get("recipient_email", "")
+        recipient_sids = self._sids_for_email(recipient_email)
+        if not recipient_sids:
             emit("share_error", {"error": "Recipient is no longer online"})
             return
 
         sender = _online_users.get(request.sid, {})
-        emit("share_payload", {
+
+        # Send to ALL recipient tabs — the client deduplicates the upsert
+        self._emit_to_user("share_payload", {
             "sender_name": sender.get("name", "Unknown"),
             "sender_email": sender.get("email", ""),
             "partners": data.get("partners", []),
-        }, to=recipient_sid)
-
-    # ── Helpers ──────────────────────────────────────────────────────────
-
-    def _broadcast_online(self):
-        """Send updated online list to all connected clients."""
-        for sid in _online_users:
-            users = [
-                {"sid": s, "name": u["name"], "email": u["email"]}
-                for s, u in _online_users.items()
-                if s != sid  # exclude self from own list
-            ]
-            emit("online_users", {"users": users}, to=sid)
+        }, recipient_email)
