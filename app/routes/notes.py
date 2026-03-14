@@ -973,3 +973,38 @@ def api_fill_my_day_save():
         db.session.rollback()
         logger.error(f"Fill My Day - save error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# =============================================================================
+# Note Sharing API
+# =============================================================================
+
+@notes_bp.route('/api/share/note/<int:note_id>')
+def api_share_serialize_note(note_id):
+    """Serialize a single note for sharing."""
+    from app.services.note_sharing import serialize_note
+    note = Note.query.get_or_404(note_id)
+    return jsonify({'success': True, 'note': serialize_note(note)})
+
+
+@notes_bp.route('/api/share/receive-note', methods=['POST'])
+def api_share_receive_note():
+    """Receive and import a shared note from a sharing peer."""
+    from app.services.note_sharing import import_shared_note
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    note_data = data.get('note')
+    sender_name = data.get('sender_name', 'Unknown')
+
+    if not note_data:
+        return jsonify({'success': False, 'error': 'No note in payload'}), 400
+
+    try:
+        result = import_shared_note(note_data, sender_name)
+        return jsonify(result)
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Note share import error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500

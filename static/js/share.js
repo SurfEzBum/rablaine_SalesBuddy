@@ -1,8 +1,8 @@
 /**
- * Partner sharing client — Socket.IO connection and share flow management.
+ * Sharing client — Socket.IO connection and share flow management.
  *
- * Connects to the NoteHelper gateway via Socket.IO for real-time partner
- * directory sharing between NoteHelper instances.
+ * Connects to the NoteHelper gateway via Socket.IO for real-time sharing
+ * of partner directories and notes between NoteHelper instances.
  *
  * Usage:
  *   PartnerShare.init()           — Connect to gateway (called on page load)
@@ -14,8 +14,9 @@ const PartnerShare = (function () {
   let connected = false;
   let shareEnabled = false;  // true only after successful connect (passes allowlist)
   let onlineUsers = [];
-  let pendingShareType = null;   // "directory" or "partner"
+  let pendingShareType = null;   // "directory", "partner", or "note"
   let pendingPartnerId = null;   // set when sharing a single partner
+  let pendingNoteId = null;      // set when sharing a note
   let pendingRecipientEmail = null;
 
   // ── Connection ──────────────────────────────────────────────────────
@@ -99,9 +100,10 @@ const PartnerShare = (function () {
 
   // ── Share initiation ────────────────────────────────────────────────
 
-  function openShareModal(type, partnerId) {
+  function openShareModal(type, itemId) {
     pendingShareType = type || 'directory';
-    pendingPartnerId = partnerId || null;
+    pendingPartnerId = (type === 'partner') ? (itemId || null) : null;
+    pendingNoteId = (type === 'note') ? (itemId || null) : null;
 
     if (!connected || onlineUsers.length === 0) {
       _showToast('No teammates online right now. They need to be running NoteHelper too.', 'info');
@@ -133,6 +135,7 @@ const PartnerShare = (function () {
       recipient_email: recipientEmail,
       share_type: pendingShareType,
       partner_name: pendingPartnerId ? document.title.replace(' - NoteHelper', '') : null,
+      note_title: pendingNoteId ? document.title.replace(' - NoteHelper', '') : null,
     });
   }
 
@@ -145,26 +148,39 @@ const PartnerShare = (function () {
 
   async function _sendShareData(recipientEmail) {
     try {
-      let url, partners;
-      if (pendingShareType === 'partner' && pendingPartnerId) {
+      if (pendingShareType === 'note' && pendingNoteId) {
+        // Note sharing
+        const resp = await fetch(`/api/share/note/${pendingNoteId}`);
+        const data = await resp.json();
+        socket.emit('share_data', {
+          recipient_email: recipientEmail,
+          share_type: 'note',
+          note: data.note,
+        });
+        _showToast('Note shared successfully!', 'success');
+      } else if (pendingShareType === 'partner' && pendingPartnerId) {
         const resp = await fetch(`/api/share/partner/${pendingPartnerId}`);
         const data = await resp.json();
-        partners = [data.partner];
+        socket.emit('share_data', {
+          recipient_email: recipientEmail,
+          share_type: 'partner',
+          partners: [data.partner],
+        });
+        _showToast('Sent 1 partner successfully!', 'success');
       } else {
         const resp = await fetch('/api/share/directory');
         const data = await resp.json();
-        partners = data.partners;
+        const partners = data.partners;
+        socket.emit('share_data', {
+          recipient_email: recipientEmail,
+          share_type: 'directory',
+          partners: partners,
+        });
+        const count = partners.length;
+        _showToast(`Sent ${count} partner${count !== 1 ? 's' : ''} successfully!`, 'success');
       }
-
-      socket.emit('share_data', {
-        recipient_email: recipientEmail,
-        partners: partners,
-      });
-
-      const count = partners.length;
-      _showToast(`Sent ${count} partner${count !== 1 ? 's' : ''} successfully!`, 'success');
     } catch (e) {
-      _showToast('Failed to send partner data: ' + e.message, 'danger');
+      _showToast('Failed to send share data: ' + e.message, 'danger');
     }
     _resetShareState();
     bootstrap.Modal.getInstance(document.getElementById('sharePartnerModal'))?.hide();
@@ -173,6 +189,43 @@ const PartnerShare = (function () {
   // ── Receiving data ──────────────────────────────────────────────────
 
   async function _receiveShareData(data) {
+    if (data.share_type === 'note' && data.note) {
+      // Note import
+      const customerName = data.note.customer?.name || 'General';
+      _showToast(
+        `Receiving note for ${_esc(customerName)} from ${_esc(data.sender_name)}...`,
+        'info',
+      );
+      try {
+        const resp = await fetch('/api/share/receive-note', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            note: data.note,
+            sender_name: data.sender_name,
+          }),
+        });
+        const result = await resp.json();
+        if (result.success) {
+          const msg = result.customer_name
+            ? `Note imported for ${_esc(result.customer_name)}!`
+            : 'Note imported!';
+          _showToast(msg, 'success');
+          // Reload if on notes list or note view
+          if (window.location.pathname === '/notes' ||
+              window.location.pathname.startsWith('/note/')) {
+            setTimeout(() => window.location.reload(), 1500);
+          }
+        } else {
+          _showToast('Import failed: ' + (result.error || 'unknown error'), 'danger');
+        }
+      } catch (e) {
+        _showToast('Import failed: ' + e.message, 'danger');
+      }
+      return;
+    }
+
+    // Partner import (existing behavior)
     const count = (data.partners || []).length;
     _showToast(
       `Receiving ${count} partner${count !== 1 ? 's' : ''} from ${_esc(data.sender_name)}...`,
@@ -209,9 +262,14 @@ const PartnerShare = (function () {
   // ── Incoming offer UI ───────────────────────────────────────────────
 
   function _showIncomingOffer(data) {
-    const typeLabel = data.share_type === 'directory'
-      ? 'their entire partner directory'
-      : `partner "${_esc(data.partner_name || 'a partner')}"`;
+    let typeLabel;
+    if (data.share_type === 'note') {
+      typeLabel = `a note${data.note_title ? ' "' + _esc(data.note_title) + '"' : ''}`;
+    } else if (data.share_type === 'directory') {
+      typeLabel = 'their entire partner directory';
+    } else {
+      typeLabel = `partner "${_esc(data.partner_name || 'a partner')}"`;
+    }
 
     // Create or reuse the offer toast container
     let container = document.getElementById('shareOfferContainer');
@@ -330,6 +388,7 @@ const PartnerShare = (function () {
   function _resetShareState() {
     pendingShareType = null;
     pendingPartnerId = null;
+    pendingNoteId = null;
     pendingRecipientEmail = null;
   }
 

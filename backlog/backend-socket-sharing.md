@@ -11,7 +11,7 @@ Browser A ──Socket.IO──→ Gateway ←──Socket.IO── Browser B
 Browser A ──HTTP──→ Flask A              Flask B ←──HTTP── Browser B
 ```
 
-- Socket.IO lives in `static/js/partner-share.js` (IIFE module)
+- Socket.IO lives in `static/js/share.js` (IIFE module)
 - Connection drops on page navigation or browser close
 - Share state (pending type, partner ID) lives in JS closure — lost on navigation
 - Flask backend has no awareness of the Socket.IO connection
@@ -149,8 +149,8 @@ Minimal — the gateway `sharing_hub.py` doesn't care whether the client is a br
 1. Keep the current browser-only implementation working
 2. Add the Flask Socket.IO client alongside it
 3. Migrate share flow from browser→gateway to browser→Flask→gateway
-4. Remove Socket.IO CDN and `partner-share.js` Socket.IO code (keep the UI parts, just change the transport)
-5. The `partner-share.js` becomes a thin HTTP client instead of a Socket.IO client
+4. Remove Socket.IO CDN and `share.js` Socket.IO code (keep the UI parts, just change the transport)
+5. The `share.js` becomes a thin HTTP client instead of a Socket.IO client
 
 ## Testing Considerations
 
@@ -163,7 +163,7 @@ Minimal — the gateway `sharing_hub.py` doesn't care whether the client is a br
 
 - `sharing_client.py` + event handlers: ~100 lines
 - New/modified Flask API endpoints: ~80 lines
-- Modify `partner-share.js` to use HTTP instead of Socket.IO: ~60 lines changed
+- Modify `share.js` to use HTTP instead of Socket.IO: ~60 lines changed
 - Token refresh loop: ~20 lines
 - Tests: ~100 lines
 - Total: ~360 lines of code, plus removing ~150 lines of browser Socket.IO code

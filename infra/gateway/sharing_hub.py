@@ -1,16 +1,16 @@
-"""
-Partner sharing hub — Socket.IO namespace for the NoteHelper gateway.
+"""Sharing hub -- Socket.IO namespace for the NoteHelper gateway.
 
-Handles presence tracking (who's online) and partner data relay between
-NoteHelper instances.  Clients connect directly to the gateway app service
-(not through APIM) using the same JWT for authentication.
+Handles presence tracking (who's online) and data relay between
+NoteHelper instances.  Supports partner sharing and note sharing.
+Clients connect directly to the gateway app service (not through APIM)
+using the same JWT for authentication.
 
 Flow:
 1. Client connects with JWT in auth header → gateway validates → user joins
 2. Other clients see updated online list via ``online_users`` event
 3. Sender emits ``share_request`` → gateway relays to recipient
 4. Recipient accepts → emits ``share_accept`` → gateway relays to sender
-5. Sender emits ``share_data`` with partner JSON → gateway relays to recipient
+5. Sender emits ``share_data`` with payload → gateway relays to recipient
 6. Recipient processes data locally (upsert) → done
 """
 import logging
@@ -91,7 +91,7 @@ def _decode_jwt_claims(token: str) -> dict | None:
 
 
 class ShareNamespace(Namespace):
-    """Socket.IO namespace for partner directory sharing."""
+    """Socket.IO namespace for sharing (partners, notes, etc.)."""
 
     # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -188,9 +188,10 @@ class ShareNamespace(Namespace):
     # ── Share flow (all email-based) ─────────────────────────────────────
 
     def on_share_request(self, data):
-        """Sender wants to share partners with a specific recipient.
+        """Sender wants to share with a specific recipient.
 
-        data: {recipient_email, share_type: "directory"|"partner", partner_name?: str}
+        data: {recipient_email, share_type: "directory"|"partner"|"note",
+               partner_name?: str, note_title?: str}
         """
         recipient_email = data.get("recipient_email", "")
         recipient_sids = self._sids_for_email(recipient_email)
@@ -207,6 +208,7 @@ class ShareNamespace(Namespace):
             "sender_name": sender.get("name", "Unknown"),
             "share_type": data.get("share_type", "partner"),
             "partner_name": data.get("partner_name"),
+            "note_title": data.get("note_title"),
         }, recipient_email)
 
     def on_share_accept(self, data):
@@ -252,9 +254,9 @@ class ShareNamespace(Namespace):
                 emit("share_offer_handled", {}, to=sid)
 
     def on_share_data(self, data):
-        """Sender transmits partner data to the recipient.
+        """Sender transmits share payload to the recipient.
 
-        data: {recipient_email, partners: [...]}
+        data: {recipient_email, share_type, ...payload fields}
         The gateway relays without inspecting the payload.
         """
         recipient_email = data.get("recipient_email", "")
@@ -265,9 +267,10 @@ class ShareNamespace(Namespace):
 
         sender = _online_users.get(request.sid, {})
 
+        # Forward everything except recipient_email, add sender info
+        payload = {k: v for k, v in data.items() if k != "recipient_email"}
+        payload["sender_name"] = sender.get("name", "Unknown")
+        payload["sender_email"] = sender.get("email", "")
+
         # Send to ALL recipient tabs — the client deduplicates the upsert
-        self._emit_to_user("share_payload", {
-            "sender_name": sender.get("name", "Unknown"),
-            "sender_email": sender.get("email", ""),
-            "partners": data.get("partners", []),
-        }, recipient_email)
+        self._emit_to_user("share_payload", payload, recipient_email)
