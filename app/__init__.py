@@ -1,5 +1,5 @@
 """
-Flask application factory for NoteHelper.
+Flask application factory for Sales Buddy.
 Single-user local deployment mode.
 """
 import os
@@ -23,7 +23,7 @@ def create_app():
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
     
     # SQLite database path - use absolute path
-    db_url = os.environ.get('DATABASE_URL', 'sqlite:///data/notehelper.db')
+    db_url = os.environ.get('DATABASE_URL', 'sqlite:///data/salesbuddy.db')
     if db_url.startswith('sqlite:///') and not db_url.startswith('sqlite:////'):
         # Convert relative path to absolute path
         db_path = db_url.replace('sqlite:///', '')
