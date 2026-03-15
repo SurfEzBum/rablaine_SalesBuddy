@@ -681,6 +681,7 @@ def api_fill_my_day_process():
         - success: bool
     """
     from app.services.workiq_service import get_meeting_summary
+    from markupsafe import escape
     
     data = request.get_json()
     if not data:
@@ -712,14 +713,17 @@ def api_fill_my_day_process():
         summary = summary_data.get('summary', '')
         action_items = summary_data.get('action_items', [])
         
-        # Build HTML content
-        content_html = f'<h2>{title}</h2>'
+        # Build HTML content — split summary on double-newlines into <p> tags
+        content_html = f'<h2>{escape(title)}</h2>'
         content_html += '<p><strong>Summary:</strong></p>'
-        content_html += f'<p>{summary}</p>'
+        for para in summary.split('\n\n'):
+            stripped = para.strip()
+            if stripped:
+                content_html += '<p>' + str(escape(stripped)).replace('\n', '<br>') + '</p>'
         if action_items:
             content_html += '<p><strong>Action Items:</strong></p><ul>'
             for item in action_items:
-                content_html += f'<li>{item}</li>'
+                content_html += f'<li>{escape(item)}</li>'
             content_html += '</ul>'
         
         # Add Connect impact signals if present
@@ -727,7 +731,7 @@ def api_fill_my_day_process():
         if impact_items:
             content_html += '<hr><p><strong>Impact Signals:</strong></p><ul>'
             for item in impact_items:
-                content_html += f'<li>{item}</li>'
+                content_html += f'<li>{escape(item)}</li>'
             content_html += '</ul>'
         
         # Add engagement metadata signals if present (Ben's table fields)
@@ -735,7 +739,7 @@ def api_fill_my_day_process():
         if eng_signals:
             content_html += '<hr><p><strong>Engagement Metadata:</strong></p><ul>'
             for field, value in eng_signals.items():
-                content_html += f'<li><strong>{field}:</strong> {value}</li>'
+                content_html += f'<li><strong>{escape(field)}:</strong> {escape(value)}</li>'
             content_html += '</ul>'
         
         result['summary'] = summary
@@ -750,7 +754,7 @@ def api_fill_my_day_process():
     except Exception as e:
         logger.error(f"Fill My Day - summary error for '{title}': {e}")
         result['summary'] = f'[Could not fetch summary: {str(e)}]'
-        result['content_html'] = f'<h2>{title}</h2><p><em>Summary unavailable</em></p>'
+        result['content_html'] = f'<h2>{escape(title)}</h2><p><em>Summary unavailable</em></p>'
     
     # Step 2: AI analysis (topics) - only if we got a real summary and AI is enabled
     if result['summary_ok']:
