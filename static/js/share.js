@@ -1,21 +1,21 @@
 /**
- * Partner sharing client — Socket.IO connection and share flow management.
+ * Sharing client — Socket.IO connection and share flow management.
  *
- * Connects to the NoteHelper gateway via Socket.IO for real-time partner
- * directory sharing between NoteHelper instances.
+ * Connects to the NoteHelper gateway via Socket.IO for real-time sharing
+ * of directories, partners, and notes between NoteHelper instances.
  *
  * Usage:
- *   PartnerShare.init()           — Connect to gateway (called on page load)
- *   PartnerShare.openShareModal() — Open the share modal with online users
- *   PartnerShare.getOnlineCount() — Get number of online peers
+ *   Share.init()           — Connect to gateway (called on page load)
+ *   Share.openShareModal() — Open the share modal with online users
+ *   Share.getOnlineCount() — Get number of online peers
  */
-const PartnerShare = (function () {
+const Share = (function () {
   let socket = null;
   let connected = false;
   let shareEnabled = false;  // true only after successful connect (passes allowlist)
   let onlineUsers = [];
-  let pendingShareType = null;   // "directory" or "partner"
-  let pendingPartnerId = null;   // set when sharing a single partner
+  let pendingShareType = null;   // "directory", "partner", or "note"
+  let pendingItemId = null;      // set when sharing a single partner or note
   let pendingRecipientEmail = null;
 
   // ── Connection ──────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ const PartnerShare = (function () {
         _resetShareState();
       });
 
-      // Incoming partner data
+      // Incoming shared data
       socket.on('share_payload', async (data) => {
         await _receiveShareData(data);
       });
@@ -93,15 +93,15 @@ const PartnerShare = (function () {
       });
 
     } catch (e) {
-      console.warn('Partner sharing unavailable:', e);
+      console.warn('Sharing unavailable:', e);
     }
   }
 
   // ── Share initiation ────────────────────────────────────────────────
 
-  function openShareModal(type, partnerId) {
+  function openShareModal(type, itemId) {
     pendingShareType = type || 'directory';
-    pendingPartnerId = partnerId || null;
+    pendingItemId = (type === 'partner' || type === 'note') ? (itemId || null) : null;
 
     if (!connected || onlineUsers.length === 0) {
       _showToast('No teammates online right now. They need to be running NoteHelper too.', 'info');
@@ -109,7 +109,7 @@ const PartnerShare = (function () {
     }
 
     _renderOnlineList();
-    const modal = new bootstrap.Modal(document.getElementById('sharePartnerModal'));
+    const modal = new bootstrap.Modal(document.getElementById('shareModal'));
     modal.show();
   }
 
@@ -125,54 +125,113 @@ const PartnerShare = (function () {
       <div class="text-center py-4">
         <div class="spinner-border text-primary mb-3" role="status"></div>
         <p>Waiting for <strong>${_esc(recipient?.name || 'recipient')}</strong> to accept...</p>
-        <button class="btn btn-sm btn-outline-secondary" onclick="PartnerShare.cancelShare()">Cancel</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="Share.cancelShare()">Cancel</button>
       </div>
     `;
 
     socket.emit('share_request', {
       recipient_email: recipientEmail,
       share_type: pendingShareType,
-      partner_name: pendingPartnerId ? document.title.replace(' - NoteHelper', '') : null,
+      item_name: pendingItemId ? document.title.replace(' - NoteHelper', '') : null,
     });
   }
 
   function cancelShare() {
     _resetShareState();
-    bootstrap.Modal.getInstance(document.getElementById('sharePartnerModal'))?.hide();
+    bootstrap.Modal.getInstance(document.getElementById('shareModal'))?.hide();
   }
 
   // ── Sending data ────────────────────────────────────────────────────
 
   async function _sendShareData(recipientEmail) {
+    // Capture and clear state atomically to prevent duplicate sends.
+    const shareType = pendingShareType;
+    const itemId = pendingItemId;
+    _resetShareState();
+
+    if (!shareType) return;
+
     try {
-      let url, partners;
-      if (pendingShareType === 'partner' && pendingPartnerId) {
-        const resp = await fetch(`/api/share/partner/${pendingPartnerId}`);
+      if (shareType === 'note' && itemId) {
+        const resp = await fetch(`/api/share/note/${itemId}`);
         const data = await resp.json();
-        partners = [data.partner];
-      } else {
+        socket.emit('share_data', {
+          recipient_email: recipientEmail,
+          share_type: 'note',
+          note: data.note,
+        });
+        _showToast('Note shared successfully!', 'success');
+      } else if (shareType === 'partner' && itemId) {
+        const resp = await fetch(`/api/share/partner/${itemId}`);
+        const data = await resp.json();
+        socket.emit('share_data', {
+          recipient_email: recipientEmail,
+          share_type: 'partner',
+          partners: [data.partner],
+        });
+        _showToast('Sent 1 partner successfully!', 'success');
+      } else if (shareType === 'directory') {
         const resp = await fetch('/api/share/directory');
         const data = await resp.json();
-        partners = data.partners;
+        const partners = data.partners;
+        socket.emit('share_data', {
+          recipient_email: recipientEmail,
+          share_type: 'directory',
+          partners: partners,
+        });
+        const count = partners.length;
+        _showToast(`Sent ${count} partner${count !== 1 ? 's' : ''} successfully!`, 'success');
       }
-
-      socket.emit('share_data', {
-        recipient_email: recipientEmail,
-        partners: partners,
-      });
-
-      const count = partners.length;
-      _showToast(`Sent ${count} partner${count !== 1 ? 's' : ''} successfully!`, 'success');
     } catch (e) {
-      _showToast('Failed to send partner data: ' + e.message, 'danger');
+      _showToast('Failed to send share data: ' + e.message, 'danger');
     }
-    _resetShareState();
-    bootstrap.Modal.getInstance(document.getElementById('sharePartnerModal'))?.hide();
+    bootstrap.Modal.getInstance(document.getElementById('shareModal'))?.hide();
   }
 
   // ── Receiving data ──────────────────────────────────────────────────
 
   async function _receiveShareData(data) {
+    if (data.share_type === 'note' && data.note) {
+      // Note import
+      const customerName = data.note.customer?.name || 'General';
+      _showToast(
+        `Receiving note for ${_esc(customerName)} from ${_esc(data.sender_name)}...`,
+        'info',
+      );
+      try {
+        const resp = await fetch('/api/share/receive-note', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            note: data.note,
+            sender_name: data.sender_name,
+          }),
+        });
+        const result = await resp.json();
+        if (result.success) {
+          // Show what was created (seller, customer, etc.)
+          if (result.created && result.created.length > 0) {
+            _showToast(`Created: ${result.created.join(', ')}`, 'info');
+          }
+          const msg = result.customer_name
+            ? `Note imported for ${_esc(result.customer_name)}!`
+            : 'Note imported!';
+          _showToast(msg, 'success');
+          // Reload if on notes list or note view
+          if (window.location.pathname === '/notes' ||
+              window.location.pathname.startsWith('/note/')) {
+            setTimeout(() => window.location.reload(), 1500);
+          }
+        } else {
+          _showToast('Import failed: ' + (result.error || 'unknown error'), 'danger');
+        }
+      } catch (e) {
+        _showToast('Import failed: ' + e.message, 'danger');
+      }
+      return;
+    }
+
+    // Partner directory / single partner import
     const count = (data.partners || []).length;
     _showToast(
       `Receiving ${count} partner${count !== 1 ? 's' : ''} from ${_esc(data.sender_name)}...`,
@@ -209,9 +268,14 @@ const PartnerShare = (function () {
   // ── Incoming offer UI ───────────────────────────────────────────────
 
   function _showIncomingOffer(data) {
-    const typeLabel = data.share_type === 'directory'
-      ? 'their entire partner directory'
-      : `partner "${_esc(data.partner_name || 'a partner')}"`;
+    let typeLabel;
+    if (data.share_type === 'note') {
+      typeLabel = `a note${data.item_name ? ' "' + _esc(data.item_name) + '"' : ''}`;
+    } else if (data.share_type === 'directory') {
+      typeLabel = 'their partner directory';
+    } else {
+      typeLabel = `"${_esc(data.item_name || 'a partner')}"`;
+    }
 
     // Create or reuse the offer toast container
     let container = document.getElementById('shareOfferContainer');
@@ -229,9 +293,9 @@ const PartnerShare = (function () {
            style="min-width: 350px;">
         <div class="toast-header bg-primary text-white">
           <i class="bi bi-share me-2"></i>
-          <strong class="me-auto">Partner Share</strong>
+          <strong class="me-auto">Share</strong>
           <button type="button" class="btn-close btn-close-white" 
-                  onclick="PartnerShare.declineOffer('${_esc(data.sender_email)}', '${offerId}')"></button>
+                  onclick="Share.declineOffer('${_esc(data.sender_email)}', '${offerId}')"></button>
         </div>
         <div class="toast-body">
           <p class="mb-2">
@@ -239,11 +303,11 @@ const PartnerShare = (function () {
           </p>
           <div class="d-flex gap-2">
             <button class="btn btn-sm btn-success" 
-                    onclick="PartnerShare.acceptOffer('${_esc(data.sender_email)}', '${offerId}')">
+                    onclick="Share.acceptOffer('${_esc(data.sender_email)}', '${offerId}')">
               <i class="bi bi-check-lg"></i> Accept
             </button>
             <button class="btn btn-sm btn-outline-secondary"
-                    onclick="PartnerShare.declineOffer('${_esc(data.sender_email)}', '${offerId}')">
+                    onclick="Share.declineOffer('${_esc(data.sender_email)}', '${offerId}')">
               Decline
             </button>
           </div>
@@ -290,7 +354,7 @@ const PartnerShare = (function () {
         ${onlineUsers.map(u => `
           <button class="list-group-item list-group-item-action d-flex align-items-center share-user-item"
                   data-name="${_esc(u.name.toLowerCase())}" data-email="${_esc(u.email.toLowerCase())}"
-                  onclick="PartnerShare.sendShareRequest('${_esc(u.email)}')">
+                  onclick="Share.sendShareRequest('${_esc(u.email)}')">
             <i class="bi bi-person-circle fs-4 me-3 text-success"></i>
             <div>
               <div class="fw-semibold">${_esc(u.name)}</div>
@@ -316,7 +380,7 @@ const PartnerShare = (function () {
 
   function _updateBadges() {
     // Hide share buttons entirely if not on allowlist
-    document.querySelectorAll('.btn-share-partner').forEach(btn => {
+    document.querySelectorAll('.btn-share').forEach(btn => {
       btn.style.display = shareEnabled ? '' : 'none';
     });
 
@@ -329,7 +393,7 @@ const PartnerShare = (function () {
 
   function _resetShareState() {
     pendingShareType = null;
-    pendingPartnerId = null;
+    pendingItemId = null;
     pendingRecipientEmail = null;
   }
 
