@@ -189,8 +189,7 @@ Double-click `restore.bat` for an interactive restore. It will:
 
 ### What Gets Backed Up
 
-- **Database only** (`data/salesbuddy.db`) - contains all your call logs, customers, sellers, revenue data, etc.
-- **Configuration** (`data/backup_config.json`) is NOT backed up (it stays local so restore doesn't break the backup setup)
+- **Database only** (`data/salesbuddy.db`) - contains all your call logs, customers, sellers, revenue data, and backup settings
 
 ### Retention Policy (defaults)
 

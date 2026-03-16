@@ -3069,12 +3069,12 @@ def scan_init() -> Dict[str, Any]:
             error_msg = team_result.get("error", "")
             # Detect broken msp_accountteams entity (MSX-side outage)
             if "0x80040224" in error_msg or "header name and value" in error_msg.lower():
-                logger.error("MSX msp_accountteams entity is returning 400 — likely an MSX-side outage")
+                logger.error("MSX msp_accountteams entity is returning 400 - likely an MSX-side outage")
                 return {
                     "success": False,
                     "error": (
                         "MSX Account Teams API is currently unavailable (HTTP 400). "
-                        "This is an MSX-side issue — not a Sales Buddy problem. "
+                        "This is an MSX-side issue, not a Sales Buddy problem. "
                         "Try again in a few hours."
                         "\n\n"
                         "Details: HTTP 400 on msp_accountteam entity, "

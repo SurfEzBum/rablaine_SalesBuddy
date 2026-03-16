@@ -16,7 +16,6 @@ from flask import Blueprint, g, jsonify, request
 
 from app.services.backup import (
     _get_backup_root,
-    _load_db_backup_config,
     backup_all_customers,
     detect_onedrive_paths,
     find_backup_folder,
@@ -55,11 +54,10 @@ def backup_status():
     """Return backup status for the admin panel.
 
     Backups are automatically enabled when a OneDrive for Business path
-    is configured in ``backup_config.json`` or auto-detected.  There is
-    no separate enable/disable toggle.
+    is stored in the database or auto-detected at runtime.
     """
     backup_root = _get_backup_root()
-    enabled = backup_root is not None
+    configured = backup_root is not None
 
     # Count .json files in the notes subfolder (check both new and legacy names)
     file_count = 0
@@ -72,7 +70,7 @@ def backup_status():
                 break  # Only count from first folder found
 
     return jsonify({
-        "enabled": enabled,
+        "configured": configured,
         "backup_path": backup_root or "",
         "file_count": file_count,
     })
