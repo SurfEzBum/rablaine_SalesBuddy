@@ -134,6 +134,10 @@ class TestAISuggestions:
         assert len(data['topics']) == 3
         assert any('azure functions' in t['name'].lower() for t in data['topics'])
 
+        # Verify existing_topics was passed to gateway
+        call_args = mock_gw.call_args
+        assert 'existing_topics' in call_args[0][1]
+
         # Verify topics created in DB
         with app.app_context():
             assert Topic.query.count() == 3
@@ -164,6 +168,10 @@ class TestAISuggestions:
         assert any(t['id'] == existing_id for t in data['topics'])
         with app.app_context():
             assert Topic.query.count() == 2
+
+        # Verify existing topic name was sent to gateway
+        call_args = mock_gw.call_args
+        assert 'azure functions' in call_args[0][1]['existing_topics']
 
     def test_suggest_topics_requires_call_notes(self, app, client):
         """call_notes parameter is required."""
