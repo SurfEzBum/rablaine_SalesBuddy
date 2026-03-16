@@ -679,9 +679,13 @@ def api_get_meeting_summary():
     if not title:
         return jsonify({'error': 'title parameter is required'}), 400
     
+    # Pass existing topic names so WorkIQ prefers reusing them
+    existing_topics = [t.name for t in Topic.query.order_by(Topic.name).all()]
+    
     try:
         result = get_meeting_summary(title, date_str, custom_prompt=custom_prompt,
-                                     extract_impact=extract_impact)
+                                     extract_impact=extract_impact,
+                                     existing_topics=existing_topics)
         return jsonify({
             'summary': result.get('summary', ''),
             'topics': result.get('topics', []),
