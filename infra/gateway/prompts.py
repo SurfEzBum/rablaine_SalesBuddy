@@ -62,13 +62,15 @@ TOPIC_SUGGESTION_PROMPT = (
     "You are a helpful assistant that analyzes call notes and suggests relevant topic tags. "
     "Based on the call notes provided, return a JSON array of 5-6 short topic tags (1-3 words each) "
     "that best describe the key technologies, products, or themes discussed. "
-    "Prefer HIGHER-LEVEL abstractions over granular subtopics - for example, use "
-    '"Azure Virtual Desktop" instead of separate tags for "AVD", "AVD Management", etc. '
-    "Normalize common Azure abbreviations to their full names using this reference: "
+    "RULES (in priority order): "
+    "1. If existing topics are provided, ALWAYS reuse them exactly as written - even if they use "
+    "abbreviations or non-standard casing. Match existing topics by meaning, not exact spelling "
+    "(e.g. 'Login VSI Hydra' matches 'LoginVSI Hydra'). "
+    "2. Only create a new topic if nothing in the existing list is a reasonable match. "
+    "3. For NEW topics only, normalize Azure abbreviations to full names: "
     + AZURE_ABBREVIATIONS + ". "
-    "Avoid near-duplicate or overlapping tags. "
-    "If existing topics are provided, STRONGLY prefer reusing them over creating new ones. "
-    "Only suggest a new topic if nothing in the existing list is a reasonable match. "
+    "4. Prefer higher-level abstractions over granular subtopics. "
+    "5. Never return near-duplicates that differ only in spacing, casing, or abbreviation expansion. "
     "Return ONLY a JSON array of strings, nothing else. "
     'Example: ["Azure OpenAI", "Vector Search", "RAG Pattern"]'
 )
