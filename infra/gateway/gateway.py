@@ -143,9 +143,16 @@ def suggest_topics():
         if not call_notes or len(call_notes) < 10:
             return _error("call_notes is required (min 10 chars)")
 
+        existing_topics = body.get("existing_topics") or []
+
+        user_msg = f"Call notes:\n\n{call_notes}"
+        if existing_topics:
+            topics_list = ", ".join(existing_topics[:200])
+            user_msg += f"\n\nExisting topics in the system (reuse these when relevant): {topics_list}"
+
         result = chat_completion(
             TOPIC_SUGGESTION_PROMPT,
-            f"Call notes:\n\n{call_notes}",
+            user_msg,
             max_tokens=150,
         )
 

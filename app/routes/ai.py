@@ -33,7 +33,11 @@ def api_ai_suggest_topics():
         return jsonify({'success': False, 'error': 'Call notes are too short to analyze'}), 400
 
     try:
-        result = gateway_call("/v1/suggest-topics", {"call_notes": call_notes})
+        existing_topics = [t.name for t in Topic.query.order_by(Topic.name).all()]
+        result = gateway_call("/v1/suggest-topics", {
+            "call_notes": call_notes,
+            "existing_topics": existing_topics,
+        })
         suggested_topics = result.get("topics", [])
         usage = result.get("usage", {})
 
