@@ -1,6 +1,52 @@
 # Sales Buddy
 
-A single-user note-taking application for Azure technical sellers to capture and retrieve customer call notes. Enables searching and filtering notes by customer, seller, technologies discussed, and other criteria.
+Your customer engagement brain, running locally on your machine.
+
+Sales Buddy is a local-first productivity tool for Azure solution engineers and technical sellers. It pulls together your call notes, MSX data, revenue trends, milestones, and partner relationships into a single unified view per customer, so you stop context-switching between MSX, OneNote, Excel, and email to piece together what's happening in your accounts.
+
+## Why Sales Buddy?
+
+### The problem
+
+Solution engineers and sellers already have MSX and OneNote. But in practice:
+
+- **MSX is built for reporting up, not helping you sell.** Finding your own notes, tracking what happened on a call, or seeing revenue trends for a specific customer means clicking through multiple disconnected pages. There's no fast, unified view of a customer.
+- **OneNote is freeform, which means unstructured.** Six months in, your notebook is a wall of text. Searching for "that call where we discussed Fabric migration with Contoso" means scrolling and hoping. There's no tagging, no linking to engagements or milestones, no way to filter by technology or seller.
+- **Revenue analysis lives in Excel.** You download ACR reports, build pivot tables, spot trends manually, and repeat next month. Nobody alerts you when a customer's Synapse consumption drops 40%.
+
+### What Sales Buddy does differently
+
+| Capability | MSX | OneNote | Sales Buddy |
+|---|---|---|---|
+| Unified customer view (notes + revenue + milestones + opportunities + partners) | Fragmented across pages | No structure | Single page, everything linked |
+| Search by customer, topic, seller, territory, date range | Limited | Ctrl+F only | Structured search + full-text |
+| AI auto-tagging, milestone matching, call analysis | No | No | Built-in (Azure OpenAI) |
+| Revenue trend alerts (drops, spikes, new users) | Manual Excel work | No | Automated analyzer with drill-down |
+| Import Teams meeting summaries into call logs | No | No | One-click via WorkIQ |
+| Connect self-eval export | Manual | Manual | Structured export with AI summary |
+| Milestone tracker with MSX sync | MSX native (slow) | No | Visual board + auto-sync |
+| Partner directory with contacts and specialties | No | Manual | Structured + shareable between instances |
+| Local-first, instant, works offline | Cloud-dependent + VPN | Cloud sync | SQLite on your machine |
+
+### Who it's for
+
+Azure solution engineers and technical sellers who want to:
+- **Spend less time logging and more time selling** - AI fills in topics, matches milestones, and summarizes meetings
+- **Walk into every call prepared** - one page shows everything about a customer: recent notes, active engagements, revenue trends, milestones, and partner involvement
+- **Catch revenue signals early** - automated alerts flag drops, spikes, and new product adoption before they show up in a QBR
+- **Nail Connect season** - export structured activity summaries with per-customer breakdowns instead of scrambling through OneNote
+
+## Feature Highlights
+
+- **Call Notes** - rich text editor, tagging by topic/seller/customer, templates, meeting import, AI analysis
+- **Customer Hub** - unified view per customer with notes, engagements, milestones, opportunities, revenue, and partners
+- **Revenue Analyzer** - CSV import, trend charts, growth alerts, seller/customer/product drill-downs, review workflow
+- **Milestone Tracker** - visual board, MSX sync, task management, AI milestone matching from call notes
+- **AI Assistant** - topic suggestions, milestone matching, call analysis, engagement stories, Connect summaries
+- **Partner Management** - directory with contacts, specialties, and real-time sharing between instances
+- **Connect Export** - structured self-eval summaries over date ranges with optional AI summary
+- **Global Search** - full-text across notes, customers, sellers, topics, and territories
+- **Analytics Dashboard** - activity heatmap, engagement trends, top topics and customers
 
 ## Getting Started
 
