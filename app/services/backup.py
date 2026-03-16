@@ -5,10 +5,9 @@ Writes per-customer JSON files organized by seller name into a OneDrive-synced
 folder.  OneDrive handles cloud sync transparently, giving us RPO=0 backups
 with zero external API calls.
 
-The backup path is derived automatically from ``data/backup_config.json``
-(the DB backup config written by ``scripts/server.ps1``) or auto-detected
-from OneDrive for Business.  There is no separate note-specific config
-file -- if DB backups are configured, call log backups use the same path.
+The backup path is derived automatically from the ``onedrive_path`` stored
+in ``UserPreference`` (populated on first boot) or auto-detected from OneDrive
+for Business.  There is no separate note-specific config file - if DB backups
 
 Folder structure::
 
@@ -62,29 +61,15 @@ _ONEDRIVE_ORG_NAME = "Microsoft"
 # organization under a shared Backups umbrella.
 _SALESBUDDY_BACKUPS_DIR = os.path.join("Backups", "SalesBuddy")
 
-# DB backup config filename (written by scripts/server.ps1 and backup.ps1)
-_DB_BACKUP_CONFIG = "backup_config.json"
 
+def _get_onedrive_path_from_db() -> str:
+    """Return the cached OneDrive path from UserPreference, or empty string.
 
-def _db_backup_config_path() -> Path:
-    """Return the absolute path to the DB backup config file."""
-    project_root = Path(os.path.abspath(__file__)).parent.parent.parent
-    return project_root / "data" / _DB_BACKUP_CONFIG
-
-
-def _load_db_backup_config() -> Dict[str, Any]:
-    """Load the DB backup config (written by scripts/server.ps1).
-
-    Returns a dict with at least ``enabled`` and ``backup_dir`` keys.
+    Must be called inside an app context.
     """
-    path = _db_backup_config_path()
-    if path.exists():
-        try:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {"enabled": False, "backup_dir": ""}
+    from app.models import UserPreference
+    prefs = UserPreference.query.first()
+    return (prefs.onedrive_path or '') if prefs else ''
 
 
 # ---------------------------------------------------------------------------
@@ -240,16 +225,13 @@ def _get_backup_root() -> Optional[str]:
     """Return the backup root path, or None if no backup location is available.
 
     Resolution order:
-    1. ``backup_config.json`` -- the DB backup config written by
-       ``scripts/server.ps1``.  If ``enabled`` is true and ``backup_dir``
-       is set, use that.
+    1. ``UserPreference.onedrive_path`` in the database - derive
+       ``{onedrive_path}/Backups/SalesBuddy``.
     2. Auto-detect from OneDrive for Business (``get_auto_detected_backup_path``).
-
-    No separate note config file is needed.
     """
-    db_cfg = _load_db_backup_config()
-    if db_cfg.get("enabled") and db_cfg.get("backup_dir"):
-        return db_cfg["backup_dir"]
+    onedrive = _get_onedrive_path_from_db()
+    if onedrive:
+        return os.path.join(onedrive, "Backups", "SalesBuddy")
 
     # Fallback: auto-detect
     return get_auto_detected_backup_path()
@@ -901,7 +883,7 @@ def find_backup_folder() -> Optional[str]:
     Returns:
         Absolute path to the backup subfolder, or None if not found.
     """
-    # 1. Try _get_backup_root (reads backup_config.json, then auto-detects)
+    # 1. Try _get_backup_root (reads DB, then auto-detects)
     backup_root = _get_backup_root()
     if backup_root:
         for dirname in (_NOTES_DIR, _LEGACY_NOTES_DIR):

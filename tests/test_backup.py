@@ -195,52 +195,79 @@ class TestIsBusinessOneDrivePath:
 class TestBackupHelpers:
     """Tests for backup helper functions."""
 
-    def test_get_backup_config_returns_defaults_when_no_file(self, app):
-        """Should return default config when backup_config.json doesn't exist."""
+    def test_get_onedrive_path_empty_when_not_set(self, app):
+        """Should return empty string when no UserPreference onedrive_path set."""
         with app.app_context():
-            from app.routes.admin import _get_backup_config
-            with patch('app.routes.admin.Path.exists', return_value=False):
-                config = _get_backup_config()
-            assert config['enabled'] is False
-            assert config['onedrive_path'] == ''
-            assert config['backup_dir'] == ''
-            assert config['last_backup'] is None
-            assert config['task_registered'] is False
-            assert config['retention'] == {'daily': 7, 'weekly': 4, 'monthly': 3}
+            from app.routes.admin import _get_onedrive_path
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            if prefs:
+                prefs.onedrive_path = None
+                db.session.commit()
+            result = _get_onedrive_path()
+            assert result == ''
 
-    def test_get_backup_config_loads_from_file(self, app, tmp_path):
-        """Should load config from existing backup_config.json."""
+    def test_get_onedrive_path_returns_stored_value(self, app):
+        """Should return the stored OneDrive path from UserPreference."""
         with app.app_context():
-            from app.routes.admin import _get_backup_config
-            config_data = {
-                'enabled': True,
-                'onedrive_path': 'C:\\Users\\test\\OneDrive',
-                'backup_dir': 'C:\\Users\\test\\OneDrive\\Backups\\SalesBuddy',
-                'retention': {'daily': 7, 'weekly': 4, 'monthly': 3},
-                'last_backup': '2025-01-15T10:30:00+00:00',
-                'task_registered': True,
-            }
-            config_file = tmp_path / 'backup_config.json'
-            config_file.write_text(json.dumps(config_data))
+            from app.routes.admin import _get_onedrive_path
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = 'C:\\Users\\test\\OneDrive'
+            db.session.commit()
+            result = _get_onedrive_path()
+            assert result == 'C:\\Users\\test\\OneDrive'
+            # Clean up
+            prefs.onedrive_path = None
+            db.session.commit()
 
-            with patch(
-                'app.routes.admin._get_backup_config'
-            ) as mock_get:
-                mock_get.return_value = config_data
-                result = mock_get()
-
-            assert result['enabled'] is True
-            assert result['backup_dir'] == 'C:\\Users\\test\\OneDrive\\Backups\\SalesBuddy'
-            assert result['task_registered'] is True
-
-    def test_get_backup_config_handles_corrupt_json(self, app):
-        """Should return defaults when JSON is corrupt."""
+    def test_get_backup_dir_empty_when_no_path(self, app):
+        """Should return empty string when no OneDrive path configured."""
         with app.app_context():
-            from app.routes.admin import _get_backup_config
-            with patch('app.routes.admin.Path.exists', return_value=True), \
-                 patch('builtins.open', side_effect=json.JSONDecodeError('err', '', 0)):
-                config = _get_backup_config()
-            assert config['enabled'] is False
+            from app.routes.admin import _get_backup_dir
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = None
+            db.session.commit()
+            result = _get_backup_dir()
+            assert result == ''
+            prefs.onedrive_path = None
+            db.session.commit()
+
+    def test_get_backup_dir_derives_path(self, app):
+        """Should derive backup dir as {onedrive_path}/Backups/SalesBuddy."""
+        with app.app_context():
+            from app.routes.admin import _get_backup_dir
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = 'C:\\Users\\test\\OneDrive'
+            db.session.commit()
+            result = _get_backup_dir()
+            assert result == os.path.join('C:\\Users\\test\\OneDrive', 'Backups', 'SalesBuddy')
+            prefs.onedrive_path = None
+            db.session.commit()
+
+    def test_get_retention_defaults(self, app):
+        """Should return default retention values from UserPreference."""
+        with app.app_context():
+            from app.routes.admin import _get_retention
+            result = _get_retention()
+            assert result == {'daily': 7, 'weekly': 4, 'monthly': 3}
+
+    def test_get_last_backup_from_files(self, app, tmp_path):
+        """Should deduce last backup from newest file timestamp."""
+        with app.app_context():
+            from app.routes.admin import _get_last_backup
+            (tmp_path / 'salesbuddy_2025-01-15_100000.db').write_bytes(b'x')
+            result = _get_last_backup(str(tmp_path))
+            assert result is not None
+
+    def test_get_last_backup_empty_dir(self, app, tmp_path):
+        """Should return None for empty backup directory."""
+        with app.app_context():
+            from app.routes.admin import _get_last_backup
+            result = _get_last_backup(str(tmp_path))
+            assert result is None
 
     def test_list_backup_files_empty_dir(self, app, tmp_path):
         """Should return empty list when backup dir has no matching files."""
@@ -303,7 +330,7 @@ class TestCheckScheduledTask:
                 mock_run.return_value = type('R', (), {
                     'returncode': 0, 'stdout': csv_output, 'stderr': ''
                 })()
-                result = _check_scheduled_task()
+                result = _check_scheduled_task('SalesBuddy-DailyBackup')
             assert result['exists'] is True
             assert result['next_run'] == '3/8/2026 11:00:00 AM'
             assert result['status'] == 'Ready'
@@ -316,7 +343,7 @@ class TestCheckScheduledTask:
                 mock_run.return_value = type('R', (), {
                     'returncode': 1, 'stdout': '', 'stderr': 'ERROR: not found'
                 })()
-                result = _check_scheduled_task()
+                result = _check_scheduled_task('SalesBuddy-DailyBackup')
             assert result['exists'] is False
             assert result['next_run'] is None
 
@@ -326,7 +353,7 @@ class TestCheckScheduledTask:
             from app.routes.admin import _check_scheduled_task
             with patch('app.routes.admin.subprocess.run',
                        side_effect=subprocess.TimeoutExpired('schtasks', 5)):
-                result = _check_scheduled_task()
+                result = _check_scheduled_task('SalesBuddy-DailyBackup')
             assert result['exists'] is False
 
     def test_task_check_non_windows(self, app):
@@ -335,7 +362,7 @@ class TestCheckScheduledTask:
             from app.routes.admin import _check_scheduled_task
             with patch('app.routes.admin.sys') as mock_sys:
                 mock_sys.platform = 'linux'
-                result = _check_scheduled_task()
+                result = _check_scheduled_task('SalesBuddy-DailyBackup')
             assert result['exists'] is False
 
 
@@ -343,75 +370,78 @@ class TestBackupStatusAPI:
     """Tests for GET /api/admin/backup/status."""
 
     def test_backup_status_not_configured(self, client, app):
-        """Should return not-configured status when no config exists."""
-        with patch('app.routes.admin._get_backup_config') as mock_config, \
-             patch('app.routes.admin._check_scheduled_task') as mock_task:
-            mock_config.return_value = {
-                'enabled': False,
-                'onedrive_path': '',
-                'backup_dir': '',
-                'retention': {'daily': 7, 'weekly': 4, 'monthly': 3},
-                'last_backup': None,
-                'task_registered': False,
-            }
+        """Should return not-configured status when no OneDrive path set."""
+        with app.app_context():
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = None
+            db.session.commit()
+
+        with patch('app.routes.admin._check_scheduled_task') as mock_task:
             mock_task.return_value = {'exists': False, 'next_run': None, 'status': None}
             response = client.get('/api/admin/backup/status')
 
         assert response.status_code == 200
         data = response.get_json()
-        assert data['enabled'] is False
+        assert data['configured'] is False
         assert data['recent_backups'] == []
         assert data['task_exists'] is False
 
     def test_backup_status_configured(self, client, app, tmp_path):
         """Should return configured status with backup list."""
-        # Create a fake backup file
-        (tmp_path / 'salesbuddy_2025-01-15_100000.db').write_bytes(b'x' * 4096)
+        # Create backup subdir and a fake backup file
+        backup_dir = tmp_path / 'Backups' / 'SalesBuddy'
+        backup_dir.mkdir(parents=True)
+        (backup_dir / 'salesbuddy_2025-01-15_100000.db').write_bytes(b'x' * 4096)
 
-        with patch('app.routes.admin._get_backup_config') as mock_config, \
-             patch('app.routes.admin._check_scheduled_task') as mock_task:
-            mock_config.return_value = {
-                'enabled': True,
-                'onedrive_path': 'C:\\OneDrive',
-                'backup_dir': str(tmp_path),
-                'retention': {'daily': 7, 'weekly': 4, 'monthly': 3},
-                'last_backup': '2025-01-15T10:30:00+00:00',
-                'task_registered': True,
-            }
+        with app.app_context():
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = str(tmp_path)
+            db.session.commit()
+
+        with patch('app.routes.admin._check_scheduled_task') as mock_task:
             mock_task.return_value = {'exists': True, 'next_run': '3/8/2026 11:00:00 AM', 'status': 'Ready'}
             response = client.get('/api/admin/backup/status')
 
         assert response.status_code == 200
         data = response.get_json()
-        assert data['enabled'] is True
-        assert data['task_registered'] is True
+        assert data['configured'] is True
         assert data['task_exists'] is True
         assert data['task_next_run'] == '3/8/2026 11:00:00 AM'
         assert data['task_status'] == 'Ready'
-        assert data['last_backup'] == '2025-01-15T10:30:00+00:00'
+        assert data['last_backup'] is not None
         assert len(data['recent_backups']) == 1
         assert data['recent_backups'][0]['name'] == 'salesbuddy_2025-01-15_100000.db'
 
-    def test_backup_status_task_missing_but_config_says_registered(self, client, app):
-        """task_exists should be False even when task_registered is True."""
-        with patch('app.routes.admin._get_backup_config') as mock_config, \
-             patch('app.routes.admin._check_scheduled_task') as mock_task:
-            mock_config.return_value = {
-                'enabled': True,
-                'onedrive_path': 'C:\\OneDrive',
-                'backup_dir': 'C:\\fake',
-                'retention': {'daily': 7, 'weekly': 4, 'monthly': 3},
-                'last_backup': None,
-                'task_registered': True,
-            }
+        # Clean up
+        with app.app_context():
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = None
+            db.session.commit()
+
+    def test_backup_status_task_not_found(self, client, app):
+        """task_exists should be False when task is not in Task Scheduler."""
+        with app.app_context():
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = 'C:\\OneDrive'
+            db.session.commit()
+
+        with patch('app.routes.admin._check_scheduled_task') as mock_task:
             mock_task.return_value = {'exists': False, 'next_run': None, 'status': None}
             response = client.get('/api/admin/backup/status')
 
         assert response.status_code == 200
         data = response.get_json()
-        assert data['task_registered'] is True
         assert data['task_exists'] is False
         assert data['task_next_run'] is None
+
+        # Clean up
+        with app.app_context():
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = None
+            db.session.commit()
 
 
 class TestBackupRunAPI:
@@ -419,12 +449,13 @@ class TestBackupRunAPI:
 
     def test_backup_run_not_configured(self, client, app):
         """Should return 400 when backups are not configured."""
-        with patch('app.routes.admin._get_backup_config') as mock_config:
-            mock_config.return_value = {
-                'enabled': False,
-                'backup_dir': '',
-            }
-            response = client.post('/api/admin/backup/run')
+        with app.app_context():
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = None
+            db.session.commit()
+
+        response = client.post('/api/admin/backup/run')
 
         assert response.status_code == 400
         data = response.get_json()
@@ -433,94 +464,223 @@ class TestBackupRunAPI:
 
     def test_backup_run_no_database(self, client, app, tmp_path):
         """Should return 404 when database file doesn't exist."""
-        with patch('app.routes.admin._get_backup_config') as mock_config, \
-             patch('app.routes.admin.Path.exists', return_value=False):
-            mock_config.return_value = {
-                'enabled': True,
-                'backup_dir': str(tmp_path),
-            }
+        with app.app_context():
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = str(tmp_path)
+            db.session.commit()
+
+        with patch('app.routes.admin.Path.exists', return_value=False):
             response = client.post('/api/admin/backup/run')
 
         assert response.status_code == 404
 
+        # Clean up
+        with app.app_context():
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = None
+            db.session.commit()
+
     def test_backup_run_success(self, client, app, tmp_path):
         """Should successfully create a backup copy."""
-        backup_dir = tmp_path / 'backups'
-        backup_dir.mkdir()
+        backup_dir = tmp_path / 'Backups' / 'SalesBuddy'
+        backup_dir.mkdir(parents=True)
 
         # Create a fake DB file
         fake_db = tmp_path / 'salesbuddy.db'
         fake_db.write_bytes(b'SQLite DB content' * 100)
 
-        config = {
-            'enabled': True,
-            'backup_dir': str(backup_dir),
-            'last_backup': None,
-        }
+        with app.app_context():
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = str(tmp_path)
+            db.session.commit()
 
-        with patch('app.routes.admin._get_backup_config', return_value=config), \
-             patch('app.routes.admin._save_backup_config') as mock_save, \
-             patch('app.routes.admin.Path', wraps=Path) as mock_path_cls:
-            # Make the db_path check return our fake db
-            original_truediv = Path.__truediv__
+        original_truediv = Path.__truediv__
 
-            def patched_truediv(self, other):
-                result = original_truediv(self, other)
-                if str(other) == 'salesbuddy.db' and 'data' in str(self):
-                    return fake_db
-                return result
+        def patched_truediv(self, other):
+            result = original_truediv(self, other)
+            if str(other) == 'salesbuddy.db' and 'data' in str(self):
+                return fake_db
+            return result
 
-            with patch.object(Path, '__truediv__', patched_truediv):
-                response = client.post('/api/admin/backup/run')
+        with patch.object(Path, '__truediv__', patched_truediv):
+            response = client.post('/api/admin/backup/run')
 
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
         assert 'Backup created' in data['message']
 
+        # Clean up
+        with app.app_context():
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = None
+            db.session.commit()
+
     def test_backup_run_creates_file_in_backup_dir(self, client, app, tmp_path):
         """Should create an actual .db file in the backup directory."""
-        backup_dir = tmp_path / 'backups'
-        backup_dir.mkdir()
+        backup_dir = tmp_path / 'Backups' / 'SalesBuddy'
+        backup_dir.mkdir(parents=True)
 
         fake_db = tmp_path / 'salesbuddy.db'
         fake_db.write_bytes(b'test database content')
 
-        config = {
-            'enabled': True,
-            'backup_dir': str(backup_dir),
-            'last_backup': None,
-        }
+        with app.app_context():
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = str(tmp_path)
+            db.session.commit()
 
-        with patch('app.routes.admin._get_backup_config', return_value=config), \
-             patch('app.routes.admin._save_backup_config'):
-            # Patch the db_path construction
-            original_init = Path.__truediv__
+        original_init = Path.__truediv__
 
-            def patched(self, other):
-                result = original_init(self, other)
-                if str(other) == 'salesbuddy.db' and 'data' in str(self):
-                    return fake_db
-                return result
+        def patched(self, other):
+            result = original_init(self, other)
+            if str(other) == 'salesbuddy.db' and 'data' in str(self):
+                return fake_db
+            return result
 
-            with patch.object(Path, '__truediv__', patched):
-                response = client.post('/api/admin/backup/run')
+        with patch.object(Path, '__truediv__', patched):
+            response = client.post('/api/admin/backup/run')
 
         assert response.status_code == 200
         backup_files = list(backup_dir.glob('salesbuddy_*.db'))
         assert len(backup_files) == 1
         assert backup_files[0].read_bytes() == b'test database content'
 
-    def test_backup_run_enabled_but_empty_dir(self, client, app):
-        """Should return 400 when enabled but backup_dir is empty."""
-        with patch('app.routes.admin._get_backup_config') as mock_config:
-            mock_config.return_value = {
-                'enabled': True,
-                'backup_dir': '',
-            }
-            response = client.post('/api/admin/backup/run')
+        # Clean up
+        with app.app_context():
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = None
+            db.session.commit()
 
+    def test_backup_run_no_onedrive_path(self, client, app):
+        """Should return 400 when onedrive_path is empty."""
+        with app.app_context():
+            from app.models import UserPreference, db
+            prefs = UserPreference.query.first()
+            prefs.onedrive_path = None
+            db.session.commit()
+
+        response = client.post('/api/admin/backup/run')
         assert response.status_code == 400
+
+
+class TestTaskToggleAPI:
+    """Tests for POST /api/admin/tasks/<task_key>/toggle."""
+
+    def test_toggle_unknown_task_key(self, client, app):
+        """Should return 400 for an unknown task key."""
+        response = client.post(
+            '/api/admin/tasks/bogus/toggle',
+            json={'enabled': True},
+        )
+        assert response.status_code == 400
+        data = response.get_json()
+        assert data['success'] is False
+
+    def test_toggle_missing_enabled_field(self, client, app):
+        """Should return 400 when enabled field is missing."""
+        response = client.post(
+            '/api/admin/tasks/backup/toggle',
+            json={},
+        )
+        assert response.status_code == 400
+
+    def test_toggle_backup_enable_success(self, client, app):
+        """Should enable the backup task successfully."""
+        with patch('app.routes.admin._set_scheduled_task_enabled') as mock_set, \
+             patch('app.routes.admin._check_scheduled_task') as mock_check:
+            mock_set.return_value = {'success': True}
+            mock_check.return_value = {
+                'exists': True, 'next_run': '3/8/2026 11:00:00 AM', 'status': 'Ready'
+            }
+            response = client.post(
+                '/api/admin/tasks/backup/toggle',
+                json={'enabled': True},
+            )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['task_status'] == 'Ready'
+
+    def test_toggle_backup_disable_success(self, client, app):
+        """Should disable the backup task successfully."""
+        with patch('app.routes.admin._set_scheduled_task_enabled') as mock_set, \
+             patch('app.routes.admin._check_scheduled_task') as mock_check:
+            mock_set.return_value = {'success': True}
+            mock_check.return_value = {
+                'exists': True, 'next_run': None, 'status': 'Disabled'
+            }
+            response = client.post(
+                '/api/admin/tasks/backup/toggle',
+                json={'enabled': False},
+            )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['task_status'] == 'Disabled'
+
+    def test_toggle_autostart_success(self, client, app):
+        """Should toggle the autostart task."""
+        with patch('app.routes.admin._set_scheduled_task_enabled') as mock_set, \
+             patch('app.routes.admin._check_scheduled_task') as mock_check:
+            mock_set.return_value = {'success': True}
+            mock_check.return_value = {
+                'exists': True, 'next_run': None, 'status': 'Disabled'
+            }
+            response = client.post(
+                '/api/admin/tasks/autostart/toggle',
+                json={'enabled': False},
+            )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+
+    def test_toggle_fails_returns_500(self, client, app):
+        """Should return 500 when toggle operation fails."""
+        with patch('app.routes.admin._set_scheduled_task_enabled') as mock_set:
+            mock_set.return_value = {'success': False, 'error': 'Access denied'}
+            response = client.post(
+                '/api/admin/tasks/backup/toggle',
+                json={'enabled': True},
+            )
+
+        assert response.status_code == 500
+        data = response.get_json()
+        assert data['success'] is False
+
+
+class TestAutoStartStatusAPI:
+    """Tests for GET /api/admin/tasks/autostart/status."""
+
+    def test_autostart_status_exists(self, client, app):
+        """Should return status when autostart task exists."""
+        with patch('app.routes.admin._check_scheduled_task') as mock_check:
+            mock_check.return_value = {
+                'exists': True, 'next_run': None, 'status': 'Ready'
+            }
+            response = client.get('/api/admin/tasks/autostart/status')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['task_exists'] is True
+        assert data['task_status'] == 'Ready'
+
+    def test_autostart_status_not_found(self, client, app):
+        """Should return exists=False when task not found."""
+        with patch('app.routes.admin._check_scheduled_task') as mock_check:
+            mock_check.return_value = {
+                'exists': False, 'next_run': None, 'status': None
+            }
+            response = client.get('/api/admin/tasks/autostart/status')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['task_exists'] is False
 
 
 # =========================================================================

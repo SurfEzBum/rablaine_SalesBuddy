@@ -177,6 +177,15 @@ def run_migrations(db):
         _add_column_if_not_exists(db, inspector, 'revenue_analyses', 'review_notes', 'TEXT')
         _add_column_if_not_exists(db, inspector, 'revenue_analyses', 'reviewed_at', 'DATETIME')
 
+    # Migration: Add backup settings to user_preferences (replaces backup_config.json)
+    _add_column_if_not_exists(db, inspector, 'user_preferences', 'onedrive_path', 'VARCHAR(500)')
+    _add_column_if_not_exists(db, inspector, 'user_preferences', 'backup_retention_daily', 'INTEGER NOT NULL DEFAULT 7')
+    _add_column_if_not_exists(db, inspector, 'user_preferences', 'backup_retention_weekly', 'INTEGER NOT NULL DEFAULT 4')
+    _add_column_if_not_exists(db, inspector, 'user_preferences', 'backup_retention_monthly', 'INTEGER NOT NULL DEFAULT 3')
+
+    # One-time: migrate backup_config.json -> database
+    _migrate_backup_config_to_db(db)
+
     # =========================================================================
     # End migrations
     # =========================================================================
@@ -238,6 +247,59 @@ def _column_exists(inspector, table: str, column: str) -> bool:
     """Check if a column exists in a table."""
     columns = [c['name'] for c in inspector.get_columns(table)]
     return column in columns
+
+
+def _migrate_backup_config_to_db(db):
+    """One-time migration: move backup_config.json values into user_preferences.
+
+    Reads onedrive_path and retention from the old JSON config file and writes
+    them into the database.  Only runs if the DB has no onedrive_path set yet
+    and the JSON file exists.  Safe to run multiple times (idempotent).
+    """
+    import json
+    import os
+    from pathlib import Path
+
+    # Check if DB already has an onedrive_path set
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT onedrive_path FROM user_preferences LIMIT 1")
+        ).fetchone()
+        if row and row[0]:
+            return  # Already migrated
+
+    # Find the old config file
+    project_root = Path(os.path.abspath(__file__)).parent.parent
+    config_path = project_root / "data" / "backup_config.json"
+    if not config_path.exists():
+        return
+
+    try:
+        with open(config_path, "r", encoding="utf-8-sig") as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return
+
+    onedrive = config.get("onedrive_path", "")
+    if not onedrive:
+        return
+
+    retention = config.get("retention", {})
+    daily = retention.get("daily", 7)
+    weekly = retention.get("weekly", 4)
+    monthly = retention.get("monthly", 3)
+
+    with db.engine.connect() as conn:
+        conn.execute(text(
+            "UPDATE user_preferences SET "
+            "onedrive_path = :path, "
+            "backup_retention_daily = :daily, "
+            "backup_retention_weekly = :weekly, "
+            "backup_retention_monthly = :monthly "
+            "WHERE id = (SELECT id FROM user_preferences LIMIT 1)"
+        ), {"path": onedrive, "daily": daily, "weekly": weekly, "monthly": monthly})
+        conn.commit()
+    print(f"  Migrated backup config to database (OneDrive: {onedrive})")
 
 
 def _migrate_milestones_for_msx(db, inspector):

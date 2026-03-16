@@ -17,7 +17,6 @@
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
 $DataDir = Join-Path $RepoRoot 'data'
-$ConfigFile = Join-Path $DataDir 'backup_config.json'
 $DbFile = Join-Path $DataDir 'salesbuddy.db'
 
 Set-Location $RepoRoot
@@ -117,11 +116,27 @@ print(json.dumps(stats))
     return $null
 }
 
-function Get-BackupConfig {
-    if (Test-Path $ConfigFile) {
-        try { return Get-Content $ConfigFile -Raw | ConvertFrom-Json } catch {}
-    }
-    return $null
+function Get-OneDrivePathFromDb {
+    $pythonExe = Join-Path $RepoRoot 'venv\Scripts\python.exe'
+    if (-not (Test-Path $pythonExe)) { $pythonExe = 'python' }
+    $script = @"
+import sqlite3, sys
+db = sys.argv[1]
+try:
+    conn = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+    c = conn.cursor()
+    c.execute('SELECT onedrive_path FROM user_preferences LIMIT 1')
+    row = c.fetchone()
+    conn.close()
+    print(row[0] if row and row[0] else '')
+except Exception:
+    print('')
+"@
+    try {
+        $result = & $pythonExe -c $script $DbFile 2>$null
+        return $result.Trim()
+    } catch {}
+    return ''
 }
 
 function Get-AllBackupFiles {
@@ -132,10 +147,13 @@ function Get-AllBackupFiles {
     $files = @()
 
     # OneDrive backups
-    $config = Get-BackupConfig
-    if ($config -and $config.backup_dir -and (Test-Path $config.backup_dir)) {
-        $files += Get-ChildItem $config.backup_dir -Filter 'salesbuddy_*.db' -File |
-            ForEach-Object { $_ | Add-Member -NotePropertyName Source -NotePropertyValue 'OneDrive' -PassThru }
+    $onedrivePath = Get-OneDrivePathFromDb
+    if ($onedrivePath) {
+        $backupPath = Join-Path $onedrivePath 'Backups\SalesBuddy'
+        if (Test-Path $backupPath) {
+            $files += Get-ChildItem $backupPath -Filter 'salesbuddy_*.db' -File |
+                ForEach-Object { $_ | Add-Member -NotePropertyName Source -NotePropertyValue 'OneDrive' -PassThru }
+        }
     }
 
     # Local data/ backups (from deploy/update cycle)
@@ -174,9 +192,10 @@ if ($backups.Count -eq 0) {
     Write-Host "  No backups found." -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Looked in:" -ForegroundColor Gray
-    $config = Get-BackupConfig
-    if ($config -and $config.backup_dir) {
-        Write-Host "    - $($config.backup_dir) (OneDrive)" -ForegroundColor Gray
+    $onedrivePath = Get-OneDrivePathFromDb
+    if ($onedrivePath) {
+        $backupPath = Join-Path $onedrivePath 'Backups\SalesBuddy'
+        Write-Host "    - $backupPath (OneDrive)" -ForegroundColor Gray
     }
     Write-Host "    - $DataDir (local)" -ForegroundColor Gray
     Write-Host ""

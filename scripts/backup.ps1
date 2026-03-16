@@ -7,7 +7,7 @@
 #   .\scripts\backup.ps1 -Remove      Remove the scheduled task
 #   .\scripts\backup.ps1 -Status      Show backup status and recent backups
 #
-# Configuration lives in data/backup_config.json. Defaults:
+# Configuration lives in the database (user_preferences table). Defaults:
 #   - 7 daily backups, 4 weekly backups, 3 monthly backups
 #   - Backups go to OneDrive - Microsoft/Backups/SalesBuddy/
 #
@@ -24,7 +24,6 @@ param(
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
 $DataDir = Join-Path $RepoRoot 'data'
-$ConfigFile = Join-Path $DataDir 'backup_config.json'
 $DbFile = Join-Path $DataDir 'salesbuddy.db'
 $TaskName = 'SalesBuddy-DailyBackup'
 
@@ -32,56 +31,63 @@ $TaskName = 'SalesBuddy-DailyBackup'
 # Helper Functions
 # ==============================================================================
 
-function Get-BackupConfig {
-    <#
-    .SYNOPSIS
-    Load backup configuration from JSON, creating defaults if missing.
-    #>
-    $defaults = @{
-        enabled = $false
-        onedrive_path = ''
-        backup_dir = ''
-        retention = @{
-            daily = 7
-            weekly = 4
-            monthly = 3
-        }
-        last_backup = $null
-        task_registered = $false
-    }
-
-    if (Test-Path $ConfigFile) {
-        try {
-            $config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
-            # Merge with defaults for any missing keys
-            $result = @{}
-            foreach ($key in $defaults.Keys) {
-                if ($null -ne $config.$key) {
-                    if ($key -eq 'retention') {
-                        $result[$key] = @{
-                            daily = if ($config.retention.daily) { $config.retention.daily } else { 7 }
-                            weekly = if ($config.retention.weekly) { $config.retention.weekly } else { 4 }
-                            monthly = if ($config.retention.monthly) { $config.retention.monthly } else { 3 }
-                        }
-                    } else {
-                        $result[$key] = $config.$key
-                    }
-                } else {
-                    $result[$key] = $defaults[$key]
-                }
-            }
-            return $result
-        } catch {
-            Write-Host "  [WARNING] Could not parse backup_config.json, using defaults." -ForegroundColor Yellow
-        }
-    }
-    return $defaults
+function Get-PythonExe {
+    $pythonExe = Join-Path $RepoRoot 'venv\Scripts\python.exe'
+    if (-not (Test-Path $pythonExe)) { $pythonExe = 'python' }
+    return $pythonExe
 }
 
-function Save-BackupConfig {
-    param([hashtable]$Config)
-    if (-not (Test-Path $DataDir)) { New-Item -ItemType Directory -Path $DataDir -Force | Out-Null }
-    $Config | ConvertTo-Json -Depth 3 | Set-Content $ConfigFile -Encoding UTF8
+function Get-BackupPrefs {
+    <#
+    .SYNOPSIS
+    Read backup preferences from the database via Python.
+    Returns a hashtable with onedrive_path, retention (daily/weekly/monthly).
+    #>
+    $pythonExe = Get-PythonExe
+    $script = @"
+import sqlite3, json, sys
+db = sys.argv[1]
+try:
+    conn = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+    c = conn.cursor()
+    c.execute('SELECT onedrive_path, backup_retention_daily, backup_retention_weekly, backup_retention_monthly FROM user_preferences LIMIT 1')
+    row = c.fetchone()
+    conn.close()
+    if row:
+        print(json.dumps({'onedrive_path': row[0] or '', 'retention': {'daily': row[1] or 7, 'weekly': row[2] or 4, 'monthly': row[3] or 3}}))
+    else:
+        print(json.dumps({'onedrive_path': '', 'retention': {'daily': 7, 'weekly': 4, 'monthly': 3}}))
+except Exception:
+    print(json.dumps({'onedrive_path': '', 'retention': {'daily': 7, 'weekly': 4, 'monthly': 3}}))
+"@
+    try {
+        $result = & $pythonExe -c $script $DbFile 2>$null
+        if ($result) { return ($result | ConvertFrom-Json) }
+    } catch {}
+    return @{ onedrive_path = ''; retention = @{ daily = 7; weekly = 4; monthly = 3 } }
+}
+
+function Set-OneDrivePath {
+    <#
+    .SYNOPSIS
+    Store the OneDrive path in the database.
+    #>
+    param([string]$Path)
+    $pythonExe = Get-PythonExe
+    $escapedPath = $Path -replace "'", "''"
+    $script = @"
+import sqlite3, sys
+db = sys.argv[1]
+path = sys.argv[2]
+conn = sqlite3.connect(db)
+c = conn.cursor()
+c.execute('UPDATE user_preferences SET onedrive_path = ? WHERE id = (SELECT id FROM user_preferences LIMIT 1)', (path,))
+if c.rowcount == 0:
+    c.execute('INSERT INTO user_preferences (onedrive_path, dark_mode, customer_view_grouped, customer_sort_by, topic_sort_by_calls, territory_view_accounts, show_customers_without_calls, first_run_modal_dismissed, guided_tour_completed, ai_enabled, fy_transition_active, fy_sync_complete, backup_retention_daily, backup_retention_weekly, backup_retention_monthly) VALUES (?, 1, 0, ''alphabetical'', 0, 0, 1, 0, 0, 0, 0, 0, 7, 4, 3)', (path,))
+conn.commit()
+conn.close()
+"@
+    & $pythonExe -c $script $DbFile $Path 2>$null
 }
 
 function Find-OneDrivePath {
@@ -235,11 +241,17 @@ function Run-Backup {
     .SYNOPSIS
     Copy the database to the backup directory with timestamp, then apply retention.
     #>
-    $config = Get-BackupConfig
+    $prefs = Get-BackupPrefs
 
-    if (-not $config.backup_dir) {
-        Write-Host "  [ERROR] Backups not configured. Run: .\scripts\backup.ps1 -Setup" -ForegroundColor Red
-        return $false
+    if (-not $prefs.onedrive_path) {
+        # Fallback: try runtime detection
+        $detected = Find-OneDrivePath
+        if ($detected) {
+            $prefs.onedrive_path = $detected
+        } else {
+            Write-Host "  [ERROR] Backups not configured. Run: .\scripts\backup.ps1 -Setup" -ForegroundColor Red
+            return $false
+        }
     }
 
     if (-not (Test-Path $DbFile)) {
@@ -247,7 +259,7 @@ function Run-Backup {
         return $false
     }
 
-    $backupDir = $config.backup_dir
+    $backupDir = Join-Path $prefs.onedrive_path 'Backups\SalesBuddy'
     if (-not (Test-Path $backupDir)) {
         New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
     }
@@ -268,15 +280,11 @@ function Run-Backup {
             Write-Host "  [OK] Backup saved: $backupFile ($sizeMB MB)" -ForegroundColor Green
         }
 
-        # Update config with last backup time
-        $config.last_backup = (Get-Date).ToString('o')
-        Save-BackupConfig $config
-
         # Apply retention policy
         Remove-OldBackups -BackupDir $backupDir `
-            -KeepDaily $config.retention.daily `
-            -KeepWeekly $config.retention.weekly `
-            -KeepMonthly $config.retention.monthly
+            -KeepDaily $prefs.retention.daily `
+            -KeepWeekly $prefs.retention.weekly `
+            -KeepMonthly $prefs.retention.monthly
 
         return $true
     } catch {
@@ -324,12 +332,8 @@ if ($Setup) {
         Write-Host "  [OK] Created backup folder." -ForegroundColor Green
     }
 
-    # Save config
-    $config = Get-BackupConfig
-    $config.enabled = $true
-    $config.onedrive_path = $onedrivePath
-    $config.backup_dir = $defaultBackupDir
-    Save-BackupConfig $config
+    # Save OneDrive path to database
+    Set-OneDrivePath -Path $onedrivePath
 
     # Register scheduled task
     Write-Host ""
@@ -356,7 +360,7 @@ if ($Setup) {
     # Try SYSTEM first (reliable on Entra ID cloud-joined machines, but needs admin).
     # Fall back to Interactive if not elevated. Interactive works when the user is
     # logged in, and StartWhenAvailable catches up on missed runs.
-    # NEVER use S4U — it silently fails on Entra-only accounts (no creds/profile).
+    # NEVER use S4U - it silently fails on Entra-only accounts (no creds/profile).
     $registered = $false
     try {
         $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
@@ -390,11 +394,6 @@ if ($Setup) {
             Write-Host "  [WARNING] Could not register scheduled task: $_" -ForegroundColor Yellow
             Write-Host "            You can still run backups manually with backup.bat" -ForegroundColor Gray
         }
-    }
-
-    if ($registered) {
-        $config.task_registered = $true
-        Save-BackupConfig $config
     }
 
     # Run first backup now
@@ -432,10 +431,8 @@ if ($Remove) {
         Write-Host "  [WARNING] Task not found or already removed." -ForegroundColor Yellow
     }
 
-    $config = Get-BackupConfig
-    $config.task_registered = $false
-    $config.enabled = $false
-    Save-BackupConfig $config
+    # Clear OneDrive path from database
+    Set-OneDrivePath -Path ''
 
     Write-Host "  Existing backups in OneDrive have NOT been deleted." -ForegroundColor Gray
     Write-Host ""
@@ -453,16 +450,17 @@ if ($Status) {
     Write-Host "  ========================" -ForegroundColor Cyan
     Write-Host ""
 
-    $config = Get-BackupConfig
+    $prefs = Get-BackupPrefs
 
-    if (-not $config.enabled) {
+    if (-not $prefs.onedrive_path) {
         Write-Host "  Backups: NOT CONFIGURED" -ForegroundColor Yellow
         Write-Host "  Run: .\scripts\backup.ps1 -Setup" -ForegroundColor Gray
         Write-Host ""
         exit 0
     }
 
-    Write-Host "  Backup folder: $($config.backup_dir)" -ForegroundColor White
+    $backupStatusDir = Join-Path $prefs.onedrive_path 'Backups\SalesBuddy'
+    Write-Host "  Backup folder: $backupStatusDir" -ForegroundColor White
 
     # Live-check the scheduled task in Windows Task Scheduler
     $liveTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -470,18 +468,21 @@ if ($Status) {
         $taskInfo = $liveTask | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue
         $nextRun = if ($taskInfo -and $taskInfo.NextRunTime) { $taskInfo.NextRunTime.ToString('yyyy-MM-dd h:mm tt') } else { 'Unknown' }
         Write-Host "  Scheduled task: Active (next run: $nextRun)" -ForegroundColor Green
-    } elseif ($config.task_registered) {
-        Write-Host "  Scheduled task: NOT FOUND (config says registered but task is missing from Task Scheduler)" -ForegroundColor Red
-        Write-Host "                  Run: .\scripts\backup.ps1 -Setup  to re-register" -ForegroundColor Yellow
     } else {
         Write-Host "  Scheduled task: Not registered" -ForegroundColor Yellow
+        Write-Host "                  Run start.bat to register, or .\scripts\backup.ps1 -Setup" -ForegroundColor Gray
     }
 
-    Write-Host "  Last backup: $(if ($config.last_backup) { [datetime]::Parse($config.last_backup).ToString('yyyy-MM-dd h:mm tt') } else { 'Never' })" -ForegroundColor White
-    Write-Host "  Retention: $($config.retention.daily) daily, $($config.retention.weekly) weekly, $($config.retention.monthly) monthly" -ForegroundColor White
+    # Deduce last backup from newest file
+    $backups = Get-BackupFiles -BackupDir $backupStatusDir
+    $lastBackupStr = 'Never'
+    if ($backups.Count -gt 0) {
+        $lastBackupStr = $backups[0].LastWriteTime.ToString('yyyy-MM-dd h:mm tt')
+    }
+    Write-Host "  Last backup: $lastBackupStr" -ForegroundColor White
+    Write-Host "  Retention: $($prefs.retention.daily) daily, $($prefs.retention.weekly) weekly, $($prefs.retention.monthly) monthly" -ForegroundColor White
     Write-Host ""
 
-    $backups = Get-BackupFiles -BackupDir $config.backup_dir
     if ($backups.Count -eq 0) {
         Write-Host "  No backups found." -ForegroundColor Yellow
     } else {
@@ -509,19 +510,23 @@ Write-Host "  =================" -ForegroundColor Cyan
 Write-Host ""
 
 # If not configured, offer to run setup instead of just erroring
-$config = Get-BackupConfig
-if (-not $config.backup_dir -and -not $Silent) {
-    Write-Host "  Backups are not configured yet." -ForegroundColor Yellow
-    Write-Host ""
-    $response = Read-Host "  Would you like to set up automatic backups now? (Y/n)"
-    if ($response -eq '' -or $response -eq 'Y' -or $response -eq 'y') {
-        & $PSCommandPath -Setup
-        exit $LASTEXITCODE
-    } else {
-        Write-Host "  [SKIP] Run with -Setup when you're ready." -ForegroundColor Gray
+$prefs = Get-BackupPrefs
+if (-not $prefs.onedrive_path -and -not $Silent) {
+    # Try runtime detection before prompting
+    $detected = Find-OneDrivePath
+    if (-not $detected) {
+        Write-Host "  Backups are not configured yet." -ForegroundColor Yellow
         Write-Host ""
-        Read-Host "  Press Enter to close"
-        exit 0
+        $response = Read-Host "  Would you like to set up automatic backups now? (Y/n)"
+        if ($response -eq '' -or $response -eq 'Y' -or $response -eq 'y') {
+            & $PSCommandPath -Setup
+            exit $LASTEXITCODE
+        } else {
+            Write-Host "  [SKIP] Run with -Setup when you're ready." -ForegroundColor Gray
+            Write-Host ""
+            Read-Host "  Press Enter to close"
+            exit 0
+        }
     }
 }
 

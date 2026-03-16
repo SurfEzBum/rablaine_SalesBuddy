@@ -3,7 +3,6 @@ Admin routes for Sales Buddy.
 Handles admin panel, user management, and domain whitelisting.
 """
 import base64
-import json
 import os
 import shutil
 import signal
@@ -598,43 +597,49 @@ def admin_favicon_gallery():
 # Backup API Endpoints
 # ==============================================================================
 
-def _get_backup_config() -> dict:
-    """Load backup configuration from data/backup_config.json.
+# Hardcoded backup subdirectory under OneDrive for Business
+_BACKUP_SUBDIR = os.path.join('Backups', 'SalesBuddy')
 
-    Returns:
-        dict with backup config, or defaults if file missing/invalid.
+
+def _get_onedrive_path() -> str:
+    """Return the OneDrive for Business path from UserPreference, or empty string."""
+    prefs = UserPreference.query.first()
+    return (prefs.onedrive_path or '') if prefs else ''
+
+
+def _get_backup_dir() -> str:
+    """Derive the backup directory from the stored OneDrive path.
+
+    Returns ``{onedrive_path}/Backups/SalesBuddy`` or empty string.
     """
-    app_root = Path(current_app.root_path).parent
-    config_path = app_root / 'data' / 'backup_config.json'
-    defaults = {
-        'enabled': False,
-        'onedrive_path': '',
-        'backup_dir': '',
-        'retention': {'daily': 7, 'weekly': 4, 'monthly': 3},
-        'last_backup': None,
-        'task_registered': False,
-    }
-    if config_path.exists():
-        try:
-            with open(config_path, 'r', encoding='utf-8-sig') as f:
-                config = json.load(f)
-            # Merge with defaults for missing keys
-            for key, val in defaults.items():
-                if key not in config:
-                    config[key] = val
-            return config
-        except (json.JSONDecodeError, OSError):
-            pass
-    return defaults
+    onedrive = _get_onedrive_path()
+    if not onedrive:
+        return ''
+    return os.path.join(onedrive, _BACKUP_SUBDIR)
 
 
-def _save_backup_config(config: dict) -> None:
-    """Save backup configuration to data/backup_config.json."""
-    app_root = Path(current_app.root_path).parent
-    config_path = app_root / 'data' / 'backup_config.json'
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2)
+def _get_retention() -> dict:
+    """Return backup retention policy from UserPreference."""
+    prefs = UserPreference.query.first()
+    if prefs:
+        return {
+            'daily': prefs.backup_retention_daily,
+            'weekly': prefs.backup_retention_weekly,
+            'monthly': prefs.backup_retention_monthly,
+        }
+    return {'daily': 7, 'weekly': 4, 'monthly': 3}
+
+
+def _get_last_backup(backup_dir: str) -> str | None:
+    """Deduce the last backup timestamp from the newest file in backup_dir."""
+    if not backup_dir or not os.path.isdir(backup_dir):
+        return None
+    files = sorted(Path(backup_dir).glob('salesbuddy_*.db'), reverse=True)
+    if not files:
+        return None
+    return datetime.fromtimestamp(
+        files[0].stat().st_mtime, tz=timezone.utc
+    ).isoformat()
 
 
 def _list_backup_files(backup_dir: str, limit: int = 10) -> list[dict]:
@@ -667,12 +672,16 @@ def _list_backup_files(backup_dir: str, limit: int = 10) -> list[dict]:
     return backups
 
 
-# Scheduled task name (must match scripts/backup.ps1 and scripts/server.ps1)
+# Scheduled task names (must match scripts/backup.ps1 and scripts/server.ps1)
 _BACKUP_TASK_NAME = 'SalesBuddy-DailyBackup'
+_AUTOSTART_TASK_NAME = 'SalesBuddy-AutoStart'
 
 
-def _check_scheduled_task() -> dict:
-    """Query Windows Task Scheduler for the backup task's real status.
+def _check_scheduled_task(task_name: str) -> dict:
+    """Query Windows Task Scheduler for a task's real status.
+
+    Args:
+        task_name: The scheduled task name to query.
 
     Returns:
         dict with ``exists`` (bool), ``next_run`` (str or None), and
@@ -683,7 +692,7 @@ def _check_scheduled_task() -> dict:
         return result
     try:
         proc = subprocess.run(
-            ['schtasks', '/Query', '/TN', _BACKUP_TASK_NAME, '/FO', 'CSV', '/NH'],
+            ['schtasks', '/Query', '/TN', task_name, '/FO', 'CSV', '/NH'],
             capture_output=True, text=True, timeout=5,
         )
         if proc.returncode == 0 and proc.stdout.strip():
@@ -700,22 +709,52 @@ def _check_scheduled_task() -> dict:
     return result
 
 
+def _set_scheduled_task_enabled(task_name: str, enabled: bool) -> dict:
+    """Enable or disable a Windows scheduled task.
+
+    Args:
+        task_name: The scheduled task name.
+        enabled: True to enable, False to disable.
+
+    Returns:
+        dict with ``success`` (bool) and optional ``error`` (str).
+    """
+    if sys.platform != 'win32':
+        return {'success': False, 'error': 'Scheduled tasks are only supported on Windows.'}
+    verb = 'Enable' if enabled else 'Disable'
+    try:
+        proc = subprocess.run(
+            ['schtasks', '/Change', '/TN', task_name,
+             '/ENABLE' if enabled else '/DISABLE'],
+            capture_output=True, text=True, timeout=10,
+        )
+        if proc.returncode == 0:
+            return {'success': True}
+        return {
+            'success': False,
+            'error': proc.stderr.strip() or f'Failed to {verb.lower()} task.',
+        }
+    except subprocess.TimeoutExpired:
+        return {'success': False, 'error': f'{verb} task timed out.'}
+    except (FileNotFoundError, OSError) as e:
+        return {'success': False, 'error': str(e)}
+
+
 @admin_bp.route('/api/admin/backup/status', methods=['GET'])
 def api_backup_status():
     """Return backup configuration and recent backup list."""
-    config = _get_backup_config()
-    backups = _list_backup_files(config.get('backup_dir', ''))
-    task_info = _check_scheduled_task()
+    backup_dir = _get_backup_dir()
+    backups = _list_backup_files(backup_dir)
+    task_info = _check_scheduled_task(_BACKUP_TASK_NAME)
     return jsonify({
-        'enabled': config.get('enabled', False),
-        'backup_dir': config.get('backup_dir', ''),
-        'onedrive_path': config.get('onedrive_path', ''),
-        'last_backup': config.get('last_backup'),
-        'task_registered': config.get('task_registered', False),
+        'configured': bool(backup_dir),
+        'backup_dir': backup_dir,
+        'onedrive_path': _get_onedrive_path(),
+        'last_backup': _get_last_backup(backup_dir),
         'task_exists': task_info['exists'],
         'task_next_run': task_info['next_run'],
         'task_status': task_info['status'],
-        'retention': config.get('retention', {}),
+        'retention': _get_retention(),
         'recent_backups': backups,
     })
 
@@ -727,13 +766,12 @@ def api_backup_run():
     This performs the copy directly in Python rather than shelling out to
     PowerShell, so it works regardless of OS.
     """
-    config = _get_backup_config()
-    backup_dir = config.get('backup_dir', '')
+    backup_dir = _get_backup_dir()
 
-    if not config.get('enabled') or not backup_dir:
+    if not backup_dir:
         return jsonify({
             'success': False,
-            'error': 'Backups are not configured. Run backup.bat -Setup first.',
+            'error': 'Backups are not configured. Run start.bat to auto-detect OneDrive.',
         }), 400
 
     app_root = Path(current_app.root_path).parent
@@ -747,10 +785,6 @@ def api_backup_run():
         dest = os.path.join(backup_dir, f'salesbuddy_{timestamp}.db')
         shutil.copy2(str(db_path), dest)
 
-        # Update last_backup in config
-        config['last_backup'] = datetime.now(timezone.utc).isoformat()
-        _save_backup_config(config)
-
         size_mb = os.path.getsize(dest) / (1024 * 1024)
         return jsonify({
             'success': True,
@@ -759,6 +793,50 @@ def api_backup_run():
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/tasks/<task_key>/toggle', methods=['POST'])
+def api_task_toggle(task_key: str):
+    """Enable or disable a scheduled task.
+
+    Args:
+        task_key: 'backup' or 'autostart'.
+
+    Request JSON: {"enabled": true/false}
+    """
+    task_map = {
+        'backup': _BACKUP_TASK_NAME,
+        'autostart': _AUTOSTART_TASK_NAME,
+    }
+    task_name = task_map.get(task_key)
+    if not task_name:
+        return jsonify({'success': False, 'error': 'Unknown task key.'}), 400
+
+    body = request.get_json(silent=True) or {}
+    enabled = body.get('enabled')
+    if enabled is None:
+        return jsonify({'success': False, 'error': 'Missing enabled field.'}), 400
+
+    result = _set_scheduled_task_enabled(task_name, bool(enabled))
+    if result['success']:
+        task_info = _check_scheduled_task(task_name)
+        return jsonify({
+            'success': True,
+            'task_status': task_info['status'],
+            'task_exists': task_info['exists'],
+        })
+    return jsonify(result), 500
+
+
+@admin_bp.route('/api/admin/tasks/autostart/status', methods=['GET'])
+def api_autostart_status():
+    """Return the autostart scheduled task status."""
+    task_info = _check_scheduled_task(_AUTOSTART_TASK_NAME)
+    return jsonify({
+        'task_exists': task_info['exists'],
+        'task_next_run': task_info['next_run'],
+        'task_status': task_info['status'],
+    })
 
 
 # ==============================================================================

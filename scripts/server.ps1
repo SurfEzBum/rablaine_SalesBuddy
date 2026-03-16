@@ -95,6 +95,49 @@ function Find-OneDriveBusinessPath {
     return $null
 }
 
+# Store OneDrive path in the database (user_preferences table)
+function Set-OneDrivePathInDb {
+    param([string]$Path)
+    $pythonExe = Join-Path $RepoRoot 'venv\Scripts\python.exe'
+    if (-not (Test-Path $pythonExe)) { return }
+    $dbPath = Join-Path $RepoRoot 'data\salesbuddy.db'
+    $script = @"
+import sqlite3, sys
+db, path = sys.argv[1], sys.argv[2]
+conn = sqlite3.connect(db)
+c = conn.cursor()
+c.execute('UPDATE user_preferences SET onedrive_path = ? WHERE id = (SELECT id FROM user_preferences LIMIT 1)', (path,))
+conn.commit()
+conn.close()
+"@
+    & $pythonExe -c $script $dbPath $Path 2>$null
+}
+
+# Read OneDrive path from the database
+function Get-OneDrivePathFromDb {
+    $pythonExe = Join-Path $RepoRoot 'venv\Scripts\python.exe'
+    if (-not (Test-Path $pythonExe)) { return '' }
+    $dbPath = Join-Path $RepoRoot 'data\salesbuddy.db'
+    $script = @"
+import sqlite3, sys
+db = sys.argv[1]
+try:
+    conn = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+    c = conn.cursor()
+    c.execute('SELECT onedrive_path FROM user_preferences LIMIT 1')
+    row = c.fetchone()
+    conn.close()
+    print(row[0] if row and row[0] else '')
+except Exception:
+    print('')
+"@
+    try {
+        $result = & $pythonExe -c $script $dbPath 2>$null
+        return $result.Trim()
+    } catch {}
+    return ''
+}
+
 # Read .env file into a hashtable
 function Read-EnvFile {
     $config = @{}
@@ -446,102 +489,31 @@ if ($isGitRepo) {
 }
 
 # -- Step 11: Check/configure backups ------------------------------------------
-$backupConfigFile = Join-Path $RepoRoot 'data\backup_config.json'
-$backupConfigExists = Test-Path $backupConfigFile
-$backupEnabled = $false
-if ($backupConfigExists) {
-    try {
-        $backupConfig = Get-Content $backupConfigFile -Raw | ConvertFrom-Json
-        if ($backupConfig.enabled -eq $true -and $backupConfig.backup_dir) {
-            $backupEnabled = $true
-            Write-Host "  [OK] Backups enabled -> $($backupConfig.backup_dir)" -ForegroundColor Green
-        } else {
-            Write-Host "  [INFO] Backups disabled. Run backup.bat to set up." -ForegroundColor Gray
-        }
-    } catch {
-        Write-Host "  [INFO] Backups disabled. Run backup.bat to set up." -ForegroundColor Gray
-    }
-}
+# Read OneDrive path from DB. If empty, try runtime detection and store it.
+$backupOneDrive = Get-OneDrivePathFromDb
 
-# First run: auto-detect OneDrive for Business and enable backups without prompting.
-# If the config already exists (enabled or disabled), respect that -- don't override.
-if (-not $backupConfigExists -and -not $Force) {
+if ($backupOneDrive) {
+    $backupDir = Join-Path $backupOneDrive 'Backups\SalesBuddy'
+    Write-Host "  [OK] Backups configured -> $backupDir" -ForegroundColor Green
+} elseif (-not $Force) {
+    # First run or DB has no path - auto-detect OneDrive for Business
     $businessOneDrive = Find-OneDriveBusinessPath
     if ($businessOneDrive) {
         $backupDir = Join-Path $businessOneDrive 'Backups\SalesBuddy'
         Write-Host ""
         Write-Host "  Detected OneDrive for Business: $businessOneDrive" -ForegroundColor Green
-        Write-Host "  Enabling automatic backups -> $backupDir" -ForegroundColor Yellow
+        Write-Host "  Configuring automatic backups -> $backupDir" -ForegroundColor Yellow
 
         # Create the backup directory
         if (-not (Test-Path $backupDir)) {
             New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
         }
 
-        # Save backup_config.json
-        $dataDir = Join-Path $RepoRoot 'data'
-        if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
-        $newBackupConfig = @{
-            enabled        = $true
-            onedrive_path  = $businessOneDrive
-            backup_dir     = $backupDir
-            retention      = @{ daily = 7; weekly = 4; monthly = 3 }
-            last_backup    = $null
-            task_registered = $false
-        }
-        $newBackupConfig | ConvertTo-Json -Depth 3 | Set-Content $backupConfigFile -Encoding UTF8
+        # Store OneDrive path in the database
+        Set-OneDrivePathInDb -Path $businessOneDrive
+        $backupOneDrive = $businessOneDrive
 
-        # Register scheduled task for daily backups
-        $BackupTaskName = 'SalesBuddy-DailyBackup'
-        $backupScript = Join-Path $PSScriptRoot 'backup.ps1'
-        $action = New-ScheduledTaskAction `
-            -Execute 'powershell.exe' `
-            -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$backupScript`" -Silent" `
-            -WorkingDirectory $RepoRoot
-        $trigger = New-ScheduledTaskTrigger -Daily -At '11:00AM'
-        $settings = New-ScheduledTaskSettingsSet `
-            -AllowStartIfOnBatteries `
-            -DontStopIfGoingOnBatteries `
-            -StartWhenAvailable `
-            -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
-        Unregister-ScheduledTask -TaskName $BackupTaskName -Confirm:$false -ErrorAction SilentlyContinue
-
-        # Try SYSTEM first (reliable on Entra ID cloud-joined machines, but needs admin).
-        # Fall back to Interactive if not elevated. Interactive works when the user is
-        # logged in, and StartWhenAvailable catches up on missed runs.
-        # NEVER use S4U — it silently fails on Entra-only accounts (no creds/profile).
-        $taskRegistered = $false
-        try {
-            $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-            Register-ScheduledTask `
-                -TaskName $BackupTaskName -Action $action -Trigger $trigger `
-                -Principal $principal -Settings $settings `
-                -Description 'Daily backup of Sales Buddy database to OneDrive' `
-                -ErrorAction Stop | Out-Null
-            $taskRegistered = $true
-        } catch {
-            # SYSTEM requires admin — fall back to Interactive (runs when logged in)
-            try {
-                $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-                Register-ScheduledTask `
-                    -TaskName $BackupTaskName -Action $action -Trigger $trigger `
-                    -Principal $principal -Settings $settings `
-                    -Description 'Daily backup of Sales Buddy database to OneDrive' `
-                    -ErrorAction Stop | Out-Null
-                $taskRegistered = $true
-            } catch {
-                Write-Host "  [WARNING] Could not register scheduled task: $_" -ForegroundColor Yellow
-                Write-Host "            Run backup.bat -Setup as admin to register." -ForegroundColor Gray
-            }
-        }
-
-        if ($taskRegistered) {
-            $newBackupConfig.task_registered = $true
-            $newBackupConfig | ConvertTo-Json -Depth 3 | Set-Content $backupConfigFile -Encoding UTF8
-            Write-Host "  [OK] Daily backups scheduled at 11:00 AM." -ForegroundColor Green
-        }
-
-        Write-Host "  [OK] Automatic backups enabled (database + call logs)." -ForegroundColor Green
+        Write-Host "  [OK] Automatic backups configured (database + call logs)." -ForegroundColor Green
     } else {
         Write-Host ""
         Write-Host "  [WARNING] No OneDrive for Business detected." -ForegroundColor Yellow
@@ -549,15 +521,73 @@ if (-not $backupConfigExists -and -not $Force) {
         Write-Host "            Install OneDrive and sign in with your work account," -ForegroundColor Gray
         Write-Host "            then run backup.bat to set up backups." -ForegroundColor Gray
     }
-} elseif (-not $backupConfigExists -and $Force) {
+} else {
     Write-Host "  [INFO] Backups not configured. Run backup.bat to set up." -ForegroundColor Gray
 }
 
-# -- Step 12: Register autostart scheduled task --------------------------------
-$AutoStartTaskName = 'SalesBuddy-AutoStart'
-$autoStartTask = Get-ScheduledTask -TaskName $AutoStartTaskName -ErrorAction SilentlyContinue
+# -- Step 12: Ensure scheduled tasks are registered ----------------------------
+# Both tasks are registered idempotently on every start. If a task was disabled
+# by the user via the admin panel, we leave it disabled - we only create missing
+# tasks, never re-enable or re-create existing ones.
 
-if (-not $autoStartTask -and -not $Force) {
+# 12a: SalesBuddy-DailyBackup (only if OneDrive path is known)
+$BackupTaskName = 'SalesBuddy-DailyBackup'
+$existingBackupTask = Get-ScheduledTask -TaskName $BackupTaskName -ErrorAction SilentlyContinue
+
+if (-not $existingBackupTask -and $backupOneDrive) {
+    Write-Host ""
+    Write-Host "  Registering daily backup task..." -ForegroundColor Yellow
+
+    $backupScript = Join-Path $PSScriptRoot 'backup.ps1'
+    $action = New-ScheduledTaskAction `
+        -Execute 'powershell.exe' `
+        -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$backupScript`" -Silent" `
+        -WorkingDirectory $RepoRoot
+    $trigger = New-ScheduledTaskTrigger -Daily -At '11:00AM'
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+
+    # Try SYSTEM first (reliable on Entra ID cloud-joined machines, but needs admin).
+    # Fall back to Interactive if not elevated.
+    # NEVER use S4U - it silently fails on Entra-only accounts.
+    $taskRegistered = $false
+    try {
+        $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        Register-ScheduledTask `
+            -TaskName $BackupTaskName -Action $action -Trigger $trigger `
+            -Principal $principal -Settings $settings `
+            -Description 'Daily backup of Sales Buddy database to OneDrive' `
+            -ErrorAction Stop | Out-Null
+        $taskRegistered = $true
+    } catch {
+        try {
+            $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+            Register-ScheduledTask `
+                -TaskName $BackupTaskName -Action $action -Trigger $trigger `
+                -Principal $principal -Settings $settings `
+                -Description 'Daily backup of Sales Buddy database to OneDrive' `
+                -ErrorAction Stop | Out-Null
+            $taskRegistered = $true
+        } catch {
+            Write-Host "  [WARNING] Could not register backup task: $_" -ForegroundColor Yellow
+        }
+    }
+
+    if ($taskRegistered) {
+        Write-Host "  [OK] Daily backups scheduled at 11:00 AM." -ForegroundColor Green
+    }
+} elseif ($existingBackupTask) {
+    Write-Host "  [OK] Daily backup task registered." -ForegroundColor Green
+}
+
+# 12b: SalesBuddy-AutoStart
+$AutoStartTaskName = 'SalesBuddy-AutoStart'
+$existingAutoStart = Get-ScheduledTask -TaskName $AutoStartTaskName -ErrorAction SilentlyContinue
+
+if (-not $existingAutoStart) {
     Write-Host ""
     Write-Host "  Registering auto-start on login..." -ForegroundColor Yellow
 
@@ -593,10 +623,9 @@ if (-not $autoStartTask -and -not $Force) {
 
     if ($asRegistered) {
         Write-Host "  [OK] Sales Buddy will start automatically at login." -ForegroundColor Green
-        Write-Host "       Task name: $AutoStartTaskName (remove with uninstall.bat)" -ForegroundColor Gray
     }
-} elseif ($autoStartTask) {
-    Write-Host "  [OK] Auto-start at login enabled." -ForegroundColor Green
+} elseif ($existingAutoStart) {
+    Write-Host "  [OK] Auto-start at login registered." -ForegroundColor Green
 }
 
 # ==============================================================================

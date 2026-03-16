@@ -67,6 +67,7 @@
 - Use 4 spaces for indentation
 - Maximum line length: 100 characters
 - Use docstrings for all functions, classes, and modules
+- **Never use em dashes** (the long dash character). Use a regular hyphen (-), a comma, or rewrite the sentence instead. Do not fake an em dash with two hyphens (--) either.
 
 ### Naming Conventions
 - **Files:** snake_case (e.g., `customer_routes.py`, `note_model.py`)
@@ -77,9 +78,9 @@
 - **Database tables:** snake_case plural (e.g., `customers`, `notes`, `tags`)
 
 ### Code Organization
-- Use Flask blueprints in `app/routes/` — one file per domain
+- Use Flask blueprints in `app/routes/` - one file per domain
 - Keep database models in `app/models.py`
-- Keep business logic in `app/services/` — separate from route handlers
+- Keep business logic in `app/services/` - separate from route handlers
 - Group related routes together with clear comments
 - Keep functions focused and under 50 lines when possible
 - Extract magic numbers and strings into constants at top of file
@@ -101,17 +102,17 @@
 - Never run tests against production database
 - Aim for 70%+ code coverage
 - Test file naming: `test_*.py` or `*_test.py`
-- **Run scoped tests during development** - Run only the test file(s) relevant to what you're building (e.g., `pytest tests/test_views.py`). Do NOT run the full suite (`pytest tests/`) — the user runs that manually.
+- **Run scoped tests during development** - Run only the test file(s) relevant to what you're building (e.g., `pytest tests/test_views.py`). Do NOT run the full suite (`pytest tests/`) - the user runs that manually.
 - Add tests for any bugs discovered to prevent regression
 
 ## Terminal Command Rules
 
 **CRITICAL - DO NOT VIOLATE THESE RULES:**
-- **NEVER run the full test suite (`pytest tests/`)** — the user runs that manually. During development, run only the relevant scoped test file(s) (e.g., `pytest tests/test_views.py`).
-- **NEVER pipe, redirect, or filter pytest output** — always run pytest plain and wait for it to finish. The full suite is 900+ tests and takes 12+ minutes. Let it complete.
-- **NEVER kill a running command and re-run it** — if a command is still running, WAIT. Do not start a new terminal command while one is still executing.
-- **NEVER chain pytest with `| Select-Object`, `| Out-String`, `| Where-Object`, `2>&1`, or any other output manipulation** — this causes truncation and wastes massive amounts of time re-running.
-- **Set timeout to 0 for pytest runs** — the suite can take over 12 minutes. Use `timeout: 0` so it doesn't get killed early.
+- **NEVER run the full test suite (`pytest tests/`)** - the user runs that manually. During development, run only the relevant scoped test file(s) (e.g., `pytest tests/test_views.py`).
+- **NEVER pipe, redirect, or filter pytest output** - always run pytest plain and wait for it to finish. The full suite is 900+ tests and takes 12+ minutes. Let it complete.
+- **NEVER kill a running command and re-run it** - if a command is still running, WAIT. Do not start a new terminal command while one is still executing.
+- **NEVER chain pytest with `| Select-Object`, `| Out-String`, `| Where-Object`, `2>&1`, or any other output manipulation** - this causes truncation and wastes massive amounts of time re-running.
+- **Set timeout to 0 for pytest runs** - the suite can take over 12 minutes. Use `timeout: 0` so it doesn't get killed early.
 - If output appears truncated, DO NOT re-run the command with different piping. Just re-run the same plain command and wait.
 
 ## Architecture Patterns
@@ -155,7 +156,7 @@ FLASK_DEBUG=True
 
 **Optional Environment Variables (AI Features):**
 ```
-# AI features use the APIM gateway — no env vars needed for AI.
+# AI features use the APIM gateway - no env vars needed for AI.
 # The gateway URL and Entra app ID are hardcoded in app/gateway_client.py.
 # Authentication uses the caller's `az login` credential automatically.
 ```
@@ -269,15 +270,15 @@ pytest --cov=app tests/  # with coverage
 3. Run scoped tests for the feature you're building (e.g., `pytest tests/test_views.py`)
 4. **Prompt user to manually test new features or bug fixes** - Before committing, always ask the user to test the changes in the running app to verify everything works as expected
 5. Commit to feature branch with descriptive message
-6. **STOP AND WAIT for user confirmation** before merging to `main` — **NEVER merge to main without explicit user approval**
+6. **STOP AND WAIT for user confirmation** before merging to `main` - **NEVER merge to main without explicit user approval**
 7. When user says ready: merge to `main` with `--no-ff` and push
    - **Always use `git merge --no-ff`** to preserve feature branch history
 
-**CRITICAL — DO NOT AUTO-MERGE:**
-- **NEVER merge a feature branch to `main` on your own** — always wait for the user to test and explicitly say to merge
-- Building a feature and committing to the feature branch is fine — merging to `main` requires user sign-off
-- If the user says "commit" that does NOT mean "merge to main" — it means commit to the current feature branch only
-- Merging to `main` is a deployment gate — treat it seriously
+**CRITICAL - DO NOT AUTO-MERGE:**
+- **NEVER merge a feature branch to `main` on your own** - always wait for the user to test and explicitly say to merge
+- Building a feature and committing to the feature branch is fine - merging to `main` requires user sign-off
+- If the user says "commit" that does NOT mean "merge to main" - it means commit to the current feature branch only
+- Merging to `main` is a deployment gate - treat it seriously
 
 **Merge to Production Checklist:**
 - Scoped tests passing for changed code
@@ -286,28 +287,28 @@ pytest --cov=app tests/  # with coverage
 - No secrets or .env file committed
 - Tests included for new features or bug fixes
 
-**CRITICAL — Gateway Deployment Rules:**
+**CRITICAL - Gateway Deployment Rules:**
 - **NEVER deploy to prod without verifying staging first.** Deploy to staging → hit `/health` → confirm 200 → only then deploy to prod.
 - **NEVER deploy to both slots simultaneously.** Staging is the canary. If staging breaks, prod is unaffected.
-- **Before building a deploy zip, include ALL required files** (see manifest below). Do not guess — verify.
+- **Before building a deploy zip, include ALL required files** (see manifest below). Do not guess - verify.
 - **After deploying, verify with `GET /health`** (returns `{"status": "ok"}`). See HTTP status reference below.
 
-**Gateway Deploy Zip — Required Files:**
+**Gateway Deploy Zip - Required Files:**
 All 5 files from `infra/gateway/` must be in the zip root:
-1. `gateway.py` — Main Flask app
-2. `sharing_hub.py` — Socket.IO sharing server
-3. `openai_client.py` — Azure OpenAI client wrapper
-4. `prompts.py` — AI prompt templates
-5. `requirements.txt` — Python dependencies
+1. `gateway.py` - Main Flask app
+2. `sharing_hub.py` - Socket.IO sharing server
+3. `openai_client.py` - Azure OpenAI client wrapper
+4. `prompts.py` - AI prompt templates
+5. `requirements.txt` - Python dependencies
 
 If `gateway.py` adds new imports in the future, the new files must also be included.
 
 **Gateway HTTP Status Cheat Sheet:**
 | Status | Meaning |
 |--------|-----------------------------------------------|
-| `200`  | Healthy — app is running and responding |
+| `200`  | Healthy - app is running and responding |
 | `403`  | App is running, but auth rejected the request (check gateway secret / JWT) |
-| `404`  | Endpoint doesn't exist (check route definitions — NOT "service is down") |
+| `404`  | Endpoint doesn't exist (check route definitions - NOT "service is down") |
 | `502`  | Container failed to start (check App Service logs: `az webapp log tail`) |
 | `503`  | App Service is restarting or overloaded |
 
@@ -318,15 +319,15 @@ If a deploy breaks a slot:
 3. Verify with `GET /health` → 200
 
 **GitHub Interactions:**
-- **Use `gh` CLI for all GitHub operations** — issues, PRs, comments, labels, etc.
+- **Use `gh` CLI for all GitHub operations** - issues, PRs, comments, labels, etc.
 - Examples: `gh issue comment 46 --body "Fixed in commit abc123"`, `gh issue list`, `gh pr create`
-- Do NOT ask about MCP tools or other methods — just use `gh` directly
+- Do NOT ask about MCP tools or other methods - just use `gh` directly
 
 ## External Actions Safety
 
 **Before any action that modifies systems outside the local workspace, pause and confirm:**
-- **Deploying to Azure** (staging or prod) — state the target slot and what's being deployed
-- **Pushing to remote** (`git push`) — state the branch and what's being pushed
+- **Deploying to Azure** (staging or prod) - state the target slot and what's being deployed
+- **Pushing to remote** (`git push`) - state the branch and what's being pushed
 - **Deleting remote resources** (branches, Azure resources, deployed code)
 - **Running `az` commands that modify infrastructure** (config changes, restarts, identity assignments)
 
@@ -362,14 +363,14 @@ The rule: **if it leaves your machine, say what you're doing and why before doin
 - **APIM Gateway URL:** `https://apim-notehelper.azure-api.net/ai`
 - **Entra App Registration:** `NoteHelper-AI-Gateway`, App ID `0f6db4af-332c-4fd5-b894-77fadb181e5c`
 - **Tenant:** Microsoft corp `72f988bf-86f1-41af-91ab-2d7cd011db47` (JWT validation)
-- **Gateway client:** `app/gateway_client.py` — hardcoded config, no env vars needed
-- **AI is always enabled** — the onboarding wizard enforces consent before the user can access the product, so there is no per-user AI gate
+- **Gateway client:** `app/gateway_client.py` - hardcoded config, no env vars needed
+- **AI is always enabled** - the onboarding wizard enforces consent before the user can access the product, so there is no per-user AI gate
 
 **How AI consent works:**
 1. User runs `az login --scope api://0f6db4af-332c-4fd5-b894-77fadb181e5c/.default` (wizard does this automatically)
 2. Browser shows Entra consent prompt if first time
 3. After accepting, `POST /api/admin/ai-enable` validates token acquisition and records consent in `UserPreference.ai_enabled`
-4. AI features are available immediately — no template-level gating
+4. AI features are available immediately - no template-level gating
 
 **Revoking AI consent for testing:**
 

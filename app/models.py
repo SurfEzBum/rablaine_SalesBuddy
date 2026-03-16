@@ -880,7 +880,11 @@ class UserPreference(db.Model):
     fy_transition_label = db.Column(db.String(10), nullable=True)  # e.g. "FY27"
     fy_transition_started = db.Column(db.DateTime, nullable=True)  # When FY transition was started
     fy_sync_complete = db.Column(db.Boolean, default=False, nullable=False)  # True after FY account sync finishes
-    fy_last_completed = db.Column(db.String(10), nullable=True)  # e.g. "FY27" — set when finalization completes
+    fy_last_completed = db.Column(db.String(10), nullable=True)  # e.g. "FY27" - set when finalization completes
+    onedrive_path = db.Column(db.String(500), nullable=True)  # Cached OneDrive for Business root path
+    backup_retention_daily = db.Column(db.Integer, default=7, nullable=False)  # Number of daily backups to keep
+    backup_retention_weekly = db.Column(db.Integer, default=4, nullable=False)  # Number of weekly backups to keep
+    backup_retention_monthly = db.Column(db.Integer, default=3, nullable=False)  # Number of monthly backups to keep
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
     updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
     

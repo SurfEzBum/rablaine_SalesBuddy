@@ -29,7 +29,6 @@ from app.models import (
 from app.services.backup import (
     _customer_to_dict,
     _get_backup_root,
-    _load_db_backup_config,
     _sanitize_folder_name,
     backup_all_customers,
     backup_customer,
@@ -47,19 +46,26 @@ from app.services.backup import (
 
 @pytest.fixture
 def backup_dir():
-    """Create a temporary directory for backups and clean up after."""
+    """Create a temporary OneDrive-like directory with Backups/SalesBuddy subdir."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        yield tmpdir
+        backup_path = os.path.join(tmpdir, "Backups", "SalesBuddy")
+        os.makedirs(backup_path)
+        yield backup_path
 
 
 @pytest.fixture
-def backup_config(app, backup_dir, monkeypatch):
-    """Stub _load_db_backup_config to return a config pointing at the temp dir."""
-    cfg_data = {"enabled": True, "backup_dir": backup_dir}
+def onedrive_root(backup_dir):
+    """Return the OneDrive root (two levels above backup_dir)."""
+    return str(Path(backup_dir).parent.parent)
+
+
+@pytest.fixture
+def backup_config(app, onedrive_root, monkeypatch):
+    """Stub _get_onedrive_path_from_db to return the temp OneDrive root."""
     monkeypatch.setattr(
-        "app.services.backup._load_db_backup_config", lambda: cfg_data
+        "app.services.backup._get_onedrive_path_from_db", lambda: onedrive_root
     )
-    yield cfg_data
+    yield {"onedrive_path": onedrive_root}
 
 
 @pytest.fixture
@@ -156,8 +162,7 @@ class TestGetBackupRoot:
 
     def test_returns_none_when_no_config(self, app, monkeypatch):
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": False, "backup_dir": ""},
+            "app.services.backup._get_onedrive_path_from_db", lambda: ""
         )
         monkeypatch.setattr(
             "app.services.backup.get_auto_detected_backup_path", lambda: None
@@ -165,16 +170,15 @@ class TestGetBackupRoot:
         with app.app_context():
             assert _get_backup_root() is None
 
-    def test_returns_path_when_enabled(self, app, backup_config, backup_dir):
+    def test_returns_path_when_configured(self, app, backup_config, backup_dir):
         with app.app_context():
             root = _get_backup_root()
             assert root is not None
             assert root == backup_dir
 
-    def test_returns_none_when_disabled(self, app, backup_dir, monkeypatch):
+    def test_returns_none_when_onedrive_empty(self, app, monkeypatch):
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": False, "backup_dir": backup_dir},
+            "app.services.backup._get_onedrive_path_from_db", lambda: ""
         )
         monkeypatch.setattr(
             "app.services.backup.get_auto_detected_backup_path", lambda: None
@@ -248,10 +252,9 @@ class TestBackupCustomer:
             assert data["_salesbuddy_backup"] is True
             assert data["customer"]["tpid"] == 99999
 
-    def test_returns_false_when_disabled(self, app, customer_with_logs, monkeypatch):
+    def test_returns_false_when_not_configured(self, app, customer_with_logs, monkeypatch):
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": False, "backup_dir": ""},
+            "app.services.backup._get_onedrive_path_from_db", lambda: ""
         )
         monkeypatch.setattr(
             "app.services.backup.get_auto_detected_backup_path", lambda: None
@@ -350,10 +353,9 @@ class TestBackupAllCustomers:
             db.session.delete(seller)
             db.session.commit()
 
-    def test_returns_error_when_disabled(self, app, monkeypatch):
+    def test_returns_error_when_not_configured(self, app, monkeypatch):
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": False, "backup_dir": ""},
+            "app.services.backup._get_onedrive_path_from_db", lambda: ""
         )
         monkeypatch.setattr(
             "app.services.backup.get_auto_detected_backup_path", lambda: None
@@ -502,10 +504,9 @@ class TestRestoreFromBackup:
 class TestBackupRoutes:
     """Tests for backup API endpoints."""
 
-    def test_status_when_disabled(self, client, app, monkeypatch):
+    def test_status_when_not_configured(self, client, app, monkeypatch):
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": False, "backup_dir": ""},
+            "app.services.backup._get_onedrive_path_from_db", lambda: ""
         )
         monkeypatch.setattr(
             "app.services.backup.get_auto_detected_backup_path", lambda: None
@@ -513,12 +514,11 @@ class TestBackupRoutes:
         resp = client.get("/api/backup/status")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert data["enabled"] is False
+        assert data["configured"] is False
 
-    def test_backup_all_when_disabled(self, client, app, monkeypatch):
+    def test_backup_all_when_not_configured(self, client, app, monkeypatch):
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": False, "backup_dir": ""},
+            "app.services.backup._get_onedrive_path_from_db", lambda: ""
         )
         monkeypatch.setattr(
             "app.services.backup.get_auto_detected_backup_path", lambda: None
@@ -526,10 +526,10 @@ class TestBackupRoutes:
         resp = client.post("/api/backup/backup-all")
         assert resp.status_code == 400
 
-    def test_backup_all_success(self, client, app, backup_dir, sample_data, monkeypatch):
+    def test_backup_all_success(self, client, app, backup_dir, onedrive_root, sample_data, monkeypatch):
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": True, "backup_dir": backup_dir},
+            "app.services.backup._get_onedrive_path_from_db",
+            lambda: onedrive_root,
         )
 
         resp = client.post("/api/backup/backup-all")
@@ -596,11 +596,11 @@ class TestBackupRoutes:
         )
         assert resp.status_code == 404
 
-    def test_status_counts_files(self, client, app, backup_dir, monkeypatch):
+    def test_status_counts_files(self, client, app, backup_dir, onedrive_root, monkeypatch):
         """Verify file_count reflects actual JSON files on disk."""
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": True, "backup_dir": backup_dir},
+            "app.services.backup._get_onedrive_path_from_db",
+            lambda: onedrive_root,
         )
 
         cl_dir = os.path.join(backup_dir, "notes", "Some Seller")
@@ -620,11 +620,11 @@ class TestBackupRoutes:
 class TestNoteBackupHooks:
     """Verify that call log CRUD triggers a backup write."""
 
-    def test_create_note_triggers_backup(self, client, app, backup_dir, sample_data, monkeypatch):
+    def test_create_note_triggers_backup(self, client, app, backup_dir, onedrive_root, sample_data, monkeypatch):
         """Creating a call log should write a backup file."""
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": True, "backup_dir": backup_dir},
+            "app.services.backup._get_onedrive_path_from_db",
+            lambda: onedrive_root,
         )
 
         resp = client.post(
@@ -642,11 +642,10 @@ class TestNoteBackupHooks:
         filepath = os.path.join(backup_dir, "notes", "Alice Smith", "1001.json")
         assert os.path.isfile(filepath), f"Expected backup at {filepath}"
 
-    def test_backup_not_written_when_disabled(self, client, app, backup_dir, sample_data, monkeypatch):
-        """No backup file when feature is off."""
+    def test_backup_not_written_when_not_configured(self, client, app, backup_dir, sample_data, monkeypatch):
+        """No backup file when not configured."""
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": False, "backup_dir": ""},
+            "app.services.backup._get_onedrive_path_from_db", lambda: ""
         )
         monkeypatch.setattr(
             "app.services.backup.get_auto_detected_backup_path", lambda: None
@@ -835,13 +834,13 @@ class TestFindBackupFolder:
             result = find_backup_folder()
             assert result == notes
 
-    def test_returns_none_when_no_folder(self, app, backup_dir, monkeypatch):
+    def test_returns_none_when_no_folder(self, app, backup_dir, onedrive_root, monkeypatch):
         """Should return None when no notes folder exists anywhere."""
         with app.app_context():
             # Config pointing at dir with no notes subfolder
             monkeypatch.setattr(
-                "app.services.backup._load_db_backup_config",
-                lambda: {"enabled": True, "backup_dir": backup_dir},
+                "app.services.backup._get_onedrive_path_from_db",
+                lambda: onedrive_root,
             )
 
             # Stub out all OneDrive detection so real machine paths don't leak in
@@ -1054,11 +1053,11 @@ class TestRestoreAllRoute:
 class TestCustomerNotesBackupIntegration:
     """Verify that customer account context changes trigger backup and restore correctly."""
 
-    def test_update_notes_triggers_backup(self, client, app, backup_dir, sample_data, monkeypatch):
+    def test_update_notes_triggers_backup(self, client, app, backup_dir, onedrive_root, sample_data, monkeypatch):
         """Saving customer account context should write a backup JSON file."""
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": True, "backup_dir": backup_dir},
+            "app.services.backup._get_onedrive_path_from_db",
+            lambda: onedrive_root,
         )
 
         resp = client.post(
@@ -1076,11 +1075,10 @@ class TestCustomerNotesBackupIntegration:
             backup = json.load(f)
         assert backup["customer"]["account_context"] == "Key engagement notes for Acme"
 
-    def test_update_notes_backup_disabled(self, client, app, backup_dir, sample_data, monkeypatch):
-        """No backup file when backup is disabled."""
+    def test_update_notes_backup_not_configured(self, client, app, backup_dir, sample_data, monkeypatch):
+        """No backup file when backup is not configured."""
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": False, "backup_dir": ""},
+            "app.services.backup._get_onedrive_path_from_db", lambda: ""
         )
         monkeypatch.setattr(
             "app.services.backup.get_auto_detected_backup_path", lambda: None,
@@ -1096,11 +1094,11 @@ class TestCustomerNotesBackupIntegration:
         cl_dir = os.path.join(backup_dir, "notes")
         assert not os.path.exists(cl_dir)
 
-    def test_edit_customer_triggers_backup(self, client, app, backup_dir, sample_data, monkeypatch):
+    def test_edit_customer_triggers_backup(self, client, app, backup_dir, onedrive_root, sample_data, monkeypatch):
         """Editing a customer via the form should write a backup JSON file."""
         monkeypatch.setattr(
-            "app.services.backup._load_db_backup_config",
-            lambda: {"enabled": True, "backup_dir": backup_dir},
+            "app.services.backup._get_onedrive_path_from_db",
+            lambda: onedrive_root,
         )
 
         resp = client.post(
