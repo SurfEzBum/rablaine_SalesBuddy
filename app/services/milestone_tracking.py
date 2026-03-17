@@ -26,7 +26,7 @@ import re
 import logging
 import threading
 from collections import deque
-from datetime import date
+from datetime import date, datetime, timezone
 
 from markupsafe import Markup, escape
 
@@ -217,8 +217,9 @@ def _build_engagement_story(engagement) -> str:
 
 
 def _add_footer(content: str, ref_tag: str) -> str:
-    """Append a Sales Buddy ref-tag footer to a comment."""
-    return f"{content}\n\n· {ref_tag} ·"
+    """Append a Date Updated line and Sales Buddy ref-tag footer."""
+    updated = datetime.now(timezone.utc).strftime('%b %d, %Y')
+    return f"{content}\n\nDate Updated: {updated}\n· {ref_tag} ·"
 
 
 # ── Background workers ──────────────────────────────────────────────────────
