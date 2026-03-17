@@ -216,6 +216,11 @@
                                 {% endif %}
                             </small>
                         </div>
+                        {% if task.note %}
+                        <a href="{{ url_for('notes.note_view', id=task.note.id) }}" class="btn btn-outline-info btn-sm flex-shrink-0 ms-2" title="Linked Note">
+                            <i class="bi bi-journal-text"></i> Linked Note
+                        </a>
+                        {% endif %}
                         {% if task.msx_task_url %}
                         <a href="{{ task.msx_task_url }}" target="_blank" class="btn btn-outline-success btn-sm flex-shrink-0 ms-2" title="Open in MSX">
                             <i class="bi bi-box-arrow-up-right"></i>
@@ -228,9 +233,9 @@
             {% else %}
             <div class="card-body text-muted py-2">
                 {% if milestone.msx_milestone_id %}
-                No tasks yet.
+                No tasks created yet.
                 {% else %}
-                No MSX ID - tasks not available.
+                Tasks cannot be created without an MSX milestone ID.
                 {% endif %}
             </div>
             {% endif %}
