@@ -367,9 +367,11 @@ def api_ai_generate_engagement_story():
 
     from datetime import datetime as _dt
     date_str = _dt.now().strftime('%Y-%m-%d')
+    my_name = g.user.name if g.user else ''
     user_message = (
         f"Customer: {customer.name}\n"
         f"Today's date: {date_str}\n"
+        f"My name: {my_name}\n"
         f"{engagement_context}"
         f"{opp_context}"
         f"Total notes: {len(notes)}\n\n"
