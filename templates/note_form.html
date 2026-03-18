@@ -264,11 +264,15 @@
                                     {% endfor %}
                                 </select>
                                 {% endif %}
+                                <button type="button" class="btn btn-sm btn-outline-success" id="engTaskToggleLink" style="display: none;" onclick="openEngTaskFlyout()">
+                                    <i class="bi bi-check2-square"></i> Create Task
+                                </button>
                                 <button type="button" class="btn btn-sm btn-outline-info" id="importMeetingBtn" onclick="openMeetingImport()">
                                     <i class="bi bi-calendar-event"></i> Import from Meeting
                                 </button>
                             </div>
                         </div>
+                        <div id="engTaskBadges" class="mb-1 d-flex flex-wrap gap-1"></div>
                         <div id="editor" style="height: 400px;">{{ note.content|safe if note else '' }}</div>
                         <textarea name="content" id="content" style="display:none;"></textarea>
                         <div class="form-text">Use rich formatting to capture call details, action items, and follow-ups. Press <kbd>Esc</kbd> to exit editor and Tab to next field.</div>
@@ -433,7 +437,7 @@
                         </div>
                     </div>
                     {% endif %}{# end not is_general_note #}
-                    
+
                     <div class="d-flex justify-content-between">
                         <div>
                             <button type="submit" class="btn btn-success">
@@ -673,6 +677,45 @@
 </div>
 
 {% if not is_general_note %}
+<!-- Engagement Task Creation Flyout -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="engTaskFlyout" aria-labelledby="engTaskFlyoutLabel" data-bs-backdrop="false" data-bs-scroll="true" style="width: 380px;">
+    <div class="offcanvas-header py-2 border-bottom">
+        <h6 class="offcanvas-title" id="engTaskFlyoutLabel"><i class="bi bi-check2-square"></i> New Engagement Task</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body">
+        <div class="mb-3">
+            <label for="engTaskTitle" class="form-label">Title <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="engTaskTitle" placeholder="Follow up on POC results..." maxlength="300">
+        </div>
+        <div class="mb-3">
+            <label for="engTaskTarget" class="form-label">Engagement</label>
+            <select class="form-select" id="engTaskTarget"></select>
+        </div>
+        <div class="row mb-3">
+            <div class="col-7">
+                <label for="engTaskDue" class="form-label">Due Date</label>
+                <input type="date" class="form-control" id="engTaskDue">
+            </div>
+            <div class="col-5">
+                <label for="engTaskPriority" class="form-label">Priority</label>
+                <select class="form-select" id="engTaskPriority">
+                    <option value="normal">Normal</option>
+                    <option value="high">High</option>
+                </select>
+            </div>
+        </div>
+        <div class="mb-3">
+            <label for="engTaskContact" class="form-label">Contact</label>
+            <input type="text" class="form-control" id="engTaskContact" placeholder="Point of contact" maxlength="200">
+        </div>
+        <button type="button" class="btn btn-success w-100" onclick="createEngTask()">
+            <i class="bi bi-check-circle"></i> Create Task
+        </button>
+        <div id="engTaskResult" class="small mt-2" style="display:none;"></div>
+    </div>
+</div>
+
 <!-- Engagement Creation Flyout -->
 <div class="offcanvas offcanvas-end" tabindex="-1" id="engagementFlyout" aria-labelledby="engagementFlyoutLabel" data-bs-backdrop="false" data-bs-scroll="true" style="width: 420px;">
     <div class="offcanvas-header py-2 border-bottom">
@@ -1919,6 +1962,9 @@ function saveEngagementFromFlyout() {
             if (typeof window.rebuildEngagementDropdown === 'function') {
                 window.rebuildEngagementDropdown();
             }
+            if (typeof window.onEngagementSelectionChanged === 'function') {
+                window.onEngagementSelectionChanged();
+            }
             bootstrap.Offcanvas.getInstance(document.getElementById('engagementFlyout')).hide();
             if (typeof debouncedAutoSave === 'function') debouncedAutoSave();
         }
@@ -2722,6 +2768,7 @@ function aiMatchMilestone() {
 const DRAFT_KEY_PREFIX = 'salesbuddy_draft_';
 const MAX_DRAFTS = 5;
 const DEBOUNCE_DELAY = 1500; // 1.5 seconds after user stops typing
+const CURRENT_NOTE_ID = {% if note %}{{ note.id }}{% else %}null{% endif %};
 let autoSaveTimeout = null;
 let draftRestored = false;
 
@@ -2785,6 +2832,11 @@ function saveDraft() {
         })),
         milestones: milestoneData,
         dismissedMilestoneIds: Array.from(window.dismissedMilestoneIds || []),
+        engagementIds: Array.from(document.getElementById('engagement_ids')?.selectedOptions || []).map(o => parseInt(o.value)),
+        engTaskBadges: Array.from(document.getElementById('engTaskBadges').querySelectorAll('a')).map(a => ({
+            title: a.textContent.trim(),
+            href: a.href
+        })),
         task: taskData,
         pendingTaskSuggestion: pendingTaskSuggestion || null,
         note_id: {% if note %}{{ note.id }}{% else %}null{% endif %},
@@ -2830,6 +2882,15 @@ function restoreDraft() {
         if (!draftJson) return false;
         
         const draft = JSON.parse(draftJson);
+        
+        // On edit pages, only restore if the draft is for this specific note
+        if (CURRENT_NOTE_ID !== null && draft.note_id !== CURRENT_NOTE_ID) {
+            return false;
+        }
+        // On create pages, skip drafts that belong to a saved note
+        if (CURRENT_NOTE_ID === null && draft.note_id != null) {
+            return false;
+        }
         
         // Check if draft has any content
         const tempDiv = document.createElement('div');
@@ -2891,6 +2952,35 @@ function restoreDraft() {
             pendingTaskSuggestion = draft.pendingTaskSuggestion;
         }
         
+        // Restore engagement selections
+        if (draft.engagementIds && draft.engagementIds.length > 0) {
+            var engSelect = document.getElementById('engagement_ids');
+            if (engSelect) {
+                Array.from(engSelect.options).forEach(function(opt) {
+                    opt.selected = draft.engagementIds.includes(parseInt(opt.value));
+                });
+                // Rebuild the visible dropdown and sync task button
+                if (typeof buildMenu === 'function') buildMenu();
+                if (typeof updateLabel === 'function') updateLabel();
+                if (typeof syncEngTaskButton === 'function') syncEngTaskButton();
+                // Show engagement section if hidden
+                var engSection = document.getElementById('engagementSection');
+                if (engSection) engSection.style.display = '';
+            }
+        }
+
+        // Restore engagement task badges
+        if (draft.engTaskBadges && draft.engTaskBadges.length > 0) {
+            var badges = document.getElementById('engTaskBadges');
+            draft.engTaskBadges.forEach(function(b) {
+                var a = document.createElement('a');
+                a.href = b.href;
+                a.className = 'badge bg-success text-decoration-none';
+                a.innerHTML = '<i class="bi bi-check2-square"></i> ' + escapeHtml(b.title.replace(/^\u2611\s*/, ''));
+                badges.appendChild(a);
+            });
+        }
+
         // Restore task form data
         if (draft.task) {
             document.getElementById('task_subject').value = draft.task.subject || '';
@@ -3271,6 +3361,12 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(matchCardHeights, 100); // Retry after Quill loads
     window.addEventListener('resize', matchCardHeights);
     {% endif %}
+});
+{% endif %}
+{% if note %}
+// Initialize auto-save and draft restore for edit pages
+document.addEventListener('DOMContentLoaded', function() {
+    startAutoSave();
 });
 {% endif %}
 
@@ -4112,6 +4208,130 @@ function textToHtml(text) {
         return '<p>' + escapeHtml(para.trim()).replace(/\n/g, '<br>') + '</p>';
     }).filter(function(p) { return p !== '<p></p>'; }).join('');
 }
+
+// =============================================
+// Engagement Task Creation (Flyout)
+// =============================================
+var _lastQuillCursorPos = null;
+var _engTaskFlyoutInstance = null;
+
+// Track cursor position continuously so we have it when Quill loses focus
+quill.on('selection-change', function(range) {
+    if (range) {
+        _lastQuillCursorPos = range.index + range.length;
+    }
+});
+// Also track after text changes (typing doesn't fire selection-change)
+quill.on('text-change', function() {
+    var sel = quill.getSelection();
+    if (sel) {
+        _lastQuillCursorPos = sel.index + sel.length;
+    }
+});
+
+function syncEngTaskButton() {
+    var target = document.getElementById('engTaskTarget');
+    var link = document.getElementById('engTaskToggleLink');
+    if (!target || !link) return;
+    var hiddenSelect = document.getElementById('engagement_ids');
+    if (!hiddenSelect) { link.style.display = 'none'; return; }
+    var selected = Array.from(hiddenSelect.selectedOptions);
+    if (selected.length === 0) {
+        link.style.display = 'none';
+        return;
+    }
+    // Rebuild target dropdown
+    target.innerHTML = '';
+    selected.forEach(function(opt) {
+        var o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.textContent.trim();
+        target.appendChild(o);
+    });
+    link.style.display = 'inline';
+}
+
+function openEngTaskFlyout() {
+    // _lastQuillCursorPos is already tracked via selection-change listener
+    // Reset form
+    document.getElementById('engTaskTitle').value = '';
+    document.getElementById('engTaskDue').value = '';
+    document.getElementById('engTaskPriority').value = 'normal';
+    document.getElementById('engTaskContact').value = '';
+    document.getElementById('engTaskResult').style.display = 'none';
+    syncEngTaskButton();
+    if (!_engTaskFlyoutInstance) {
+        _engTaskFlyoutInstance = new bootstrap.Offcanvas(document.getElementById('engTaskFlyout'));
+    }
+    _engTaskFlyoutInstance.show();
+    setTimeout(function() { document.getElementById('engTaskTitle').focus(); }, 300);
+}
+
+function createEngTask() {
+    var titleEl = document.getElementById('engTaskTitle');
+    var title = titleEl.value.trim();
+    if (!title) { titleEl.focus(); return; }
+    var engId = document.getElementById('engTaskTarget').value;
+    if (!engId) { alert('Select an engagement first.'); return; }
+    var due = document.getElementById('engTaskDue').value;
+    var priority = document.getElementById('engTaskPriority').value;
+    var contact = document.getElementById('engTaskContact').value.trim();
+    var noteId = {% if note %}{{ note.id }}{% else %}null{% endif %};
+
+    fetch('/engagement/' + engId + '/tasks', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({title: title, due_date: due || null, priority: priority, contact: contact || null, note_id: noteId})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            var task = data.task;
+            // Close flyout
+            if (_engTaskFlyoutInstance) _engTaskFlyoutInstance.hide();
+            // Add badge to toolbar area
+            var badges = document.getElementById('engTaskBadges');
+            var a = document.createElement('a');
+            a.href = '/engagement/' + task.engagement_id;
+            a.className = 'badge bg-success text-decoration-none';
+            a.innerHTML = '<i class="bi bi-check2-square"></i> ' + escapeHtml(task.title);
+            badges.appendChild(a);
+            // Insert link in Quill at saved cursor position
+            var pos = _lastQuillCursorPos != null ? _lastQuillCursorPos : quill.getLength() - 1;
+            var linkText = '\u2611 ' + task.title;
+            var linkUrl = '/engagement/' + task.engagement_id;
+            quill.insertText(pos, linkText, 'link', linkUrl, 'user');
+            // Move cursor after the inserted link
+            quill.setSelection(pos + linkText.length, 0, 'silent');
+            // Save draft after a tick so Quill DOM is fully updated
+            setTimeout(function() { if (typeof saveDraft === 'function') saveDraft(); }, 100);
+        } else {
+            var result = document.getElementById('engTaskResult');
+            result.className = 'small mt-2 text-danger';
+            result.textContent = data.error || 'Failed.';
+            result.style.display = 'block';
+        }
+    })
+    .catch(function(err) {
+        var result = document.getElementById('engTaskResult');
+        result.className = 'small mt-2 text-danger';
+        result.textContent = 'Error: ' + err.message;
+        result.style.display = 'block';
+    });
+}
+
+document.getElementById('engTaskTitle').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); createEngTask(); }
+});
+
+// Hook into engagement selection changes
+var _origOnEngChange = window.onEngagementSelectionChanged;
+window.onEngagementSelectionChanged = function() {
+    if (_origOnEngChange) _origOnEngChange();
+    syncEngTaskButton();
+};
+// Initial sync on page load
+syncEngTaskButton();
 </script>
 {% endblock %}
 
