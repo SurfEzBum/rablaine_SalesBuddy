@@ -184,7 +184,7 @@ def _build_engagement_story(engagement) -> str:
     parts = [f"Engagement Overview: {engagement.title} [{engagement.status}]"]
 
     if engagement.key_individuals:
-        parts.append(f"\nI've been working with {_strip_html(engagement.key_individuals)}.")
+        parts.append(f"I've been working with {_strip_html(engagement.key_individuals)}.")
 
     if engagement.technical_problem:
         parts.append(
@@ -213,7 +213,7 @@ def _build_engagement_story(engagement) -> str:
         target_str = target.strftime('%b %Y') if isinstance(target, date) else str(target)
         parts.append(f"Target date: {target_str}.")
 
-    return "\n".join(parts)
+    return "\n\n".join(parts)
 
 
 def _add_footer(content: str, ref_tag: str) -> str:
