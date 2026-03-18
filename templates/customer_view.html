@@ -54,8 +54,8 @@
         <a href="{{ url_for('notes.note_create') }}?customer_id={{ customer.id }}" class="btn btn-success text-nowrap">
             <i class="bi bi-plus-circle"></i> New Note
         </a>
-        <a href="{{ url_for('engagements.engagement_create', customer_id=customer.id) }}" class="btn btn-outline-primary text-nowrap">
-            <i class="bi bi-diagram-3"></i> New Engagement
+        <a href="{{ url_for('engagements.engagement_create', customer_id=customer.id) }}" class="btn btn-success text-nowrap">
+            <i class="bi bi-plus-circle"></i> New Engagement
         </a>
         <a href="{{ url_for('customers.customer_edit', id=customer.id) }}" class="btn btn-primary text-nowrap">
             <i class="bi bi-pencil"></i> Edit Customer

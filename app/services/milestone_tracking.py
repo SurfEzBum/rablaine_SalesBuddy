@@ -175,11 +175,50 @@ def _build_note_fallback(topics: str) -> str:
 
 # ── Engagement story template ───────────────────────────────────────────────
 
-def _build_engagement_story(engagement) -> str:
-    """Assemble the engagement story comment from structured fields.
+def _ai_compose_story(engagement) -> str | None:
+    """Call the AI gateway to compose a natural-language engagement story.
 
-    Uses the engagement's 6 narrative fields to build a readable summary
-    that mirrors the story prompts from the engagement view page.
+    Returns the composed story text, or None if AI is unavailable.
+    """
+    fields = {}
+    if engagement.key_individuals:
+        fields["key_individuals"] = _strip_html(engagement.key_individuals)
+    if engagement.technical_problem:
+        fields["technical_problem"] = _strip_html(engagement.technical_problem)
+    if engagement.business_impact:
+        fields["business_impact"] = _strip_html(engagement.business_impact)
+    if engagement.solution_resources:
+        fields["solution_resources"] = _strip_html(engagement.solution_resources)
+    if engagement.estimated_acr:
+        fields["estimated_acr"] = engagement.estimated_acr
+    if engagement.target_date:
+        target = engagement.target_date
+        fields["target_date"] = (
+            target.strftime('%b %Y') if isinstance(target, date) else str(target)
+        )
+
+    try:
+        from app.gateway_client import gateway_call
+        print("[milestone-tracking] AI: calling gateway /v1/compose-engagement-story")
+        result = gateway_call("/v1/compose-engagement-story", {
+            "title": engagement.title,
+            "status": engagement.status or "Active",
+            "fields": fields,
+        })
+        story_text = (result.get("story_text") or "").strip()
+        if story_text:
+            print("[milestone-tracking] AI: got composed story")
+            return f"Engagement Overview: {engagement.title} [{engagement.status}]\n\n{story_text}"
+        return None
+    except Exception as e:
+        print(f"[milestone-tracking] AI compose story failed, using template: {e}")
+        return None
+
+
+def _build_engagement_story_template(engagement) -> str:
+    """Build engagement story from structured fields using a fixed template.
+
+    Used as a fallback when AI composition is unavailable.
     """
     parts = [f"Engagement Overview: {engagement.title} [{engagement.status}]"]
 
@@ -214,6 +253,18 @@ def _build_engagement_story(engagement) -> str:
         parts.append(f"Target date: {target_str}.")
 
     return "\n\n".join(parts)
+
+
+def _build_engagement_story(engagement) -> str:
+    """Build the engagement story comment, using AI if available.
+
+    Tries AI composition first for a natural-language narrative.
+    Falls back to the fixed template if AI is unavailable.
+    """
+    story = _ai_compose_story(engagement)
+    if story:
+        return story
+    return _build_engagement_story_template(engagement)
 
 
 def _add_footer(content: str, ref_tag: str) -> str:

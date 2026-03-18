@@ -24,6 +24,7 @@ from prompts import (
     ANALYZE_CALL_PROMPT,
     ENGAGEMENT_SUMMARY_PROMPT,
     ENGAGEMENT_STORY_PROMPT,
+    ENGAGEMENT_STORY_COMPOSE_PROMPT,
     MILESTONE_COMMENT_PROMPT,
     CONNECT_SUMMARY_SYSTEM_PROMPT,
     CONNECT_CHUNK_SYSTEM_PROMPT,
@@ -459,6 +460,53 @@ def engagement_story():
         return _error("AI returned invalid response format", 502)
     except Exception as exc:
         logger.exception("engagement-story error")
+        return _error(f"Internal error: {exc}", 500)
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/compose-engagement-story
+# ---------------------------------------------------------------------------
+@app.route("/v1/compose-engagement-story", methods=["POST"])
+def compose_engagement_story():
+    """Compose a natural-language engagement story from structured fields."""
+    try:
+        body = request.get_json(force=True)
+        fields = body.get("fields") or {}
+        title = (body.get("title") or "").strip()
+        status = (body.get("status") or "").strip()
+
+        if not title:
+            return _error("title is required")
+
+        # Build the user prompt from the structured fields
+        parts = [f"Engagement: {title} [{status}]"]
+        if fields.get("key_individuals"):
+            parts.append(f"Key People: {fields['key_individuals']}")
+        if fields.get("technical_problem"):
+            parts.append(f"Technical Problem: {fields['technical_problem']}")
+        if fields.get("business_impact"):
+            parts.append(f"Business Impact: {fields['business_impact']}")
+        if fields.get("solution_resources"):
+            parts.append(f"Solution: {fields['solution_resources']}")
+        if fields.get("estimated_acr"):
+            parts.append(f"Estimated ACR: {fields['estimated_acr']}")
+        if fields.get("target_date"):
+            parts.append(f"Target Date: {fields['target_date']}")
+
+        user_message = "\n".join(parts)
+
+        result = chat_completion(
+            ENGAGEMENT_STORY_COMPOSE_PROMPT, user_message, max_tokens=300,
+        )
+
+        return jsonify({
+            "success": True,
+            "story_text": result["text"].strip(),
+            "usage": result["usage"],
+        })
+
+    except Exception as exc:
+        logger.exception("compose-engagement-story error")
         return _error(f"Internal error: {exc}", 500)
 
 
