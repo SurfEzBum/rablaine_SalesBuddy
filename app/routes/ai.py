@@ -401,6 +401,19 @@ def api_ai_generate_engagement_story():
         story_data = result.get("story", {})
         usage = result.get("usage", {})
 
+        # Calculate estimated ACR from milestone monthly_usage (not AI)
+        if engagement.milestones:
+            total_acr = sum(
+                m.monthly_usage for m in engagement.milestones
+                if m.monthly_usage
+            )
+            if total_acr > 0:
+                story_data['estimated_acr'] = f"${total_acr:,.0f}/mo"
+            else:
+                story_data['estimated_acr'] = None
+        else:
+            story_data['estimated_acr'] = None
+
         log_entry = AIQueryLog(
             request_text=f"Story for engagement '{engagement.title}' ({len(notes)} notes)",
             response_text=json.dumps(story_data)[:500],

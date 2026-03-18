@@ -332,7 +332,6 @@ ENGAGEMENT_STORY_PROMPT = (
     '  "technical_problem": "the technical or business challenges they face",\n'
     '  "business_impact": "how the problem impacts their business processes/strategy",\n'
     '  "solution_resources": "Azure services, tools, or approaches being used",\n'
-    '  "estimated_acr": "expected monthly/annual Azure consumption revenue impact",\n'
     '  "target_date": "target completion date in YYYY-MM-DD format, or null if unknown"\n'
     "}\n\n"
     "Rules:\n"
@@ -346,6 +345,5 @@ ENGAGEMENT_STORY_PROMPT = (
     "- For target_date, only return a date if the customer or seller explicitly mentions "
     "a future goal date, go-live date, or deadline. If no specific target is mentioned, "
     "return null.\n"
-    "- For estimated_acr, include dollar amounts if mentioned (e.g. '$5,000/mo ACR').\n"
     "- Return ONLY the JSON object, no markdown formatting or extra text."
 )
