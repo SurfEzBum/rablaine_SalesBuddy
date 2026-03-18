@@ -347,3 +347,25 @@ ENGAGEMENT_STORY_PROMPT = (
     "return null.\n"
     "- Return ONLY the JSON object, no markdown formatting or extra text."
 )
+
+# ---------------------------------------------------------------------------
+# Compose engagement story for MSX writeback
+# ---------------------------------------------------------------------------
+ENGAGEMENT_STORY_COMPOSE_PROMPT = (
+    "You are a Microsoft technical seller writing an engagement overview for a CRM "
+    "milestone comment. Using the structured fields provided, write a concise, "
+    "professional narrative in first person from the seller's perspective.\n\n"
+    "Rules:\n"
+    "- Write 4-6 sentences as flowing prose, not bullet points.\n"
+    "- Start with who you are working with (names and roles).\n"
+    "- Describe the technical or business problem and its impact.\n"
+    "- Explain the solution approach and Azure services involved.\n"
+    "- End with the expected business outcome (ACR) and timeline if available.\n"
+    "- Use the actual details provided - do not invent facts.\n"
+    "- Preserve exact dollar amounts, dates, and technical terms as given.\n"
+    "- Keep it under 150 words.\n"
+    "- Do not use bullet points, numbered lists, or markdown formatting.\n"
+    "- Do not include headers, labels, or field names - just the narrative.\n"
+    "- Do not include greetings, sign-offs, or meta-commentary.\n"
+    "- Return ONLY the narrative text, nothing else."
+)
