@@ -582,6 +582,7 @@ class Note(db.Model):
         back_populates='notes',
         lazy='select'
     )
+    tasks = db.relationship('EngagementTask', back_populates='note', lazy='select')
     
     @property
     def seller(self):
@@ -645,6 +646,13 @@ class Engagement(db.Model):
         backref=db.backref('engagements', lazy='select'),
         lazy='select'
     )
+    tasks = db.relationship(
+        'EngagementTask',
+        back_populates='engagement',
+        lazy='select',
+        cascade='all, delete-orphan',
+        order_by='EngagementTask.sort_order, EngagementTask.created_at'
+    )
 
     @property
     def story_completeness(self) -> int:
@@ -661,8 +669,52 @@ class Engagement(db.Model):
         """Return count of linked notes."""
         return len(self.notes)
 
+    @property
+    def open_task_count(self) -> int:
+        """Return count of open (not completed) tasks."""
+        return sum(1 for t in self.tasks if t.status == 'open')
+
     def __repr__(self) -> str:
         return f'<Engagement {self.id}: {self.title[:50]}>'
+
+
+class EngagementTask(db.Model):
+    """Action item / to-do tracked against an engagement.
+
+    Tasks can optionally link back to the note they were created from.
+    Description supports rich HTML (Quill editor with image paste).
+    """
+    __tablename__ = 'engagement_tasks'
+
+    STATUSES = ['open', 'completed']
+    PRIORITIES = ['normal', 'high']
+
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey('engagements.id'), nullable=False)
+    note_id = db.Column(db.Integer, db.ForeignKey('notes.id'), nullable=True)
+    title = db.Column(db.String(300), nullable=False)
+    description = db.Column(db.Text, nullable=True)  # Rich HTML from Quill
+    due_date = db.Column(db.Date, nullable=True)
+    contact = db.Column(db.String(200), nullable=True)  # Point of contact
+    status = db.Column(db.String(20), nullable=False, default='open')
+    priority = db.Column(db.String(20), nullable=False, default='normal')
+    completed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    # Relationships
+    engagement = db.relationship('Engagement', back_populates='tasks')
+    note = db.relationship('Note', back_populates='tasks')
+
+    @property
+    def is_overdue(self) -> bool:
+        """Return True if task is open and past due date."""
+        if self.status == 'completed' or not self.due_date:
+            return False
+        return self.due_date < date.today()
+
+    def __repr__(self) -> str:
+        return f'<EngagementTask {self.id}: {self.title[:50]}>'
 
 
 class Opportunity(db.Model):

@@ -7,7 +7,7 @@ from datetime import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 
 from app.models import (
-    db, Engagement, Customer, Note, Opportunity, Milestone, Topic
+    db, Engagement, EngagementTask, Customer, Note, Opportunity, Milestone, Topic
 )
 from app.services.milestone_tracking import track_engagement_on_milestones
 
@@ -66,6 +66,7 @@ def api_all_engagements():
         subqueryload(Engagement.notes),
         subqueryload(Engagement.opportunities),
         subqueryload(Engagement.milestones),
+        subqueryload(Engagement.tasks),
     )
 
     engagements = query.order_by(Engagement.updated_at.desc()).all()
@@ -89,6 +90,7 @@ def api_all_engagements():
             'linked_note_count': eng.linked_note_count,
             'opportunity_count': len(eng.opportunities),
             'milestone_count': len(eng.milestones),
+            'open_task_count': eng.open_task_count,
             'updated_at': eng.updated_at.isoformat() if eng.updated_at else None,
         })
 
@@ -432,3 +434,150 @@ def engagement_create_inline(customer_id: int):
     db.session.commit()
 
     return jsonify(success=True, id=engagement.id, title=engagement.title)
+
+
+# =============================================================================
+# Engagement Task Routes
+# =============================================================================
+
+@engagements_bp.route('/engagement/<int:id>/tasks', methods=['POST'])
+def task_create(id: int):
+    """Create a new task on an engagement (JSON API)."""
+    engagement = Engagement.query.get_or_404(id)
+    data = request.get_json(silent=True) or {}
+
+    title = (data.get('title') or '').strip()
+    if not title:
+        return jsonify(success=False, error='Title is required.'), 400
+
+    due_date = None
+    due_str = (data.get('due_date') or '').strip()
+    if due_str:
+        try:
+            due_date = datetime.strptime(due_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify(success=False, error='Invalid date format.'), 400
+
+    # Determine sort_order: place new tasks at the end
+    max_order = db.session.query(db.func.max(EngagementTask.sort_order)).filter_by(
+        engagement_id=id
+    ).scalar() or 0
+
+    task = EngagementTask(
+        engagement_id=id,
+        title=title,
+        description=(data.get('description') or '').strip() or None,
+        due_date=due_date,
+        contact=(data.get('contact') or '').strip() or None,
+        priority=data.get('priority', 'normal') if data.get('priority') in EngagementTask.PRIORITIES else 'normal',
+        note_id=data.get('note_id') or None,
+        sort_order=max_order + 1,
+    )
+    db.session.add(task)
+    db.session.commit()
+
+    return jsonify(success=True, task=_task_to_dict(task)), 201
+
+
+@engagements_bp.route('/task/<int:id>', methods=['GET'])
+def task_get(id: int):
+    """Get a single task as JSON."""
+    task = EngagementTask.query.get_or_404(id)
+    return jsonify(success=True, task=_task_to_dict(task))
+
+
+@engagements_bp.route('/task/<int:id>', methods=['PUT'])
+def task_update(id: int):
+    """Update an existing task (JSON API)."""
+    task = EngagementTask.query.get_or_404(id)
+    data = request.get_json(silent=True) or {}
+
+    if 'title' in data:
+        title = (data['title'] or '').strip()
+        if not title:
+            return jsonify(success=False, error='Title is required.'), 400
+        task.title = title
+
+    if 'description' in data:
+        task.description = (data['description'] or '').strip() or None
+
+    if 'due_date' in data:
+        due_str = (data['due_date'] or '').strip()
+        if due_str:
+            try:
+                task.due_date = datetime.strptime(due_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify(success=False, error='Invalid date format.'), 400
+        else:
+            task.due_date = None
+
+    if 'contact' in data:
+        task.contact = (data['contact'] or '').strip() or None
+
+    if 'priority' in data and data['priority'] in EngagementTask.PRIORITIES:
+        task.priority = data['priority']
+
+    db.session.commit()
+    return jsonify(success=True, task=_task_to_dict(task))
+
+
+@engagements_bp.route('/task/<int:id>/toggle', methods=['POST'])
+def task_toggle(id: int):
+    """Toggle task between open and completed."""
+    task = EngagementTask.query.get_or_404(id)
+
+    if task.status == 'open':
+        task.status = 'completed'
+        task.completed_at = datetime.now()
+    else:
+        task.status = 'open'
+        task.completed_at = None
+
+    db.session.commit()
+    return jsonify(success=True, task=_task_to_dict(task))
+
+
+@engagements_bp.route('/engagement/<int:id>/tasks/reorder', methods=['POST'])
+def task_reorder(id: int):
+    """Persist new sort order for tasks on an engagement."""
+    Engagement.query.get_or_404(id)
+    data = request.get_json(silent=True) or {}
+    task_ids = data.get('task_ids', [])
+    if not isinstance(task_ids, list):
+        return jsonify(success=False, error='task_ids must be a list.'), 400
+
+    for idx, tid in enumerate(task_ids):
+        task = EngagementTask.query.filter_by(id=tid, engagement_id=id).first()
+        if task:
+            task.sort_order = idx
+    db.session.commit()
+    return jsonify(success=True)
+
+
+@engagements_bp.route('/task/<int:id>', methods=['DELETE'])
+def task_delete(id: int):
+    """Delete a task."""
+    task = EngagementTask.query.get_or_404(id)
+    engagement_id = task.engagement_id
+    db.session.delete(task)
+    db.session.commit()
+    return jsonify(success=True, engagement_id=engagement_id)
+
+
+def _task_to_dict(task: EngagementTask) -> dict:
+    """Serialize a task to a dictionary."""
+    return {
+        'id': task.id,
+        'engagement_id': task.engagement_id,
+        'note_id': task.note_id,
+        'title': task.title,
+        'description': task.description,
+        'due_date': task.due_date.isoformat() if task.due_date else None,
+        'contact': task.contact,
+        'status': task.status,
+        'priority': task.priority,
+        'is_overdue': task.is_overdue,
+        'completed_at': task.completed_at.isoformat() if task.completed_at else None,
+        'created_at': task.created_at.isoformat() if task.created_at else None,
+        'sort_order': task.sort_order,
+    }
