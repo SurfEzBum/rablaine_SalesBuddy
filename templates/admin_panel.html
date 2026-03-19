@@ -481,9 +481,9 @@
 
         <!-- Usage Telemetry -->
         <div class="card mb-4">
-            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#telemetryCollapse" role="button" style="cursor: pointer;" id="telemetryCardHeader">
+            <div class="card-header" role="button" style="cursor: pointer;" id="telemetryCardHeader">
                 <h5 class="mb-0 d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-graph-up"></i> Usage Telemetry</span>
+                    <span data-bs-toggle="collapse" data-bs-target="#telemetryCollapse" class="flex-grow-1"><i class="bi bi-graph-up"></i> Usage Telemetry</span>
                     <span class="d-flex align-items-center gap-2">
                         <span class="d-flex align-items-center gap-2" onclick="event.stopPropagation();">
                             <select class="form-select form-select-sm d-inline-block w-auto" id="telemetryDays">
@@ -495,7 +495,7 @@
                                 <i class="bi bi-arrow-clockwise"></i>
                             </button>
                         </span>
-                        <i class="bi bi-chevron-down"></i>
+                        <i class="bi bi-chevron-down" data-bs-toggle="collapse" data-bs-target="#telemetryCollapse"></i>
                     </span>
                 </h5>
             </div>
@@ -631,6 +631,73 @@
                     </div>
                     <div id="flushResult" class="small mt-1" style="display: none;"></div>
                 </div>
+
+                    <!-- Event Log -->
+                    <hr class="my-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0"><i class="bi bi-list-ul"></i> Event Log</h6>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">From</label>
+                            <input type="datetime-local" class="form-control form-control-sm" id="evtFromDt" step="1">
+                        </div>
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">To</label>
+                            <input type="datetime-local" class="form-control form-control-sm" id="evtToDt" step="1">
+                        </div>
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Endpoint</label>
+                            <input type="text" class="form-control form-control-sm" id="evtEndpoint" placeholder="e.g. /sync">
+                        </div>
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Category</label>
+                            <select class="form-select form-select-sm" id="evtCategory">
+                                <option value="">All</option>
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">Type</label>
+                            <select class="form-select form-select-sm" id="evtType">
+                                <option value="">All</option>
+                                <option value="true">API only</option>
+                                <option value="false">Pages only</option>
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <label class="form-label small mb-0">&nbsp;</label>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input" type="checkbox" id="evtErrorsOnly">
+                                <label class="form-check-label small" for="evtErrorsOnly">Errors only</label>
+                            </div>
+                        </div>
+                        <div class="col-auto d-flex align-items-end">
+                            <button class="btn btn-sm btn-primary" onclick="loadEventLog(1)"><i class="bi bi-search"></i> Search</button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead><tr>
+                                <th>Time</th>
+                                <th>Method</th>
+                                <th>Endpoint</th>
+                                <th>Status</th>
+                                <th>ms</th>
+                                <th>Category</th>
+                                <th>Error</th>
+                            </tr></thead>
+                            <tbody id="evtLogBody">
+                                <tr><td colspan="7" class="text-muted small text-center">Set filters and click Search</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mt-2" id="evtPagination" style="display: none !important;">
+                        <small class="text-muted" id="evtPageInfo"></small>
+                        <div>
+                            <button class="btn btn-sm btn-outline-secondary" id="evtPrev" onclick="loadEventLog(evtCurrentPage - 1)" disabled>&laquo; Prev</button>
+                            <button class="btn btn-sm btn-outline-secondary" id="evtNext" onclick="loadEventLog(evtCurrentPage + 1)" disabled>Next &raquo;</button>
+                        </div>
+                    </div>
 
                 <div id="telemetryEmpty" class="text-muted text-center py-3" style="display: none;">
                     No telemetry data yet. Events are recorded as you use the app.
@@ -1993,6 +2060,102 @@ function flushTelemetry() {
             setTimeout(() => { resultEl.style.display = 'none'; }, 5000);
         });
 }
+
+// ==============================================================================
+// Event Log
+// ==============================================================================
+
+let evtCurrentPage = 1;
+
+function populateCategoryDropdown(categories) {
+    const sel = document.getElementById('evtCategory');
+    if (sel.options.length > 1) return;  // already populated
+    categories.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        sel.appendChild(opt);
+    });
+}
+
+function loadEventLog(page) {
+    evtCurrentPage = page || 1;
+    const params = new URLSearchParams({ page: evtCurrentPage, per_page: 50 });
+
+    const fromDt = document.getElementById('evtFromDt').value;
+    const toDt = document.getElementById('evtToDt').value;
+    const endpoint = document.getElementById('evtEndpoint').value.trim();
+    const category = document.getElementById('evtCategory').value;
+    const evtType = document.getElementById('evtType').value;
+    const errorsOnly = document.getElementById('evtErrorsOnly').checked;
+
+    if (fromDt) params.set('from_dt', new Date(fromDt).toISOString());
+    if (toDt) params.set('to_dt', new Date(toDt).toISOString());
+    if (endpoint) params.set('endpoint', endpoint);
+    if (category) params.set('category', category);
+    if (evtType) params.set('is_api', evtType);
+    if (errorsOnly) params.set('errors_only', 'true');
+
+    const body = document.getElementById('evtLogBody');
+    body.innerHTML = '<tr><td colspan="7" class="text-center"><span class="spinner-border spinner-border-sm"></span></td></tr>';
+
+    fetch('/api/admin/telemetry/events?' + params)
+        .then(r => r.json())
+        .then(data => {
+            if (data.events.length === 0) {
+                body.innerHTML = '<tr><td colspan="7" class="text-muted small text-center">No events found</td></tr>';
+                document.getElementById('evtPagination').style.cssText = 'display: none !important;';
+                return;
+            }
+
+            body.innerHTML = data.events.map(e => {
+                const t = new Date(e.timestamp);
+                const ts = t.toLocaleDateString() + ' ' + t.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+                const statusClass = e.status_code >= 500 ? 'bg-danger' : e.status_code >= 400 ? 'bg-warning text-dark' : 'bg-success';
+                const errText = e.error_message ? `<small class="text-danger">${e.error_type || ''}: ${e.error_message}</small>` : '';
+                const methodClass = e.method === 'GET' ? 'bg-primary' : e.method === 'POST' ? 'bg-success' : e.method === 'PATCH' ? 'bg-info text-dark' : 'bg-warning text-dark';
+                return `<tr>
+                    <td class="text-nowrap"><small>${ts}</small></td>
+                    <td><span class="badge ${methodClass}">${e.method}</span></td>
+                    <td class="text-break"><small>${e.endpoint}</small></td>
+                    <td><span class="badge ${statusClass}">${e.status_code || '-'}</span></td>
+                    <td class="text-end"><small>${e.response_time_ms != null ? e.response_time_ms + ' ms' : '-'}</small></td>
+                    <td><small>${e.category || '-'}</small></td>
+                    <td>${errText}</td>
+                </tr>`;
+            }).join('');
+
+            // Pagination
+            const pag = document.getElementById('evtPagination');
+            pag.style.cssText = '';
+            document.getElementById('evtPageInfo').textContent =
+                `Page ${data.page} of ${data.pages} (${data.total} events)`;
+            document.getElementById('evtPrev').disabled = data.page <= 1;
+            document.getElementById('evtNext').disabled = data.page >= data.pages;
+        })
+        .catch(err => {
+            body.innerHTML = `<tr><td colspan="7" class="text-danger small">Failed: ${err.message}</td></tr>`;
+        });
+}
+
+// Populate category dropdown when telemetry stats load
+const _origLoadTelemetryStats = loadTelemetryStats;
+loadTelemetryStats = function() {
+    _origLoadTelemetryStats();
+    fetch('/api/admin/telemetry/stats?days=90')
+        .then(r => r.json())
+        .then(data => {
+            if (data.by_category) {
+                populateCategoryDropdown(data.by_category.map(c => c.category).filter(Boolean));
+            }
+        })
+        .catch(() => {});
+};
+
+// Allow Enter key to trigger search in the endpoint filter
+document.getElementById('evtEndpoint').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') loadEventLog(1);
+});
 
 // ==============================================================================
 // Unified Backup Status
