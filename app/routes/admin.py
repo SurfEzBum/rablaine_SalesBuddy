@@ -1072,8 +1072,11 @@ def api_telemetry_events():
         page: Page number (default 1).
         per_page: Events per page (default 50, max 200).
         category: Filter by category.
+        endpoint: Filter by endpoint (substring match).
         is_api: Filter (true/false) for API vs page requests.
         errors_only: If 'true', only return 4xx/5xx events.
+        from_dt: ISO datetime lower bound (inclusive).
+        to_dt: ISO datetime upper bound (inclusive).
     """
     page = max(1, int(request.args.get('page', 1)))
     per_page = min(200, max(1, int(request.args.get('per_page', 50))))
@@ -1084,6 +1087,10 @@ def api_telemetry_events():
     if category:
         q = q.filter(UsageEvent.category == category)
 
+    endpoint_filter = request.args.get('endpoint', '').strip()
+    if endpoint_filter:
+        q = q.filter(UsageEvent.endpoint.contains(endpoint_filter))
+
     is_api = request.args.get('is_api')
     if is_api == 'true':
         q = q.filter(UsageEvent.is_api.is_(True))
@@ -1092,6 +1099,20 @@ def api_telemetry_events():
 
     if request.args.get('errors_only') == 'true':
         q = q.filter(UsageEvent.status_code >= 400)
+
+    from_dt = request.args.get('from_dt')
+    if from_dt:
+        try:
+            q = q.filter(UsageEvent.timestamp >= datetime.fromisoformat(from_dt))
+        except ValueError:
+            pass
+
+    to_dt = request.args.get('to_dt')
+    if to_dt:
+        try:
+            q = q.filter(UsageEvent.timestamp <= datetime.fromisoformat(to_dt))
+        except ValueError:
+            pass
 
     pagination = q.paginate(page=page, per_page=per_page, error_out=False)
 
