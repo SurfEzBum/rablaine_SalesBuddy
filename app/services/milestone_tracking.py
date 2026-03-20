@@ -190,7 +190,7 @@ def _ai_compose_story(engagement) -> str | None:
     if engagement.solution_resources:
         fields["solution_resources"] = _strip_html(engagement.solution_resources)
     if engagement.estimated_acr:
-        fields["estimated_acr"] = f"${engagement.estimated_acr:,}/mo"
+        fields["estimated_acr"] = f"${int(engagement.estimated_acr):,}/mo"
     if engagement.target_date:
         target = engagement.target_date
         fields["target_date"] = (
@@ -243,7 +243,7 @@ def _build_engagement_story_template(engagement) -> str:
 
     acr = engagement.estimated_acr
     target = engagement.target_date
-    acr_str = f"${acr:,}/mo" if acr else None
+    acr_str = f"${int(acr):,}/mo" if acr else None
     if acr_str and target:
         target_str = target.strftime('%b %Y') if isinstance(target, date) else str(target)
         parts.append(f"This will result in {acr_str} by {target_str}.")

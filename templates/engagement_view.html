@@ -27,7 +27,7 @@
         <span class="text-muted ms-2 small"><i class="bi bi-calendar"></i> Target: {{ engagement.target_date.strftime('%b %d, %Y') }}</span>
         {% endif %}
         {% if engagement.estimated_acr %}
-        <span class="text-muted ms-2 small"><i class="bi bi-currency-dollar"></i> ${{ "{:,}".format(engagement.estimated_acr) }}/mo</span>
+        <span class="text-muted ms-2 small"><i class="bi bi-currency-dollar"></i> ${{ "{:,}".format(engagement.estimated_acr | int) }}/mo</span>
         {% endif %}
     </div>
     <div class="flex-shrink-0 d-flex gap-2">
@@ -80,7 +80,7 @@
                         <strong class="small">Business Outcome</strong>
                         <small class="text-muted d-block fst-italic">"...which will result in..."</small>
                         {% if engagement.estimated_acr %}
-                        <p class="mb-0 mt-1" style="color: #69f0ae;">${{ "{:,}".format(engagement.estimated_acr) }}/mo</p>
+                        <p class="mb-0 mt-1" style="color: #69f0ae;">${{ "{:,}".format(engagement.estimated_acr | int) }}/mo</p>
                         {% else %}
                         <p class="text-muted mb-0 mt-1 fst-italic small">Not yet filled in</p>
                         {% endif %}
