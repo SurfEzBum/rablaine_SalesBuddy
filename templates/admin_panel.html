@@ -89,15 +89,12 @@
                         <!-- Auth Status Row -->
                         <div id="msxAuthStatus" class="d-inline-flex align-items-center gap-2 p-2 px-3 rounded border mb-3">
                             <i class="bi bi-question-circle fs-5 text-muted"></i>
-                            <span class="text-muted">Click <strong>Check Status</strong> to check your connection.</span>
+                            <span class="text-muted">Click <strong>Test Connection</strong> to check your connection.</span>
                         </div>
                         
                         <!-- Action buttons (always visible so user can check status) -->
                         <div id="msxConnectedActions">
                             <div class="d-flex gap-2 mb-3">
-                                <button type="button" class="btn btn-sm btn-outline-primary" id="msxRefreshBtn">
-                                    <i class="bi bi-arrow-clockwise"></i> Check Status
-                                </button>
                                 <button type="button" class="btn btn-sm btn-outline-success" id="msxTestBtn">
                                     <i class="bi bi-lightning"></i> Test Connection
                                 </button>
@@ -1318,25 +1315,7 @@ document.getElementById('adminAuthNoCliRetryBtn').addEventListener('click', asyn
 });
 
 // MSX Refresh Token
-document.getElementById('msxRefreshBtn').addEventListener('click', async function() {
-    const btn = this;
-    const originalHtml = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking...';
-    btn.disabled = true;
-    
-    try {
-        const response = await fetch('/api/msx/refresh', { method: 'POST' });
-        const data = await response.json();
-        loadMsxStatus();
-    } catch (err) {
-        console.error('Refresh failed:', err);
-    } finally {
-        btn.innerHTML = originalHtml;
-        btn.disabled = false;
-    }
-});
-
-// MSX Test Connection
+// MSX Test Connection (also refreshes token and updates status display)
 document.getElementById('msxTestBtn').addEventListener('click', async function() {
     const btn = this;
     const resultDiv = document.getElementById('msxTestResult');
@@ -1345,6 +1324,8 @@ document.getElementById('msxTestBtn').addEventListener('click', async function()
     btn.disabled = true;
     
     try {
+        // Refresh token first, then test actual connectivity
+        await fetch('/api/msx/refresh', { method: 'POST' }).catch(() => {});
         const response = await fetch('/api/msx/test');
         const data = await response.json();
         
