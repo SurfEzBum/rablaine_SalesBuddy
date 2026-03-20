@@ -2144,8 +2144,9 @@ def get_tasks_for_milestones(
 
     all_tasks: List[Dict[str, Any]] = []
 
-    # Batch milestones in groups of 15 to keep OData filter length sane
-    batch_size = 15
+    # Batch milestones in groups of 75 to keep OData filter length sane
+    # (~4KB per filter, well under Dynamics 365's ~32KB limit)
+    batch_size = 75
     for i in range(0, len(milestone_msx_ids), batch_size):
         batch = milestone_msx_ids[i:i + batch_size]
 

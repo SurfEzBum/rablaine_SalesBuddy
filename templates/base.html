@@ -1440,11 +1440,11 @@
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' }
                         });
-                        // Only trigger guided tour if it hasn't been completed (DB-backed flag)
-                        var tourCompleted = {{ 'true' if guided_tour_completed else 'false' }};
-                        if (!tourCompleted) {
-                            localStorage.setItem('salesbuddy_start_tour', '1');
-                        }
+                        // Guided tour disabled - plumbing kept but not triggered
+                        // var tourCompleted = {{ 'true' if guided_tour_completed else 'false' }};
+                        // if (!tourCompleted) {
+                        //     localStorage.setItem('salesbuddy_start_tour', '1');
+                        // }
                     } catch (err) {
                         console.error('Failed to dismiss onboarding:', err);
                     }
@@ -1472,7 +1472,7 @@
 
                 // --- Step 2: Authentication ---
                 const SIGN_IN_TIMEOUT_MS = 120000;  // 2 min total timeout
-                const CONSENT_HINT_DELAY = 5;       // seconds before showing "look under windows" hint
+                const CONSENT_HINT_DELAY = 7;       // seconds before showing "look under windows" hint
                 let signInPollTimer = null;
                 let wizardElapsedTimer = null;
 
