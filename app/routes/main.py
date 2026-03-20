@@ -976,6 +976,92 @@ def set_user_role():
     return jsonify({'user_role': pref.user_role}), 200
 
 
+@main_bp.route('/api/preferences/save-alias', methods=['POST'])
+def save_alias():
+    """Save the DSS user's email alias during onboarding Step 2."""
+    data = request.get_json()
+    email = (data.get('email') or '').strip()
+    if not email or '@' not in email:
+        return jsonify({'error': 'Invalid email.'}), 400
+
+    alias = email.split('@')[0].lower()
+
+    pref = UserPreference.query.first()
+    if not pref:
+        pref = UserPreference()
+        db.session.add(pref)
+
+    pref.my_seller_alias = alias
+    db.session.commit()
+
+    return jsonify({'alias': alias}), 200
+
+
+@main_bp.route('/api/preferences/my-seller', methods=['POST'])
+def set_my_seller():
+    """Manually set the DSS user's Seller record (fallback picker)."""
+    data = request.get_json()
+    seller_id = data.get('seller_id')
+    if not seller_id:
+        return jsonify({'error': 'seller_id is required.'}), 400
+
+    seller = db.session.get(Seller, seller_id)
+    if not seller:
+        return jsonify({'error': 'Seller not found.'}), 404
+
+    pref = UserPreference.query.first()
+    if not pref:
+        pref = UserPreference()
+        db.session.add(pref)
+
+    pref.my_seller_id = seller.id
+    if seller.alias:
+        pref.my_seller_alias = seller.alias
+    db.session.commit()
+
+    return jsonify({
+        'my_seller_id': seller.id,
+        'seller_name': seller.name,
+    }), 200
+
+
+@main_bp.route('/api/preferences/match-seller', methods=['POST'])
+def match_seller_alias():
+    """Auto-match the saved alias to an imported Seller record and set user_role."""
+    pref = UserPreference.query.first()
+    if not pref or not pref.my_seller_alias:
+        # No alias saved - default to SE
+        if pref and not pref.user_role:
+            pref.user_role = 'se'
+            db.session.commit()
+        return jsonify({'matched': False, 'error': 'No alias saved.', 'role_set': 'se'}), 200
+
+    alias = pref.my_seller_alias.lower()
+    all_sellers = Seller.query.order_by(Seller.name).all()
+
+    seller = next((s for s in all_sellers if s.alias and s.alias.lower() == alias), None)
+    if seller:
+        pref.my_seller_id = seller.id
+        pref.user_role = 'dss'
+        db.session.commit()
+        return jsonify({
+            'matched': True,
+            'seller_id': seller.id,
+            'seller_name': seller.name,
+            'role_set': 'dss',
+        }), 200
+
+    # No match - set SE role
+    pref.user_role = 'se'
+    db.session.commit()
+    return jsonify({
+        'matched': False,
+        'alias': alias,
+        'role_set': 'se',
+        'sellers': [{'id': s.id, 'name': s.name, 'alias': s.alias} for s in all_sellers],
+    }), 200
+
+
 @main_bp.route('/api/seller-mode/activate/<int:seller_id>', methods=['POST'])
 def activate_seller_mode(seller_id: int):
     """Activate seller mode for a specific seller (SE only)."""

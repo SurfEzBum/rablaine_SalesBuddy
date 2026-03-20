@@ -45,6 +45,13 @@ notes_milestones = db.Table(
     db.Column('milestone_id', db.Integer, db.ForeignKey('milestones.id'), primary_key=True)
 )
 
+# Association table for many-to-many relationship between Note and Opportunity
+notes_opportunities = db.Table(
+    'notes_opportunities',
+    db.Column('note_id', db.Integer, db.ForeignKey('notes.id'), primary_key=True),
+    db.Column('opportunity_id', db.Integer, db.ForeignKey('opportunities.id'), primary_key=True)
+)
+
 # Association table for many-to-many relationship between Partner and Specialty
 partners_specialties = db.Table(
     'partners_specialties',
@@ -596,6 +603,12 @@ class Note(db.Model):
         back_populates='notes',
         lazy='select'
     )
+    opportunities = db.relationship(
+        'Opportunity',
+        secondary=notes_opportunities,
+        back_populates='notes',
+        lazy='select'
+    )
     engagements = db.relationship(
         'Engagement',
         secondary=notes_engagements,
@@ -773,6 +786,12 @@ class Opportunity(db.Model):
     # Relationships
     customer = db.relationship('Customer', backref=db.backref('opportunities', lazy='dynamic'))
     milestones = db.relationship('Milestone', back_populates='opportunity', lazy='dynamic')
+    notes = db.relationship(
+        'Note',
+        secondary=notes_opportunities,
+        back_populates='opportunities',
+        lazy='select'
+    )
     
     def __repr__(self) -> str:
         return f'<Opportunity {self.id}: {self.name[:50]}>'
@@ -1062,7 +1081,7 @@ class CustomerRevenueData(db.Model):
     customer_name = db.Column(db.String(500), nullable=False, index=True)
     tpid = db.Column(db.String(50), nullable=True, index=True)
     seller_name = db.Column(db.String(200), nullable=True)  # From territory alignment in CSV
-    bucket = db.Column(db.String(50), nullable=False)  # Core DBs, Analytics, Modern DBs
+    bucket = db.Column(db.String(50), nullable=False)  # e.g., Analytics, Core DBs
     
     # Link to Sales Buddy customer (nullable until matched)
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=True, index=True)
@@ -1105,7 +1124,7 @@ class ProductRevenueData(db.Model):
     
     # Customer/bucket identification
     customer_name = db.Column(db.String(500), nullable=False, index=True)
-    bucket = db.Column(db.String(50), nullable=False)  # Core DBs, Analytics, Modern DBs
+    bucket = db.Column(db.String(50), nullable=False)  # e.g., Analytics, Core DBs
     product = db.Column(db.String(200), nullable=False, index=True)  # ServiceLevel4 from CSV
     
     # Link to Sales Buddy customer (nullable until matched)

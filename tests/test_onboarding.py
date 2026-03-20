@@ -56,10 +56,9 @@ class TestOnboardingWizardDisplay:
         response = client.get('/')
         html = response.data.decode('utf-8')
 
-        # Step 1: Role Selection + Theme
-        assert "What's your role?" in html or 'your role' in html.lower()
+        # Step 1: Welcome + Dark Mode
+        assert "get you set up" in html.lower()
         assert 'onboardDarkModeToggle' in html
-        assert 'selectRole' in html
 
         # Step 2: Authentication (az login flow)
         assert 'Connect to MSX' in html

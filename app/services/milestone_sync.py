@@ -166,19 +166,33 @@ def _ms_fetch_worker(
     Worker thread: fetch milestones from MSX for a batch of customers.
 
     Puts results onto progress_q as tuples of
-    ('fetched', cust_id, cust_name, msx_result) or
-    ('vpn', cust_id, cust_name, None).
+    ('fetched', cust_id, cust_name, msx_result),
+    ('retry', cust_id, cust_name, message_str),
+    or ('vpn', cust_id, cust_name, None).
     Sends ('done', None, None, None) when finished.
     """
+    from app.services.msx_api import msx_retry_state
+
     for cust_id, cust_name, account_id in tasks:
         if is_vpn_blocked():
             progress_q.put(('vpn', cust_id, cust_name, None))
             return
-        result = get_milestones_by_account(
-            account_id,
-            open_opportunities_only=True,
-            current_fy_only=True,
-        )
+
+        def _on_retry(attempt, max_retries, wait_secs, error_type,
+                      _cid=cust_id, _cn=cust_name):
+            progress_q.put((
+                'retry', _cid, _cn,
+                f"{_cn} - Timeout, retrying ({attempt}/{max_retries})..."
+            ))
+        msx_retry_state.callback = _on_retry
+        try:
+            result = get_milestones_by_account(
+                account_id,
+                open_opportunities_only=True,
+                current_fy_only=True,
+            )
+        finally:
+            msx_retry_state.callback = None
         progress_q.put(('fetched', cust_id, cust_name, result))
     progress_q.put(('done', None, None, None))
 
@@ -272,6 +286,14 @@ def sync_all_customer_milestones_stream(
                         'skipped': remaining,
                     })
                     break
+                elif evt == 'retry':
+                    yield _sse_event('progress', {
+                        'current': fetched,
+                        'total': total,
+                        'customer': result,
+                        'status': 'retrying',
+                        'progress': int((fetched / total) * 70),
+                    })
                 elif evt == 'fetched':
                     fetch_results[cust_id] = result
                     fetched += 1

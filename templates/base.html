@@ -348,7 +348,7 @@
                             <i class="bi bi-building"></i> Customers
                         </a>
                     </li>
-                    {% if not seller_mode %}
+                    {% if not seller_mode and user_role != 'dss' %}
                     <li class="nav-item dropdown nav-hover-dropdown" id="navSellers">
                         <a class="nav-link dropdown-toggle" href="{{ url_for('sellers.sellers_list') }}" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-people"></i> Sellers
@@ -633,48 +633,29 @@
                         <div class="progress-bar" id="onboardingProgress" role="progressbar" style="width: 20%"></div>
                     </div>
 
-                    <!-- STEP 1: Role Selection + Theme -->
+                    <!-- STEP 1: Welcome + Dark Mode -->
                     <div class="onboarding-step" id="onboardingStep1">
-                        <p class="lead mb-3">Let's get you set up! First, tell us about your role.</p>
-                        
-                        <h6 class="mb-3"><i class="bi bi-person-badge text-primary"></i> What's your role?</h6>
-                        
-                        <div class="d-flex flex-column gap-2 mb-3">
-                            <div class="card role-choice-card" id="roleDssCard" style="cursor: pointer; transition: border-color 0.15s;" onclick="selectRole('dss')">
-                                <div class="card-body py-2">
-                                    <div class="d-flex align-items-center">
-                                        <i class="bi bi-person-fill fs-4 text-primary me-3"></i>
-                                        <div>
-                                            <h6 class="mb-0">Digital Sales Specialist (DSS)</h6>
-                                            <small class="text-muted">I manage my own accounts directly</small>
-                                        </div>
-                                        <i class="bi bi-check-circle-fill text-primary ms-auto d-none" id="roleDssCheck"></i>
+                        <p class="lead mb-3">Let's get you set up! This wizard will walk you through connecting to MSX, enabling AI-powered features, and importing your data.</p>
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="card-title mb-1"><i class="bi bi-moon-stars text-primary"></i> Choose Your Theme</h6>
+                                        <p class="text-muted small mb-0">You can always change this later in <i class="bi bi-gear"></i> Settings</p>
                                     </div>
-                                </div>
-                            </div>
-                            <div class="card role-choice-card" id="roleSeCard" style="cursor: pointer; transition: border-color 0.15s;" onclick="selectRole('se')">
-                                <div class="card-body py-2">
-                                    <div class="d-flex align-items-center">
-                                        <i class="bi bi-people-fill fs-4 text-primary me-3"></i>
-                                        <div>
-                                            <h6 class="mb-0">Solution Engineer (SE)</h6>
-                                            <small class="text-muted">I support multiple sellers and their accounts</small>
+                                    <div class="d-flex align-items-center gap-2 ms-3">
+                                        <span class="small text-nowrap" style="cursor: pointer;" onclick="document.getElementById('onboardDarkModeToggle').click()"><i class="bi bi-sun-fill text-warning"></i> Light</span>
+                                        <div class="form-check form-switch mb-0">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="onboardDarkModeToggle" style="width: 3em; height: 1.5em;" {{ 'checked' if dark_mode else '' }}>
                                         </div>
-                                        <i class="bi bi-check-circle-fill text-primary ms-auto d-none" id="roleSeCheck"></i>
+                                        <span class="small text-nowrap" style="cursor: pointer;" onclick="document.getElementById('onboardDarkModeToggle').click()"><i class="bi bi-moon-fill"></i> Dark</span>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        
-                        <div class="d-flex justify-content-between align-items-center border-top pt-3">
-                            <span class="small text-muted"><i class="bi bi-moon-stars"></i> Theme</span>
-                            <div class="d-flex align-items-center gap-2">
-                                <span class="small text-nowrap" style="cursor: pointer;" onclick="document.getElementById('onboardDarkModeToggle').click()"><i class="bi bi-sun-fill text-warning"></i></span>
-                                <div class="form-check form-switch mb-0">
-                                    <input class="form-check-input" type="checkbox" role="switch" id="onboardDarkModeToggle" style="width: 2.5em; height: 1.25em;" {{ 'checked' if dark_mode else '' }}>
-                                </div>
-                                <span class="small text-nowrap" style="cursor: pointer;" onclick="document.getElementById('onboardDarkModeToggle').click()"><i class="bi bi-moon-fill"></i></span>
-                            </div>
+
+                        <div class="alert alert-info mb-0">
+                            <i class="bi bi-info-circle"></i> <strong>What's next:</strong> We'll sign you in to Azure (which also enables AI features like topic suggestions and engagement summaries), then import your accounts, milestones, and revenue data.
                         </div>
                     </div>
 
@@ -852,7 +833,6 @@
                                     <button class="btn btn-primary btn-lg" id="onboardImportMilestones">
                                         <i class="bi bi-cloud-download"></i> Import Milestones
                                     </button>
-                                    <p class="mt-2 mb-0 small text-muted"><i class="bi bi-info-circle"></i> Optional — you can do this anytime from the Milestone Tracker.</p>
                                 </div>
                                 <!-- Progress state -->
                                 <div id="importMilestonesProgress" class="d-none">
@@ -1323,7 +1303,8 @@
                 let milestonesImported = {{ 'true' if has_milestones else 'false' }};
                 let revenueImported = {{ 'true' if has_revenue else 'false' }};
                 let aiEnabled = true;
-                let roleSelected = {{ 'true' if user_role_set else 'false' }};
+                let roleSelected = true;  // No role selection in Step 1 - auto-detected in Step 3
+                let selectedRole = '{{ user_role }}';  // Updated after Step 3 auto-detect
                 const milestonesSyncState = '{{ milestones_sync_state }}';
                 const revenueSyncState = '{{ revenue_sync_state }}';
 
@@ -1405,9 +1386,7 @@
 
                 function updateNextButton() {
                     const skipStepBtn = document.getElementById('onboardSkipStepBtn');
-                    if (currentStep === 1 && !roleSelected) {
-                        nextBtn.disabled = true;
-                    } else if (currentStep === 2 && !(authCompleted && vpnVerified)) {
+                    if (currentStep === 2 && !(authCompleted && vpnVerified)) {
                         nextBtn.disabled = true;
                     } else if (currentStep === 3 && !accountsImported) {
                         nextBtn.disabled = true;
@@ -1436,6 +1415,11 @@
 
                 nextBtn.addEventListener('click', async () => {
                     if (currentStep < totalSteps) {
+                        // After Step 3: reload so navbar/UI reflects detected role
+                        if (currentStep === 3) {
+                            window.location.href = window.location.pathname + '?onboarding_step=4';
+                            return;
+                        }
                         showStep(currentStep + 1);
                     } else {
                         // Finish — dismiss modal
@@ -1467,34 +1451,7 @@
                 }
 
                 // --- Step 1: Dark Mode Toggle ---
-                // --- Step 1: Role Selection ---
-                async function selectRole(role) {
-                    const dssCard = document.getElementById('roleDssCard');
-                    const seCard = document.getElementById('roleSeCard');
-                    const dssCheck = document.getElementById('roleDssCheck');
-                    const seCheck = document.getElementById('roleSeCheck');
-                    
-                    // Visual selection
-                    dssCard.classList.toggle('border-primary', role === 'dss');
-                    dssCard.classList.toggle('border-2', role === 'dss');
-                    seCard.classList.toggle('border-primary', role === 'se');
-                    seCard.classList.toggle('border-2', role === 'se');
-                    dssCheck.classList.toggle('d-none', role !== 'dss');
-                    seCheck.classList.toggle('d-none', role !== 'se');
-                    
-                    roleSelected = true;
-                    updateNextButton();
-                    
-                    try {
-                        await fetch('/api/preferences/user-role', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ role: role })
-                        });
-                    } catch (err) {
-                        console.error('Failed to save role:', err);
-                    }
-                }
+                // Role is now auto-detected in Step 3 (no manual selection)
 
                 const onboardDarkToggle = document.getElementById('onboardDarkModeToggle');
                 if (onboardDarkToggle) {
@@ -1621,6 +1578,17 @@
 
                     const emailEl = document.getElementById('signInEmail');
                     if (emailEl && email) emailEl.textContent = email;
+
+                    // Save alias for DSS seller matching (best-effort)
+                    if (email) {
+                        try {
+                            await fetch('/api/preferences/save-alias', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ email: email })
+                            });
+                        } catch (e) { /* non-blocking */ }
+                    }
 
                     // Try to enable AI (consent may have been granted during login)
                     const aiStatusEl = document.getElementById('signInAiStatus');
@@ -1833,6 +1801,18 @@
                         // Auto-trigger favicon fetch after account sync
                         fetch('/api/admin/fetch-favicons', { method: 'POST' }).catch(() => {});
 
+                        // Auto-detect role: match alias to imported seller records
+                        try {
+                            const matchResp = await fetch('/api/preferences/match-seller', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' }
+                            });
+                            const matchData = await matchResp.json();
+                            selectedRole = matchData.matched ? 'dss' : 'se';
+                        } catch (e) {
+                            selectedRole = 'se';
+                        }
+
                         const summaryDiv = document.getElementById('importAccountsSummary');
                         if (finalSummary) {
                             const s = finalSummary;
@@ -1840,7 +1820,7 @@
                                 '<ul class="list-unstyled mb-0">' +
                                 '<li><i class="bi bi-people-fill text-primary"></i> PODs: ' + (s.pods_created || 0) + ' created</li>' +
                                 '<li><i class="bi bi-geo-alt text-info"></i> Territories: ' + (s.territories_created || 0) + ' created</li>' +
-                                '<li><i class="bi bi-person text-primary"></i> Sellers: ' + (s.sellers_created || 0) + ' created' + (s.sellers_updated ? ', ' + s.sellers_updated + ' updated' : '') + '</li>' +
+                                (selectedRole !== 'dss' ? '<li><i class="bi bi-person text-primary"></i> Sellers: ' + (s.sellers_created || 0) + ' created' + (s.sellers_updated ? ', ' + s.sellers_updated + ' updated' : '') + '</li>' : '') +
                                 '<li><i class="bi bi-person-gear text-secondary"></i> Solution Engineers: ' + (s.solution_engineers_created || 0) + ' created</li>' +
                                 '<li><i class="bi bi-building text-success"></i> Customers: ' + (s.customers_created || 0) + ' created' + (s.customers_updated ? ', ' + s.customers_updated + ' updated' : '') + (s.customers_unchanged ? ', ' + s.customers_unchanged + ' unchanged' : '') + (s.customers_skipped ? ', ' + s.customers_skipped + ' skipped' : '') + '</li>' +
                                 (s.duration ? '<li>Completed in ' + s.duration + 's</li>' : '') +
@@ -1946,7 +1926,11 @@
                                         : (eventData.total > 0 ? Math.round(eventData.current / eventData.total * 100) : 0);
                                     progressBar.style.width = pct + '%';
                                     progressPercent.textContent = pct + '%';
-                                    statusText.textContent = eventData.customer || ('Customer ' + eventData.current);
+                                    if (eventData.status === 'retrying') {
+                                        statusText.textContent = eventData.customer || 'Timeout, retrying...';
+                                    } else {
+                                        statusText.textContent = eventData.customer || ('Customer ' + eventData.current);
+                                    }
                                     // Only log errors to the detail pane
                                     if (eventData.status === 'error') {
                                         logDiv.innerHTML += '<div><i class="bi bi-x-circle text-danger"></i> ' +
@@ -2117,8 +2101,17 @@
                 async function initWizard() {
                     let startStep = 1;
 
+                    // Check for step override from URL (used after Step 1 role selection reload)
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const stepOverride = parseInt(urlParams.get('onboarding_step'));
+                    if (stepOverride >= 1 && stepOverride <= totalSteps) {
+                        // Clean the URL so refreshing doesn't re-trigger
+                        history.replaceState(null, '', window.location.pathname);
+                        startStep = stepOverride;
+                    }
+
                     // If user already has data, check auth and skip completed steps
-                    if (accountsImported || milestonesImported || revenueImported) {
+                    if (startStep === 1 && (accountsImported || milestonesImported || revenueImported)) {
                         try {
                             const resp = await fetch('/api/msx/status');
                             const data = await resp.json();
