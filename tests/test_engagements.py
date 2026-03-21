@@ -13,7 +13,7 @@ import json
 from datetime import datetime, timezone, date
 
 import pytest
-from app.models import db, Customer, Seller, Territory, Note, Engagement, EngagementTask, Topic, Milestone
+from app.models import db, Customer, Seller, Territory, Note, Engagement, ActionItem, Topic, Milestone
 
 
 @pytest.fixture
@@ -1006,8 +1006,8 @@ class TestMilestoneEngagementCrossLink:
             assert len(eng.milestones) == 1  # no duplicate
 
 
-class TestEngagementTasks:
-    """Test engagement task CRUD operations."""
+class TestActionItems:
+    """Test engagement action item CRUD operations."""
 
     @pytest.fixture
     def eng_with_note(self, app, engagement_data):
@@ -1038,7 +1038,7 @@ class TestEngagementTasks:
         assert data['task']['status'] == 'open'
 
         with app.app_context():
-            task = EngagementTask.query.filter_by(engagement_id=eid).first()
+            task = ActionItem.query.filter_by(engagement_id=eid).first()
             assert task is not None
             assert task.title == 'Follow up on POC'
 
@@ -1082,7 +1082,7 @@ class TestEngagementTasks:
         """Get a single task via JSON API."""
         eid = eng_with_note['engagement_id']
         with app.app_context():
-            task = EngagementTask(engagement_id=eid, title='Fetch me')
+            task = ActionItem(engagement_id=eid, title='Fetch me')
             db.session.add(task)
             db.session.commit()
             tid = task.id
@@ -1096,7 +1096,7 @@ class TestEngagementTasks:
         """Update a task via PUT."""
         eid = eng_with_note['engagement_id']
         with app.app_context():
-            task = EngagementTask(engagement_id=eid, title='Old title')
+            task = ActionItem(engagement_id=eid, title='Old title')
             db.session.add(task)
             db.session.commit()
             tid = task.id
@@ -1119,7 +1119,7 @@ class TestEngagementTasks:
         assert data['task']['priority'] == 'high'
 
         with app.app_context():
-            task = db.session.get(EngagementTask, tid)
+            task = db.session.get(ActionItem, tid)
             assert task.title == 'New title'
             assert task.due_date == date(2026, 5, 1)
             assert task.description == '<p>Updated details</p>'
@@ -1128,7 +1128,7 @@ class TestEngagementTasks:
         """Toggle task between open and completed."""
         eid = eng_with_note['engagement_id']
         with app.app_context():
-            task = EngagementTask(engagement_id=eid, title='Toggle me')
+            task = ActionItem(engagement_id=eid, title='Toggle me')
             db.session.add(task)
             db.session.commit()
             tid = task.id
@@ -1150,7 +1150,7 @@ class TestEngagementTasks:
         """Delete a task."""
         eid = eng_with_note['engagement_id']
         with app.app_context():
-            task = EngagementTask(engagement_id=eid, title='Delete me')
+            task = ActionItem(engagement_id=eid, title='Delete me')
             db.session.add(task)
             db.session.commit()
             tid = task.id
@@ -1160,33 +1160,33 @@ class TestEngagementTasks:
         assert resp.get_json()['success'] is True
 
         with app.app_context():
-            assert db.session.get(EngagementTask, tid) is None
+            assert db.session.get(ActionItem, tid) is None
 
-    def test_open_task_count_property(self, app, eng_with_note):
-        """Engagement.open_task_count returns only open tasks."""
+    def test_open_action_item_count_property(self, app, eng_with_note):
+        """Engagement.open_action_item_count returns only open action items."""
         eid = eng_with_note['engagement_id']
         with app.app_context():
-            t1 = EngagementTask(engagement_id=eid, title='Open 1')
-            t2 = EngagementTask(engagement_id=eid, title='Open 2')
-            t3 = EngagementTask(engagement_id=eid, title='Done', status='completed')
+            t1 = ActionItem(engagement_id=eid, title='Open 1')
+            t2 = ActionItem(engagement_id=eid, title='Open 2')
+            t3 = ActionItem(engagement_id=eid, title='Done', status='completed')
             db.session.add_all([t1, t2, t3])
             db.session.commit()
 
             eng = db.session.get(Engagement, eid)
-            assert eng.open_task_count == 2
+            assert eng.open_action_item_count == 2
 
     def test_is_overdue_property(self, app, eng_with_note):
-        """EngagementTask.is_overdue returns True for past-due open tasks."""
+        """ActionItem.is_overdue returns True for past-due open action items."""
         eid = eng_with_note['engagement_id']
         with app.app_context():
-            past = EngagementTask(
+            past = ActionItem(
                 engagement_id=eid, title='Overdue', due_date=date(2020, 1, 1)
             )
-            future = EngagementTask(
+            future = ActionItem(
                 engagement_id=eid, title='Future', due_date=date(2099, 12, 31)
             )
-            no_date = EngagementTask(engagement_id=eid, title='No date')
-            done = EngagementTask(
+            no_date = ActionItem(engagement_id=eid, title='No date')
+            done = ActionItem(
                 engagement_id=eid, title='Done overdue',
                 due_date=date(2020, 1, 1), status='completed',
             )
@@ -1198,11 +1198,11 @@ class TestEngagementTasks:
             assert no_date.is_overdue is False
             assert done.is_overdue is False
 
-    def test_task_cascade_delete_with_engagement(self, client, app, eng_with_note):
-        """Tasks should be deleted when their engagement is deleted."""
+    def test_action_item_cascade_delete_with_engagement(self, client, app, eng_with_note):
+        """Action items should be deleted when their engagement is deleted."""
         eid = eng_with_note['engagement_id']
         with app.app_context():
-            task = EngagementTask(engagement_id=eid, title='Cascade me')
+            task = ActionItem(engagement_id=eid, title='Cascade me')
             db.session.add(task)
             db.session.commit()
             tid = task.id
@@ -1211,26 +1211,26 @@ class TestEngagementTasks:
         assert resp.status_code == 200
 
         with app.app_context():
-            assert db.session.get(EngagementTask, tid) is None
+            assert db.session.get(ActionItem, tid) is None
 
-    def test_task_count_in_api(self, client, app, eng_with_note):
-        """API endpoint should include open_task_count."""
+    def test_action_item_count_in_api(self, client, app, eng_with_note):
+        """API endpoint should include open_action_item_count."""
         eid = eng_with_note['engagement_id']
         with app.app_context():
-            db.session.add(EngagementTask(engagement_id=eid, title='T1'))
-            db.session.add(EngagementTask(engagement_id=eid, title='T2', status='completed'))
+            db.session.add(ActionItem(engagement_id=eid, title='T1'))
+            db.session.add(ActionItem(engagement_id=eid, title='T2', status='completed'))
             db.session.commit()
 
         resp = client.get('/api/engagements/all')
         data = resp.get_json()
         eng_data = next(e for e in data['engagements'] if e['id'] == eid)
-        assert eng_data['open_task_count'] == 1
+        assert eng_data['open_action_item_count'] == 1
 
-    def test_engagement_view_shows_tasks(self, client, app, eng_with_note):
-        """Engagement view page should display tasks."""
+    def test_engagement_view_shows_action_items(self, client, app, eng_with_note):
+        """Engagement view page should display action items."""
         eid = eng_with_note['engagement_id']
         with app.app_context():
-            db.session.add(EngagementTask(engagement_id=eid, title='Visible Task'))
+            db.session.add(ActionItem(engagement_id=eid, title='Visible Task'))
             db.session.commit()
 
         resp = client.get(f'/engagement/{eid}')
@@ -1238,13 +1238,13 @@ class TestEngagementTasks:
         assert b'Visible Task' in resp.data
         assert b'check2-square' in resp.data
 
-    def test_reorder_tasks(self, client, app, eng_with_note):
-        """Reorder tasks via POST and verify sort_order is persisted."""
+    def test_reorder_action_items(self, client, app, eng_with_note):
+        """Reorder action items via POST and verify sort_order is persisted."""
         eid = eng_with_note['engagement_id']
         with app.app_context():
-            t1 = EngagementTask(engagement_id=eid, title='First', sort_order=0)
-            t2 = EngagementTask(engagement_id=eid, title='Second', sort_order=1)
-            t3 = EngagementTask(engagement_id=eid, title='Third', sort_order=2)
+            t1 = ActionItem(engagement_id=eid, title='First', sort_order=0)
+            t2 = ActionItem(engagement_id=eid, title='Second', sort_order=1)
+            t3 = ActionItem(engagement_id=eid, title='Third', sort_order=2)
             db.session.add_all([t1, t2, t3])
             db.session.commit()
             ids = [t3.id, t1.id, t2.id]  # new order: Third, First, Second
@@ -1258,7 +1258,7 @@ class TestEngagementTasks:
         assert resp.get_json()['success'] is True
 
         with app.app_context():
-            tasks = EngagementTask.query.filter_by(engagement_id=eid).order_by(
-                EngagementTask.sort_order
+            tasks = ActionItem.query.filter_by(engagement_id=eid).order_by(
+                ActionItem.sort_order
             ).all()
             assert [t.title for t in tasks] == ['Third', 'First', 'Second']
