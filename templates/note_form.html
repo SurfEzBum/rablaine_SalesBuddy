@@ -3112,7 +3112,8 @@ function removeMilestone(msxId) {
 
 // ===== MSX TASK CREATION =====
 function createTaskInMSX() {
-    const milestoneId = document.querySelector('input[name="milestone_msx_id"]')?.value;
+    // Only create the task on the first milestone attached to the note
+    const milestoneId = selectedMilestones.length > 0 ? selectedMilestones[0].id : null;
     const subject = document.getElementById('task_subject').value.trim();
     const category = document.getElementById('task_category').value;
     const description = document.getElementById('task_description').value.trim();
@@ -4145,10 +4146,11 @@ document.getElementById('noteForm').addEventListener('submit', async function(e)
     submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
     
     // Auto-create task in MSX if task fields are filled but task wasn't created via the button
+    // Only create the task on the first milestone attached to the note
     const taskSubject = document.getElementById('task_subject').value.trim();
     const taskCategory = document.getElementById('task_category').value;
     const createdTaskId = document.getElementById('created_task_id').value.trim();
-    const milestoneId = document.querySelector('input[name="milestone_msx_id"]')?.value;
+    const milestoneId = selectedMilestones.length > 0 ? selectedMilestones[0].id : null;
     
     if (milestoneId && taskSubject && taskCategory && !createdTaskId) {
         // Task fields are filled but task hasn't been created yet - create it now
