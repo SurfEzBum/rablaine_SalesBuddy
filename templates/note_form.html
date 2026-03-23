@@ -543,16 +543,16 @@
                             {% endif %}
                         </div>
                         {% if next_url %}
-                        <a href="{{ next_url }}" class="btn btn-secondary">
+                        <a href="{{ next_url }}" class="btn btn-secondary" onclick="cancelNote()">
                             <i class="bi bi-x-circle"></i> Cancel
                         </a>
                         <input type="hidden" name="next" value="{{ next_url }}">
                         {% elif note %}
-                        <a href="{{ url_for('notes.note_view', id=note.id) }}" class="btn btn-secondary">
+                        <a href="{{ url_for('notes.note_view', id=note.id) }}" class="btn btn-secondary" onclick="cancelNote()">
                             <i class="bi bi-x-circle"></i> Cancel
                         </a>
                         {% else %}
-                        <a href="{{ url_for('notes.notes_list') }}" class="btn btn-secondary">
+                        <a href="{{ url_for('notes.notes_list') }}" class="btn btn-secondary" onclick="cancelNote()">
                             <i class="bi bi-x-circle"></i> Cancel
                         </a>
                         {% endif %}
@@ -4254,6 +4254,15 @@ document.getElementById('customer_id').addEventListener('change', startAutoSave)
 // Flags to prevent saving after form submission or draft discard
 let formSubmittedSuccessfully = false;
 let draftDiscarded = false;
+
+// Cancel note editing - clear draft so it doesn't linger
+function cancelNote() {
+    draftDiscarded = true;
+    if (autoSaveTimeout) {
+        clearTimeout(autoSaveTimeout);
+    }
+    clearDraft();
+}
 
 // Save draft before page unload (unless form was successfully submitted or draft discarded)
 window.addEventListener('beforeunload', function(e) {
