@@ -535,6 +535,23 @@ def revenue_customer_view(customer_id: int):
                 'bucket_total': sum(rd.revenue for rd in history)
             }
     
+    # Build grand total across all buckets (month-by-month)
+    grand_month_revenues = {}
+    for bucket, bdata in bucket_product_data.items():
+        for month, rev in bdata['bucket_month_revenues'].items():
+            grand_month_revenues[month] = grand_month_revenues.get(month, 0) + rev
+
+    # Get the 7 most recent months across all buckets for the total card
+    all_bucket_months = {}
+    for bucket, bdata in bucket_product_data.items():
+        for month in bdata['recent_months']:
+            for rd in revenue_by_bucket.get(bucket, []):
+                if rd.fiscal_month == month:
+                    all_bucket_months[month] = rd.month_date
+    sorted_grand_months = sorted(all_bucket_months.items(), key=lambda x: x[1])
+    grand_recent_months = [m[0] for m in sorted_grand_months[-7:]]
+    grand_total = sum(grand_month_revenues.values())
+
     return render_template(
         'revenue_customer_view.html',
         customer_name=customer_name,
@@ -542,7 +559,10 @@ def revenue_customer_view(customer_id: int):
         analyses=analyses,
         revenue_by_bucket=revenue_by_bucket,
         products_by_bucket=products_by_bucket,
-        bucket_product_data=bucket_product_data
+        bucket_product_data=bucket_product_data,
+        grand_month_revenues=grand_month_revenues,
+        grand_recent_months=grand_recent_months,
+        grand_total=grand_total,
     )
 
 

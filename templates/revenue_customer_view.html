@@ -104,6 +104,86 @@
     {% endif %}
 
     <!-- Revenue History Tables with Product Grids -->
+    {% if grand_recent_months and revenue_by_bucket|length > 1 %}
+    <div class="card mb-4 border-primary" id="bucket-total">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-calculator"></i> Total Revenue</h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Bucket</th>
+                            {% for month in grand_recent_months %}
+                            <th class="text-end">{{ month }}</th>
+                            {% endfor %}
+                            <th class="text-end pe-3"><strong>Total</strong></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Grand Total Row -->
+                        <tr class="fw-bold border-bottom border-2">
+                            <td class="ps-3">All Buckets</td>
+                            {% for month in grand_recent_months %}
+                            <td class="text-end">
+                                {% set current_rev = grand_month_revenues.get(month, 0) %}
+                                {% set prev_month = grand_recent_months[loop.index0 - 1] if loop.index0 > 0 else None %}
+                                {% set prev_rev = grand_month_revenues.get(prev_month, 0) if prev_month else 0 %}
+                                {% if current_rev %}
+                                    {% if prev_rev > 0 %}
+                                        {% set change = ((current_rev - prev_rev) / prev_rev * 100) %}
+                                        <span class="{% if change < -10 %}text-danger{% elif change > 10 %}text-success{% endif %}">
+                                            ${{ '{:,.0f}'.format(current_rev) }}
+                                        </span>
+                                    {% else %}
+                                        ${{ '{:,.0f}'.format(current_rev) }}
+                                    {% endif %}
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                            <td class="text-end pe-3">${{ '{:,.0f}'.format(grand_total) }}</td>
+                        </tr>
+
+                        <!-- Per-Bucket Rows -->
+                        {% for bucket, bdata in bucket_product_data.items() %}
+                        <tr>
+                            <td class="ps-3">
+                                <a href="#bucket-{{ bucket | lower | replace(' ', '-') | replace('/', '') | replace(':', '') }}" class="text-decoration-none">
+                                    {{ bucket }}
+                                </a>
+                            </td>
+                            {% for month in grand_recent_months %}
+                            <td class="text-end">
+                                {% set current_rev = bdata.bucket_month_revenues.get(month, 0) %}
+                                {% set prev_month = grand_recent_months[loop.index0 - 1] if loop.index0 > 0 else None %}
+                                {% set prev_rev = bdata.bucket_month_revenues.get(prev_month, 0) if prev_month else 0 %}
+                                {% if current_rev %}
+                                    {% if prev_rev > 0 %}
+                                        {% set change = ((current_rev - prev_rev) / prev_rev * 100) %}
+                                        <span class="{% if change < -10 %}text-danger{% elif change > 10 %}text-success{% endif %}">
+                                            ${{ '{:,.0f}'.format(current_rev) }}
+                                        </span>
+                                    {% else %}
+                                        ${{ '{:,.0f}'.format(current_rev) }}
+                                    {% endif %}
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                            <td class="text-end pe-3">${{ '{:,.0f}'.format(bdata.bucket_total) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {% for bucket, history in revenue_by_bucket.items() %}
     <div class="card mb-4" id="bucket-{{ bucket | lower | replace(' ', '-') | replace('/', '') | replace(':', '') }}">
         <div class="card-header d-flex justify-content-between align-items-center">
