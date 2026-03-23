@@ -36,6 +36,10 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
+    # Allow large form submissions (notes with inline screenshots are base64-encoded)
+    app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB
+    app.config['MAX_FORM_MEMORY_SIZE'] = 50 * 1024 * 1024  # 50 MB
+    
     # Initialize extensions with app
     db.init_app(app)
     
