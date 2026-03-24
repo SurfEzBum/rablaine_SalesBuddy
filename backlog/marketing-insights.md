@@ -186,11 +186,11 @@ Add marketing insights to the customer flyout in `templates/note_form.html`:
 - **TPID required** - Marketing insights are keyed by TPID. Customers without a TPID linked can't show this data. Hide the section or show "Link a TPID to see marketing insights."
 - **FormattedValue annotations** - Always use the OData `FormattedValue` annotation for picklist fields (solution area, sales play, audience, engagement level). The raw values are opaque integer codes.
 
-## Discovery Scripts
+## Discovery Notes
 
-These were used to find and validate the API patterns. Keep for reference:
+The API patterns above were validated with standalone discovery scripts that searched MSX `EntityDefinitions` for marketing-related entities, enumerated fields, and fetched sample records. Key findings:
 
-- `scripts/explore_marketing_insights.py` - Entity discovery (searched EntityDefinitions)
-- `scripts/explore_marketing_contacts.py` - Contact entity field discovery
-- `scripts/query_marketing_insights.py` - Account-level query CLI tool
-- `scripts/query_marketing_contacts.py` - Contact-level query CLI tool
+- `contains()` filter is not supported on Metadata Entities (HTTP 501), so entity discovery required direct name guessing
+- No separate contact-interaction entity exists - marketing fields live directly on the `contact` entity
+- Contacts must be filtered via `_parentcustomerid_value` (raw GUID lookup), not `parentcustomerid` (errors with 400)
+- `msp_tpid` does not exist on the `contact` entity, so the two-step account-then-contacts pattern is required
