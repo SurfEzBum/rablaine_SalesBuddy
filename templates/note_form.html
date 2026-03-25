@@ -1943,51 +1943,47 @@ topicSearch.addEventListener('input', function() {
         !isTopicSelected(topic.id)
     );
     
-    if (currentMatches.length > 0) {
-        selectedIndex = 0; // Auto-select first item
-        renderDropdown();
-        topicDropdown.style.display = 'block';
-        topicDropdown.style.width = topicSearch.offsetWidth + 'px';
-    } else {
-        topicDropdown.style.display = 'none';
-        currentMatches = [];
-        selectedIndex = -1;
-    }
+    selectedIndex = 0; // Auto-select first item
+    renderDropdown(topicSearch.value.trim());
+    topicDropdown.style.display = 'block';
+    topicDropdown.style.width = topicSearch.offsetWidth + 'px';
 });
 
 // Keyboard navigation
 topicSearch.addEventListener('keydown', function(e) {
-    if (e.key === 'ArrowDown' && currentMatches.length > 0) {
+    const rawTerm = topicSearch.value.trim();
+    const totalItems = currentMatches.length + (rawTerm.length > 0 ? 1 : 0);
+    if (e.key === 'ArrowDown' && totalItems > 0) {
         e.preventDefault();
-        selectedIndex = (selectedIndex + 1) % currentMatches.length;
-        renderDropdown();
-    } else if (e.key === 'ArrowUp' && currentMatches.length > 0) {
+        selectedIndex = (selectedIndex + 1) % totalItems;
+        renderDropdown(rawTerm);
+    } else if (e.key === 'ArrowUp' && totalItems > 0) {
         e.preventDefault();
-        selectedIndex = selectedIndex <= 0 ? currentMatches.length - 1 : selectedIndex - 1;
-        renderDropdown();
+        selectedIndex = selectedIndex <= 0 ? totalItems - 1 : selectedIndex - 1;
+        renderDropdown(rawTerm);
     } else if (e.key === 'Tab') {
-        // Empty input — let default Tab behavior move to next field
-        if (topicSearch.value.trim().length === 0) return;
+        // Empty input - let default Tab behavior move to next field
+        if (rawTerm.length === 0) return;
         
-        if (currentMatches.length > 0) {
+        if (totalItems > 0) {
             e.preventDefault();
             // Cycle through suggestions (Shift+Tab goes backwards)
             if (e.shiftKey) {
-                selectedIndex = selectedIndex <= 0 ? currentMatches.length - 1 : selectedIndex - 1;
+                selectedIndex = selectedIndex <= 0 ? totalItems - 1 : selectedIndex - 1;
             } else {
-                selectedIndex = (selectedIndex + 1) % currentMatches.length;
+                selectedIndex = (selectedIndex + 1) % totalItems;
             }
-            renderDropdown();
+            renderDropdown(rawTerm);
         }
     } else if (e.key === 'Enter') {
         e.preventDefault();
         
-        if (currentMatches.length > 0 && selectedIndex >= 0 && selectedIndex < currentMatches.length) {
-            // Select the highlighted topic
+        if (selectedIndex >= 0 && selectedIndex < currentMatches.length) {
+            // Select the highlighted existing topic
             const topic = currentMatches[selectedIndex];
             addTopic(topic.id, topic.name);
-        } else if (currentMatches.length === 0) {
-            // Add as pending topic (created on save) when no matches exist
+        } else {
+            // Selected the "+Create" entry or no matches - create as pending
             const searchTerm = topicSearch.value.trim();
             if (searchTerm.length > 0) {
                 addPendingTopic(searchTerm);
@@ -2000,8 +1996,9 @@ topicSearch.addEventListener('keydown', function(e) {
     }
 });
 
-function renderDropdown() {
-    topicDropdown.innerHTML = currentMatches.map((topic, index) => 
+function renderDropdown(rawSearchTerm) {
+    const totalItems = currentMatches.length + (rawSearchTerm ? 1 : 0);
+    let html = currentMatches.map((topic, index) => 
         `<button type="button" class="list-group-item list-group-item-action ${index === selectedIndex ? 'active' : ''}" 
             data-topic-id="${topic.id}" 
             data-topic-name="${topic.name.replace(/"/g, '&quot;')}"
@@ -2012,6 +2009,19 @@ function renderDropdown() {
             ${topic.description ? '<br><small class="text-muted">' + topic.description + '</small>' : ''}
         </button>`
     ).join('');
+    // Always add a "+ Create" entry at the bottom when there's a search term
+    if (rawSearchTerm) {
+        const createIndex = currentMatches.length;
+        const escaped = rawSearchTerm.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        html += `<button type="button" class="list-group-item list-group-item-action text-success ${createIndex === selectedIndex ? 'active' : ''}" 
+            data-topic-index="${createIndex}"
+            data-create-new="true"
+            onmouseenter="handleTopicHover(${createIndex})"
+            onclick="handleCreateTopicClick()">
+            <i class="bi bi-plus-circle"></i> <strong>${escaped}</strong>
+        </button>`;
+    }
+    topicDropdown.innerHTML = html;
 }
 
 function handleTopicHover(index) {
@@ -2028,6 +2038,13 @@ function handleTopicHover(index) {
 
 function handleTopicClick(topicId, topicName) {
     addTopic(topicId, topicName);
+}
+
+function handleCreateTopicClick() {
+    const searchTerm = topicSearch.value.trim();
+    if (searchTerm.length > 0) {
+        addPendingTopic(searchTerm);
+    }
 }
 
 // Hide dropdown when clicking outside
