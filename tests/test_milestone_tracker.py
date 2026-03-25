@@ -1975,3 +1975,205 @@ class TestSyncStatusHeartbeat:
         resp = client.get('/milestone-tracker')
         assert resp.status_code == 200
         assert b"didn&#39;t finish" in resp.data or b"didn't finish" in resp.data
+
+
+# ---------------------------------------------------------------------------
+# Comment sync tests
+# ---------------------------------------------------------------------------
+
+class TestSyncTeamMilestoneComments:
+    """Test syncing forecast comments for milestones the user is on the team for."""
+
+    def test_syncs_comments_for_team_milestones(self, app, sample_data):
+        """Should fetch and cache comments for on_my_team milestones."""
+        with app.app_context():
+            from app.models import db, Milestone, Customer
+            from app.services.milestone_sync import _sync_team_milestone_comments
+
+            customer = Customer.query.first()
+            ms = Milestone(
+                url='https://example.com/comment-sync-test',
+                title='Comment Sync Test MS',
+                msx_milestone_id='comment-sync-guid-1',
+                msx_status='On Track',
+                customer_id=customer.id,
+                on_my_team=True,
+            )
+            db.session.add(ms)
+            db.session.commit()
+
+            mock_comments = [
+                {"userId": "user-1", "modifiedOn": "2026-03-20", "comment": "Looking good"},
+                {"userId": "user-2", "modifiedOn": "2026-03-21", "comment": "Agreed"},
+            ]
+
+            with patch(
+                'app.services.milestone_sync.get_milestone_comments'
+            ) as mock_get:
+                mock_get.return_value = {
+                    'success': True,
+                    'comments': mock_comments,
+                }
+                gen = _sync_team_milestone_comments()
+                # Drain the generator
+                try:
+                    while True:
+                        next(gen)
+                except StopIteration as stop:
+                    result = stop.value
+
+            assert result['success'] is True
+            assert result['comments_synced'] == 1
+            assert result['comments_failed'] == 0
+
+            db.session.refresh(ms)
+            import json
+            cached = json.loads(ms.cached_comments_json)
+            assert len(cached) == 2
+            assert cached[0]['comment'] == 'Looking good'
+            assert ms.details_fetched_at is not None
+
+    def test_skips_milestones_not_on_team(self, app, sample_data):
+        """Should not fetch comments for milestones where on_my_team=False."""
+        with app.app_context():
+            from app.models import db, Milestone, Customer
+            from app.services.milestone_sync import _sync_team_milestone_comments
+
+            customer = Customer.query.first()
+            ms = Milestone(
+                url='https://example.com/not-team-test',
+                title='Not On Team MS',
+                msx_milestone_id='not-team-guid-1',
+                msx_status='On Track',
+                customer_id=customer.id,
+                on_my_team=False,
+            )
+            db.session.add(ms)
+            db.session.commit()
+
+            with patch(
+                'app.services.milestone_sync.get_milestone_comments'
+            ) as mock_get:
+                gen = _sync_team_milestone_comments()
+                try:
+                    while True:
+                        next(gen)
+                except StopIteration as stop:
+                    result = stop.value
+
+            mock_get.assert_not_called()
+            assert result['comments_synced'] == 0
+
+    def test_handles_comment_fetch_failure(self, app, sample_data):
+        """Should count failures but continue syncing other milestones."""
+        with app.app_context():
+            from app.models import db, Milestone, Customer
+            from app.services.milestone_sync import _sync_team_milestone_comments
+
+            customer = Customer.query.first()
+            ms1 = Milestone(
+                url='https://example.com/fail-test-1',
+                title='Fail Test 1',
+                msx_milestone_id='fail-guid-1',
+                msx_status='On Track',
+                customer_id=customer.id,
+                on_my_team=True,
+            )
+            ms2 = Milestone(
+                url='https://example.com/fail-test-2',
+                title='Fail Test 2',
+                msx_milestone_id='fail-guid-2',
+                msx_status='On Track',
+                customer_id=customer.id,
+                on_my_team=True,
+            )
+            db.session.add_all([ms1, ms2])
+            db.session.commit()
+
+            def mock_get_comments(ms_id):
+                if ms_id == 'fail-guid-1':
+                    return {'success': False, 'comments': [], 'error': 'Timeout'}
+                return {
+                    'success': True,
+                    'comments': [{"userId": "u", "modifiedOn": "d", "comment": "ok"}],
+                }
+
+            with patch(
+                'app.services.milestone_sync.get_milestone_comments',
+                side_effect=mock_get_comments,
+            ):
+                gen = _sync_team_milestone_comments()
+                try:
+                    while True:
+                        next(gen)
+                except StopIteration as stop:
+                    result = stop.value
+
+            assert result['comments_synced'] == 1
+            assert result['comments_failed'] == 1
+
+    def test_stream_includes_comment_sync_events(self, app, sample_data):
+        """Streaming sync should emit comment_sync_start and comment_sync_end events."""
+        import json
+        with app.app_context():
+            from app.models import db, Customer
+            customer = db.session.get(Customer, sample_data['customer1_id'])
+            customer.tpid_url = (
+                'https://microsoftsales.crm.dynamics.com/main.aspx'
+                '?appid=fe0c3504&pagetype=entityrecord&etn=account'
+                '&id=aaaabbbb-1111-2222-3333-444455556666'
+            )
+            db.session.commit()
+
+        with app.app_context():
+            from app.services.milestone_sync import sync_all_customer_milestones_stream
+
+            with patch('app.services.milestone_sync.get_milestones_by_account') as mock_get, \
+                 patch('app.services.milestone_sync._update_team_memberships'), \
+                 patch('app.services.milestone_sync.get_milestone_comments') as mock_comments:
+                mock_get.return_value = {
+                    'success': True,
+                    'milestones': [{
+                        'id': 'comment-stream-ms-1',
+                        'name': 'Comment Stream Test',
+                        'number': '7-888',
+                        'status': 'On Track',
+                        'status_code': 861980000,
+                        'msx_opportunity_id': None,
+                        'opportunity_name': '',
+                        'workload': '',
+                        'monthly_usage': None,
+                        'due_date': None,
+                        'dollar_value': None,
+                        'url': 'https://test.com',
+                    }],
+                    'count': 1,
+                }
+                mock_comments.return_value = {
+                    'success': True,
+                    'comments': [{"userId": "u", "modifiedOn": "d", "comment": "test"}],
+                }
+
+                events = list(sync_all_customer_milestones_stream())
+
+            event_types = []
+            event_data = []
+            for evt in events:
+                for line in evt.split('\n'):
+                    if line.startswith('event: '):
+                        event_types.append(line[7:])
+                    elif line.startswith('data: '):
+                        event_data.append(json.loads(line[6:]))
+
+            assert 'comment_sync_start' in event_types
+            assert 'comment_sync_end' in event_types
+
+            # comment_sync_end should have counts
+            end_idx = event_types.index('comment_sync_end')
+            end_data = event_data[end_idx]
+            assert 'comments_synced' in end_data
+
+            # complete event should include comments_synced
+            complete_idx = event_types.index('complete')
+            complete_data = event_data[complete_idx]
+            assert 'comments_synced' in complete_data

@@ -231,6 +231,21 @@ function syncMilestones() {
                     '<strong>VPN Required:</strong> ' + (data.message || 'IP address is blocked.') +
                     (data.skipped ? ' (' + data.skipped + ' customers skipped)' : '');
                 detail.innerHTML = '';
+            } else if (type === 'task_sync_start') {
+                detail.innerHTML = `<i class="bi bi-list-task text-info"></i> ${data.message}`;
+            } else if (type === 'task_sync_end') {
+                let taskInfo = '';
+                let taskParts = [];
+                if (data.tasks_created > 0) taskParts.push(`${data.tasks_created} new`);
+                if (data.tasks_updated > 0) taskParts.push(`${data.tasks_updated} updated`);
+                taskInfo = taskParts.length > 0 ? taskParts.join(', ') : 'No task changes';
+                detail.innerHTML = `<i class="bi bi-list-task text-success"></i> Tasks: ${taskInfo}`;
+            } else if (type === 'comment_sync_start') {
+                detail.innerHTML = `<i class="bi bi-chat-dots text-info"></i> ${data.message}`;
+            } else if (type === 'comment_sync_end') {
+                let commentInfo = `${data.comments_synced} milestone(s) comments cached`;
+                if (data.comments_failed > 0) commentInfo += `, ${data.comments_failed} failed`;
+                detail.innerHTML = `<i class="bi bi-chat-dots-fill text-success"></i> ${commentInfo}`;
             } else if (type === 'complete') {
                 window.removeEventListener('beforeunload', warnOnLeave);
                 progressBar.classList.remove('progress-bar-animated');
@@ -259,9 +274,13 @@ function syncMilestones() {
                         if (data.tasks_updated > 0) taskParts.push(`${data.tasks_updated} updated`);
                         taskText = ` Tasks: ${taskParts.join(', ')}.`;
                     }
+                    let commentText = '';
+                    if (data.comments_synced > 0) {
+                        commentText = ` Comments: ${data.comments_synced} cached.`;
+                    }
                     msg.innerHTML = `<i class="bi bi-check-circle-fill"></i> Sync complete! ` +
                         `${data.synced} of ${data.total} customers synced in ${data.duration}s. ` +
-                        `Milestones: ${summary}.${oppText}${taskText}`;
+                        `Milestones: ${summary}.${oppText}${taskText}${commentText}`;
                     if (data.errors && data.errors.length > 0) {
                         msg.innerHTML += `<br><small class="text-warning"><i class="bi bi-exclamation-triangle"></i> ` +
                             `${data.errors.length} error(s): ${data.errors.slice(0, 3).join('; ')}</small>`;
