@@ -30,7 +30,9 @@ IP_BLOCKED_MESSAGE = "IP address is blocked"
 MSX_APP_ID = "fe0c3504-3700-e911-a849-000d3a10b7cc"
 
 # Request timeout (seconds per attempt)
-REQUEST_TIMEOUT = 45
+# P99 of successful calls is 7s; 15s gives ample headroom while
+# failing fast on Dynamics 365 hiccups (was 45s, caused multi-minute stalls).
+REQUEST_TIMEOUT = 15
 
 
 def _is_writeback_disabled() -> bool:
@@ -44,8 +46,8 @@ _WRITEBACK_BLOCKED = {
 }
 
 # Retry settings for transient failures (timeouts, connection errors)
-MAX_RETRIES = 3
-RETRY_BACKOFF_SECONDS = [1, 3, 5]  # Wait between retries
+MAX_RETRIES = 10
+RETRY_BACKOFF_SECONDS = [1, 3, 5, 8, 12, 15, 20, 25, 30, 30]  # Wait between retries
 
 # Thread-local storage for optional retry callback.
 # Callers can set msx_retry_state.callback to a function(attempt, max_retries, wait_secs, error_type)
@@ -769,7 +771,8 @@ def get_milestones_by_account(
             f"&$select=msp_engagementmilestoneid,msp_name,msp_milestonestatus,"
             f"msp_milestonenumber,_msp_opportunityid_value,msp_monthlyuse,"
             f"_msp_workloadlkid_value,msp_milestonedate,msp_bacvrate,"
-            f"msp_commitmentrecommendation,msp_committedon,msp_completedon"
+            f"msp_commitmentrecommendation,msp_committedon,msp_completedon,"
+            f"msp_forecastcommentsjsonfield"
             f"&$orderby=msp_name"
         )
         
@@ -824,6 +827,7 @@ def get_milestones_by_account(
                     "url": build_milestone_url(milestone_id),
                     "committed_on": raw.get("msp_committedon"),
                     "completed_on": raw.get("msp_completedon"),
+                    "comments_json": raw.get("msp_forecastcommentsjsonfield"),
                 })
             
             # Sort by status (active first), then by name

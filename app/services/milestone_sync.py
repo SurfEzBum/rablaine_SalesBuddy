@@ -138,7 +138,7 @@ def sync_all_customer_milestones() -> Dict[str, Any]:
     _update_team_memberships()
     
     # Sync comments for milestones I'm on the team for
-    comment_gen = _sync_team_milestone_comments()
+    comment_gen = _sync_team_milestone_comments(since=start_time)
     try:
         while True:
             next(comment_gen)
@@ -302,13 +302,13 @@ def sync_all_customer_milestones_stream(
                         'total': total,
                         'customer': result,
                         'status': 'retrying',
-                        'progress': int((fetched / total) * 20),
+                        'progress': int((fetched / total) * 70),
                     })
                 elif evt == 'fetched':
                     fetch_results[cust_id] = result
                     fetched += 1
                     SyncStatus.update_heartbeat('milestones')
-                    pct = int((fetched / total) * 20)  # 0-20%
+                    pct = int((fetched / total) * 70)  # 0-70%
                     yield _sse_event('progress', {
                         'current': fetched,
                         'total': total,
@@ -349,7 +349,7 @@ def sync_all_customer_milestones_stream(
             failed += 1
             err = fetch_data.get('error', 'Fetch failed') if fetch_data else 'No data'
             errors.append(f"{cust_name}: {err}")
-            pct = 20 + int((i / write_count) * 12)  # 20-32%
+            pct = 70 + int((i / write_count) * 5)  # 70-75%
             yield _sse_event('progress', {
                 'current': fetched + i,
                 'total': total,
@@ -371,7 +371,7 @@ def sync_all_customer_milestones_stream(
                 total_deactivated += wr['deactivated']
                 total_opps_created += wr['opportunities_created']
 
-                pct = 20 + int((i / write_count) * 12)  # 20-32%
+                pct = 70 + int((i / write_count) * 5)  # 70-75%
                 yield _sse_event('progress', {
                     'current': fetched + i,
                     'total': total,
@@ -400,13 +400,13 @@ def sync_all_customer_milestones_stream(
         while True:
             batch_num, total_batches, info, status = next(task_gen)
             SyncStatus.update_heartbeat('milestones')
-            pct = 32 + int((batch_num / max(total_batches, 1)) * 44)  # 32-76%
+            pct = 75 + int((batch_num / max(total_batches, 1)) * 21)  # 75-96%
             yield _sse_event('progress', {
                 'current': batch_num,
                 'total': total_batches,
                 'customer': info,
                 'status': status,
-                'progress': min(pct, 76),
+                'progress': min(pct, 96),
             })
     except StopIteration as stop:
         task_result = stop.value
@@ -427,7 +427,7 @@ def sync_all_customer_milestones_stream(
         'total': total,
         'customer': 'Updating team memberships...',
         'status': 'ok',
-        'progress': 77,
+        'progress': 97,
     })
     _update_team_memberships()
 
@@ -439,12 +439,14 @@ def sync_all_customer_milestones_stream(
     yield _sse_event('comment_sync_start', {
         'message': 'Syncing forecast comments for team milestones...',
     })
-    comment_gen = _sync_team_milestone_comments()
+    comment_gen = _sync_team_milestone_comments(
+        since=datetime.fromtimestamp(start_time, tz=timezone.utc),
+    )
     try:
         while True:
             current_ms, total_ms, ms_title = next(comment_gen)
             SyncStatus.update_heartbeat('milestones')
-            pct = 77 + int((current_ms / max(total_ms, 1)) * 22)  # 77-99%
+            pct = 97 + int((current_ms / max(total_ms, 1)) * 2)  # 97-99%
             yield _sse_event('progress', {
                 'current': current_ms,
                 'total': total_ms,
@@ -456,8 +458,10 @@ def sync_all_customer_milestones_stream(
         comment_result = stop.value
         total_comments_synced = comment_result.get('comments_synced', 0)
         total_comments_failed = comment_result.get('comments_failed', 0)
+        total_comments_skipped = comment_result.get('comments_skipped', 0)
     yield _sse_event('comment_sync_end', {
         'comments_synced': total_comments_synced,
+        'comments_skipped': total_comments_skipped,
         'comments_failed': total_comments_failed,
     })
 
@@ -941,11 +945,20 @@ def _sync_customer_tasks(
     return result
 
 
-def _sync_team_milestone_comments() -> Generator[
+def _sync_team_milestone_comments(
+    since: Optional[datetime] = None,
+) -> Generator[
     Tuple[int, int, str], None, Dict[str, Any]
 ]:
     """
     Sync forecast comments from MSX for milestones where the user is on the team.
+
+    Skips milestones whose comments were already cached during this sync
+    (details_fetched_at >= since).
+
+    Args:
+        since: If provided, skip milestones with details_fetched_at >= this time
+               (they already got comments from the bulk milestone fetch).
 
     Yields (current, total, milestone_title) tuples for progress reporting,
     then returns the final result dict via generator return value.
@@ -954,29 +967,55 @@ def _sync_team_milestone_comments() -> Generator[
         Dict with:
         - success: bool
         - comments_synced: int (milestones whose comments were updated)
+        - comments_skipped: int (already cached from bulk fetch)
         - comments_failed: int
         - error: str if completely failed
     """
     result = {
         "success": True,
         "comments_synced": 0,
+        "comments_skipped": 0,
         "comments_failed": 0,
         "error": "",
     }
 
-    # Get all on-my-team milestones with MSX IDs
-    team_milestones = Milestone.query.filter(
+    # Get on-my-team milestones with MSX IDs that were part of this sync.
+    # The bulk fetch (Phase 1) uses open_opportunities_only + current_fy_only,
+    # so we limit Phase 4 to milestones with a recent last_synced_at to avoid
+    # individually fetching comments for old/closed milestones.
+    since_naive = since.replace(tzinfo=None) if (since and since.tzinfo) else since
+    base_filter = Milestone.query.filter(
         Milestone.on_my_team.is_(True),
         Milestone.msx_milestone_id.isnot(None),
-    ).all()
+    )
+    if since_naive:
+        base_filter = base_filter.filter(Milestone.last_synced_at >= since_naive)
+    team_milestones = base_filter.all()
 
     if not team_milestones:
         return result
 
-    total = len(team_milestones)
+    # Filter out milestones already cached during this sync
+    if since_naive:
+        need_fetch = [
+            ms for ms in team_milestones
+            if not ms.details_fetched_at or ms.details_fetched_at < since_naive
+        ]
+        result["comments_skipped"] = len(team_milestones) - len(need_fetch)
+    else:
+        need_fetch = team_milestones
+
+    if not need_fetch:
+        logger.info(
+            f"All {len(team_milestones)} team milestones already have "
+            f"fresh comments from bulk fetch - skipping comment sync"
+        )
+        return result
+
+    total = len(need_fetch)
     now = datetime.now(timezone.utc)
 
-    for i, ms in enumerate(team_milestones, 1):
+    for i, ms in enumerate(need_fetch, 1):
         yield (i, total, ms.title or ms.milestone_number or "Unknown")
 
         if is_vpn_blocked():
@@ -1037,6 +1076,11 @@ def _update_milestone_from_msx(
     milestone.last_synced_at = now
     milestone.committed_at = _parse_msx_date(msx_data.get("committed_on"))
     milestone.completed_at = _parse_msx_date(msx_data.get("completed_on"))
+    # Cache comments if included in the bulk fetch (None = field not requested,
+    # so we only update when the key is present in the dict)
+    if "comments_json" in msx_data:
+        milestone.cached_comments_json = msx_data["comments_json"] or "[]"
+        milestone.details_fetched_at = now
 
 
 def _create_milestone_from_msx(
@@ -1046,7 +1090,7 @@ def _create_milestone_from_msx(
     now: datetime,
 ) -> Milestone:
     """Create a new Milestone from MSX data."""
-    return Milestone(
+    ms = Milestone(
         msx_milestone_id=msx_data["id"],
         milestone_number=msx_data.get("number", ""),
         url=msx_data.get("url", ""),
@@ -1064,6 +1108,11 @@ def _create_milestone_from_msx(
         committed_at=_parse_msx_date(msx_data.get("committed_on")),
         completed_at=_parse_msx_date(msx_data.get("completed_on")),
     )
+    # Cache comments if included in the bulk fetch
+    if "comments_json" in msx_data:
+        ms.cached_comments_json = msx_data["comments_json"] or "[]"
+        ms.details_fetched_at = now
+    return ms
 
 
 def _upsert_opportunity(
