@@ -42,7 +42,7 @@
 {% endmacro %}
 
 <!-- Review Action Modal -->
-<div class="modal fade" id="reviewActionModal" tabindex="-1" aria-labelledby="reviewActionModalLabel" aria-hidden="true">
+<div class="modal fade" id="reviewActionModal" tabindex="-1" aria-labelledby="reviewActionModalLabel" aria-hidden="true" style="z-index: 1070;">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header py-2">
@@ -94,6 +94,11 @@ let _reviewModal = null;
 function openReviewModal(analysisId, currentStatus, currentNotes) {
     if (!_reviewModal) {
         _reviewModal = new bootstrap.Modal(document.getElementById('reviewActionModal'));
+        // Ensure the backdrop stacks above any parent modal
+        document.getElementById('reviewActionModal').addEventListener('shown.bs.modal', function() {
+            var backdrop = document.querySelector('.modal-backdrop:last-child');
+            if (backdrop) backdrop.style.zIndex = '1065';
+        });
     }
     document.getElementById('reviewAnalysisId').value = analysisId;
     document.getElementById('reviewNotes').value = currentNotes || '';
