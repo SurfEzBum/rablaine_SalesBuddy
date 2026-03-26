@@ -144,7 +144,7 @@ class TestNoteWorkerGating:
                 note_id=99,
                 app=app,
             )
-        mock_comments.assert_called_once()
+        mock_comments.assert_called()
         mock_ai.assert_called_once()
 
 
@@ -197,4 +197,4 @@ class TestEngagementWorkerGating:
                 app=app,
             )
         mock_display.assert_called_once()
-        mock_comments.assert_called_once()
+        mock_comments.assert_called()

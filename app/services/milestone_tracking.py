@@ -100,6 +100,41 @@ def _strip_html(html: str) -> str:
 
 # ── MSX upsert helper ───────────────────────────────────────────────────────
 
+def _refresh_cached_comments(msx_milestone_id: str, app=None) -> None:
+    """Re-read comments from MSX and update the local Milestone cache.
+
+    Called after a successful writeback so the dashboard stale-milestones
+    check sees the new comment without a manual refresh.
+    """
+    try:
+        from app.services.msx_api import get_milestone_comments
+        import json as _json
+        result = get_milestone_comments(msx_milestone_id)
+        if not result or not result.get("success"):
+            return
+        comments = result.get("comments", [])
+        comments_json = _json.dumps(comments)
+
+        def _update_db():
+            from app.models import Milestone as _Milestone
+            ms = _Milestone.query.filter_by(
+                msx_milestone_id=msx_milestone_id
+            ).first()
+            if ms:
+                ms.cached_comments_json = comments_json
+                db.session.commit()
+                print(f"[milestone-tracking] refreshed cached comments for {msx_milestone_id}")
+
+        if app:
+            with app.app_context():
+                _update_db()
+        else:
+            # Already in app context (synchronous path / tests)
+            _update_db()
+    except Exception as e:
+        logger.debug(f"Failed to refresh cached comments for {msx_milestone_id}: {e}")
+
+
 def _upsert_to_msx(
     msx_milestone_id: str,
     content: str,
@@ -377,6 +412,7 @@ def _track_note_worker(
                     msx_id, content_with_footer, ref_tag,
                     comment_date=call_date_iso,
                 )
+                _refresh_cached_comments(msx_id, app)
                 print(f"[milestone-tracking] AI summary upserted to {msx_id}")
             elif not has_existing_post:
                 # First-time sync for this note - AI said no new info but we
@@ -396,6 +432,7 @@ def _track_note_worker(
                     msx_id, content_with_footer, ref_tag,
                     comment_date=call_date_iso,
                 )
+                _refresh_cached_comments(msx_id, app)
                 print(f"[milestone-tracking] fallback comment created on {msx_id}")
             else:
                 print(
@@ -451,6 +488,8 @@ def _track_engagement_worker(
 
             print(f"[milestone-tracking] upserting engagement story to {msx_id}")
             result = _upsert_to_msx(msx_id, content, ref_tag, pin_to_top=True)
+            if result and result.get('success'):
+                _refresh_cached_comments(msx_id, app)
             print(f"[milestone-tracking] engagement upsert result: success={result and result.get('success')}")
         except Exception as e:
             print(f"[milestone-tracking] EXCEPTION for engagement on {msx_id}: {e}")
