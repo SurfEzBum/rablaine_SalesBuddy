@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone, date
 from flask import Blueprint, render_template, url_for, jsonify
 from app.models import (
     db, Customer, Engagement, Note, Milestone, Seller, SolutionEngineer,
-    Topic, notes_engagements, notes_milestones,
+    Topic, RevenueAnalysis, notes_engagements, notes_milestones,
 )
 from sqlalchemy import func, desc, or_
 
@@ -147,39 +147,54 @@ def report_one_on_one():
     )
 
     # --- Milestone highlights (on_my_team only) ---
-    # Recently completed or committed milestones (last 2 weeks)
-    # Uses committed_at/completed_at dates set by sync change detection
-    milestone_wins = (
+    # Recently committed milestones (last 2 weeks)
+    # Uses committed_at date set by sync change detection
+    milestone_commitments = (
         Milestone.query
         .filter(
             Milestone.on_my_team == True,  # noqa: E712
-            or_(
-                Milestone.completed_at >= two_weeks_ago,
-                Milestone.committed_at >= two_weeks_ago,
-            ),
+            Milestone.committed_at >= two_weeks_ago,
         )
-        .order_by(desc(func.coalesce(Milestone.completed_at, Milestone.committed_at)))
+        .options(
+            db.joinedload(Milestone.customer).joinedload(Customer.seller),
+        )
+        .order_by(desc(Milestone.committed_at))
         .all()
     )
 
     # Upcoming or overdue active milestones to follow up on
     today = date.today()
-    milestone_followups = (
+
+    # Current fiscal quarter milestones (on my team, active, with due date)
+    from datetime import time as _time
+    fy_month = (today.month - 7) % 12
+    fq_start = (fy_month // 3) * 3
+    q_start_month = ((fq_start + 7 - 1) % 12) + 1
+    quarter_start = datetime.combine(date(today.year, q_start_month, 1), _time.min)
+    end_month = q_start_month + 3
+    end_year = today.year
+    if end_month > 12:
+        end_month -= 12
+        end_year += 1
+    quarter_end = datetime.combine(
+        date(end_year, end_month, 1) - timedelta(days=1), _time(23, 59, 59)
+    )
+
+    quarter_milestones = (
         Milestone.query
         .filter(
             Milestone.on_my_team == True,  # noqa: E712
             Milestone.msx_status.in_(['On Track', 'At Risk', 'Blocked']),
             Milestone.due_date.isnot(None),
+            Milestone.due_date >= quarter_start,
+            Milestone.due_date <= quarter_end,
         )
-        .order_by(Milestone.due_date)
+        .options(
+            db.joinedload(Milestone.customer).joinedload(Customer.seller),
+        )
+        .order_by(desc(func.coalesce(Milestone.monthly_usage, 0)))
         .all()
     )
-    # Split into overdue and upcoming (next 2 weeks)
-    overdue_milestones = [m for m in milestone_followups if m.due_date.date() < today]
-    upcoming_milestones = [
-        m for m in milestone_followups
-        if today <= m.due_date.date() <= today + timedelta(days=14)
-    ]
 
     # --- Topic trends (last 2 weeks + FY sparkline) ---
     # Current 2-week counts for the card
@@ -242,15 +257,26 @@ def report_one_on_one():
         reverse=True,
     )[:10]
 
+    # --- Revenue alerts reviewed in last 2 weeks ---
+    reviewed_alerts = (
+        RevenueAnalysis.query
+        .filter(
+            RevenueAnalysis.review_status.in_(['reviewed', 'actioned']),
+            RevenueAnalysis.reviewed_at >= two_weeks_ago,
+        )
+        .order_by(desc(RevenueAnalysis.reviewed_at))
+        .all()
+    )
+
     # Stats
-    wins_acr = sum(m.monthly_usage or 0 for m in milestone_wins)
+    commitments_acr = sum(m.monthly_usage or 0 for m in milestone_commitments)
     stats = {
         'recent_engagement_count': len(recent_engagements),
         'recent_note_count': len(recent_notes),
         'recent_customer_count': len(recent_customers),
         'open_engagement_count': len(open_engagements),
         'open_customer_count': len(all_customers),
-        'wins_acr': wins_acr,
+        'commitments_acr': commitments_acr,
     }
 
     return render_template(
@@ -259,9 +285,12 @@ def report_one_on_one():
         all_customers=all_sorted,
         stats=stats,
         cutoff_date=two_weeks_ago,
-        milestone_wins=milestone_wins,
-        overdue_milestones=overdue_milestones,
-        upcoming_milestones=upcoming_milestones,
+        milestone_commitments=milestone_commitments,
+        quarter_milestones=quarter_milestones,
+        quarter_start=quarter_start,
+        quarter_end=quarter_end,
+        today=today,
+        reviewed_alerts=reviewed_alerts,
         top_topics=top_topics,
         fy_month_labels=fy_month_labels,
     )
