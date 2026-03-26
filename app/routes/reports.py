@@ -192,7 +192,7 @@ def report_one_on_one():
         .options(
             db.joinedload(Milestone.customer).joinedload(Customer.seller),
         )
-        .order_by(Milestone.due_date)
+        .order_by(desc(func.coalesce(Milestone.monthly_usage, 0)))
         .all()
     )
 
