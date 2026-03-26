@@ -211,6 +211,32 @@ def _build_note_fallback(topics: str) -> str:
     return "(Note linked — summary pending)"
 
 
+def _build_engagement_plain_text(engagement) -> str:
+    """Build a plain text version of engagement fields for MSX readability.
+
+    MSX renders the comment field in two places: once as stripped plain text
+    and once interpreting HTML. This plain text block ensures the stripped
+    view is still readable.
+    """
+    lines = []
+    if engagement.key_individuals:
+        lines.append(f"Key Individuals: {_strip_html(engagement.key_individuals)}")
+    if engagement.technical_problem:
+        lines.append(f"Technical Problem: {_strip_html(engagement.technical_problem)}")
+    if engagement.business_impact:
+        lines.append(f"Business Impact: {_strip_html(engagement.business_impact)}")
+    if engagement.solution_resources:
+        lines.append(f"Solution Resources: {_strip_html(engagement.solution_resources)}")
+    if engagement.estimated_acr:
+        lines.append(f"Estimated ACR: ${int(engagement.estimated_acr):,}/mo")
+    if engagement.target_date:
+        target_str = (engagement.target_date.strftime('%b %d, %Y')
+                      if isinstance(engagement.target_date, date)
+                      else str(engagement.target_date))
+        lines.append(f"Target Date: {target_str}")
+    return '\n'.join(lines)
+
+
 def _build_engagement_html_table(engagement) -> str:
     """Build an HTML table of engagement fields for MSX writeback.
 
@@ -526,7 +552,11 @@ def track_engagement_on_milestones(engagement, background: bool = True) -> list[
         print(f"[milestone-tracking] engagement {engagement.id}: no story fields populated, skipping MSX write")
         return [] if not background else None
 
-    story = _build_engagement_html_table(engagement)
+    story_plain = _build_engagement_plain_text(engagement)
+    story_html = _build_engagement_html_table(engagement)
+    # Combine plain text + HTML table so MSX's plain text view is readable
+    # while the HTML view renders the styled table
+    story = f"{story_plain}\n\n{story_html}" if story_plain else story_html
     ref_tag = _ENG_REF.format(id=engagement.id)
     print(f"[milestone-tracking] engagement {engagement.id}: {len(engagement.milestones)} milestones, ref={ref_tag}")
     content = _add_footer(story, ref_tag)
