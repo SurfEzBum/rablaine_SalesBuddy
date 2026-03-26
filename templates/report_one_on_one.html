@@ -103,7 +103,7 @@
                                     <td><small>{{ ms.customer.seller.name if ms.customer and ms.customer.seller else '' }}</small></td>
                                     <td class="text-end">
                                         {% if ms.monthly_usage %}
-                                        <small>${{ '{:,.0f}'.format(ms.monthly_usage) }}/mo</small>
+                                        <small class="text-success">${{ '{:,.0f}'.format(ms.monthly_usage) }}/mo</small>
                                         {% endif %}
                                     </td>
                                     <td class="text-end pe-3">
@@ -259,7 +259,7 @@
                                     <td><small>{{ ms.customer.seller.name if ms.customer and ms.customer.seller else '' }}</small></td>
                                     <td class="text-end">
                                         {% if ms.monthly_usage %}
-                                        <small>${{ '{:,.0f}'.format(ms.monthly_usage) }}/mo</small>
+                                        <small class="text-success">${{ '{:,.0f}'.format(ms.monthly_usage) }}/mo</small>
                                         {% endif %}
                                     </td>
                                     <td class="text-end pe-3">
