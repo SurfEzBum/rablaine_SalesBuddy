@@ -18,6 +18,7 @@ from app.models import db, Customer, Milestone, MsxTask, Opportunity, User, Sync
 from app.services.msx_api import (
     extract_account_id_from_url,
     get_milestones_by_account,
+    get_milestone_comments,
     get_my_milestone_team_ids,
     get_tasks_for_milestones,
     build_milestone_url,
@@ -136,6 +137,15 @@ def sync_all_customer_milestones() -> Dict[str, Any]:
     # Update team membership flags
     _update_team_memberships()
     
+    # Sync comments for milestones I'm on the team for
+    comment_gen = _sync_team_milestone_comments(since=start_time)
+    try:
+        while True:
+            next(comment_gen)
+    except StopIteration as stop:
+        comment_result = stop.value
+        results["comments_synced"] = comment_result.get("comments_synced", 0)
+
     logger.info(
         f"Milestone sync complete: {results['customers_synced']} synced, "
         f"{results['customers_failed']} failed, "
@@ -339,7 +349,7 @@ def sync_all_customer_milestones_stream(
             failed += 1
             err = fetch_data.get('error', 'Fetch failed') if fetch_data else 'No data'
             errors.append(f"{cust_name}: {err}")
-            pct = 70 + int((i / write_count) * 25)  # 70-95%
+            pct = 70 + int((i / write_count) * 5)  # 70-75%
             yield _sse_event('progress', {
                 'current': fetched + i,
                 'total': total,
@@ -361,7 +371,7 @@ def sync_all_customer_milestones_stream(
                 total_deactivated += wr['deactivated']
                 total_opps_created += wr['opportunities_created']
 
-                pct = 70 + int((i / write_count) * 20)  # 70-90%
+                pct = 70 + int((i / write_count) * 5)  # 70-75%
                 yield _sse_event('progress', {
                     'current': fetched + i,
                     'total': total,
@@ -380,25 +390,80 @@ def sync_all_customer_milestones_stream(
             logger.exception(f"Error saving milestones for customer {cust_id}")
 
     # -----------------------------------------------------------------
-    # Phase 2b: Batched task sync (one API call for all milestones)
+    # Phase 2b: Batched task sync (per-batch progress)
     # -----------------------------------------------------------------
-    yield _sse_event('progress', {
-        'current': total,
-        'total': total,
-        'customer': 'Syncing tasks...',
-        'status': 'ok',
-        'progress': 91,
+    yield _sse_event('task_sync_start', {
+        'message': 'Syncing tasks for milestones...',
     })
-    task_result = _sync_all_tasks()
+    task_gen = _sync_all_tasks()
+    try:
+        while True:
+            batch_num, total_batches, info, status = next(task_gen)
+            SyncStatus.update_heartbeat('milestones')
+            pct = 75 + int((batch_num / max(total_batches, 1)) * 21)  # 75-96%
+            yield _sse_event('progress', {
+                'current': batch_num,
+                'total': total_batches,
+                'customer': info,
+                'status': status,
+                'progress': min(pct, 96),
+            })
+    except StopIteration as stop:
+        task_result = stop.value
     total_tasks_created = task_result.get('tasks_created', 0)
     total_tasks_updated = task_result.get('tasks_updated', 0)
     if not task_result.get('success'):
         logger.warning(f"Batched task sync failed: {task_result.get('error')}")
+    yield _sse_event('task_sync_end', {
+        'tasks_created': total_tasks_created,
+        'tasks_updated': total_tasks_updated,
+    })
 
     # -----------------------------------------------------------------
     # Phase 3: Team membership update (one API call)
     # -----------------------------------------------------------------
+    yield _sse_event('progress', {
+        'current': total,
+        'total': total,
+        'customer': 'Updating team memberships...',
+        'status': 'ok',
+        'progress': 97,
+    })
     _update_team_memberships()
+
+    # -----------------------------------------------------------------
+    # Phase 4: Sync comments for milestones I'm on the team for
+    # -----------------------------------------------------------------
+    total_comments_synced = 0
+    total_comments_failed = 0
+    yield _sse_event('comment_sync_start', {
+        'message': 'Syncing forecast comments for team milestones...',
+    })
+    comment_gen = _sync_team_milestone_comments(
+        since=datetime.fromtimestamp(start_time, tz=timezone.utc),
+    )
+    try:
+        while True:
+            current_ms, total_ms, ms_title = next(comment_gen)
+            SyncStatus.update_heartbeat('milestones')
+            pct = 97 + int((current_ms / max(total_ms, 1)) * 2)  # 97-99%
+            yield _sse_event('progress', {
+                'current': current_ms,
+                'total': total_ms,
+                'customer': f'Comments: {ms_title}',
+                'status': 'ok',
+                'progress': min(pct, 99),
+            })
+    except StopIteration as stop:
+        comment_result = stop.value
+        total_comments_synced = comment_result.get('comments_synced', 0)
+        total_comments_failed = comment_result.get('comments_failed', 0)
+        total_comments_skipped = comment_result.get('comments_skipped', 0)
+    yield _sse_event('comment_sync_end', {
+        'comments_synced': total_comments_synced,
+        'comments_skipped': total_comments_skipped,
+        'comments_failed': total_comments_failed,
+    })
 
     duration = round(_time.time() - start_time, 1)
     sync_success = synced > 0 or failed == 0
@@ -414,6 +479,7 @@ def sync_all_customer_milestones_stream(
             'opportunities_created': total_opps_created,
             'tasks_created': total_tasks_created,
             'tasks_updated': total_tasks_updated,
+            'comments_synced': total_comments_synced,
         }),
     )
 
@@ -428,6 +494,7 @@ def sync_all_customer_milestones_stream(
         'opportunities_created': total_opps_created,
         'tasks_created': total_tasks_created,
         'tasks_updated': total_tasks_updated,
+        'comments_synced': total_comments_synced,
         'duration': duration,
         'errors': errors[:5],
     })
@@ -624,15 +691,19 @@ def _apply_customer_milestones(
     return result
 
 
-def _sync_all_tasks() -> Dict[str, Any]:
+def _sync_all_tasks() -> Generator[
+    Tuple[int, int, str, str], None, Dict[str, Any]
+]:
     """
-    Batch-sync all MSX tasks in one API call instead of per-customer.
+    Batch-sync all MSX tasks, yielding progress per API batch.
 
     Collects all milestone MSX IDs across all customers, fetches tasks
-    in a single batched call (internally batched by 75 IDs per request),
-    then upserts all MsxTask records in one commit.
+    in batched API calls (75 IDs per request), upserting MsxTask records
+    after each batch.
 
-    Returns:
+    Yields (batch_num, total_batches, info_str) tuples for progress.
+
+    Returns (via generator .value after StopIteration):
         Dict with success, tasks_created, tasks_updated, error.
     """
     result = {"success": False, "tasks_created": 0, "tasks_updated": 0, "error": ""}
@@ -650,69 +721,103 @@ def _sync_all_tasks() -> Dict[str, Any]:
         ms.msx_milestone_id.lower(): ms.id for ms in all_milestones
     }
 
-    # One batched API call for all milestone IDs
-    fetch_result = get_tasks_for_milestones(list(ms_id_map.keys()))
-    if not fetch_result.get("success"):
-        result["error"] = fetch_result.get("error", "Task fetch failed")
-        return result
+    all_msx_ids = list(ms_id_map.keys())
+    batch_size = 75
+    total_batches = math.ceil(len(all_msx_ids) / batch_size)
 
-    msx_tasks = fetch_result.get("tasks", [])
-    if not msx_tasks:
-        result["success"] = True
-        return result
-
-    # Pre-load existing MsxTask records
-    existing_task_ids = [t["task_id"] for t in msx_tasks]
+    # Pre-load existing MsxTask records for faster upserts
     existing_tasks_map: Dict[str, MsxTask] = {}
-    for task in MsxTask.query.filter(
-        MsxTask.msx_task_id.in_(existing_task_ids)
-    ).all():
-        existing_tasks_map[task.msx_task_id] = task
+    for task in MsxTask.query.all():
+        if task.msx_task_id:
+            existing_tasks_map[task.msx_task_id] = task
 
     cat_lookup = {
         c["value"]: {"name": c["label"], "is_hok": c["is_hok"]}
         for c in TASK_CATEGORIES
     }
 
-    for t in msx_tasks:
-        task_id = t["task_id"]
-        milestone_msx_id = t.get("milestone_msx_id", "").lower()
-        local_milestone_id = ms_id_map.get(milestone_msx_id)
-        if not local_milestone_id:
+    for batch_num in range(total_batches):
+        batch_start = batch_num * batch_size
+        batch_ids = all_msx_ids[batch_start:batch_start + batch_size]
+
+        yield (
+            batch_num + 1,
+            total_batches,
+            f"Tasks batch {batch_num + 1}/{total_batches} ({len(batch_ids)} milestones)",
+            'fetching',
+        )
+
+        fetch_result = get_tasks_for_milestones(batch_ids)
+        if not fetch_result.get("success"):
+            logger.warning(
+                f"Task batch {batch_num + 1} failed: {fetch_result.get('error')}"
+            )
+            if not result["error"]:
+                result["error"] = fetch_result.get("error", "Task fetch failed")
+            yield (
+                batch_num + 1,
+                total_batches,
+                f"Tasks batch {batch_num + 1}/{total_batches} - failed",
+                'error',
+            )
             continue
 
-        category_code = t.get("task_category")
-        cat_info = cat_lookup.get(category_code, {})
-        due_date = _parse_msx_date(t.get("due_date"))
+        msx_tasks = fetch_result.get("tasks", [])
+        batch_created = 0
+        batch_updated = 0
+        for t in msx_tasks:
+            task_id = t["task_id"]
+            milestone_msx_id = t.get("milestone_msx_id", "").lower()
+            local_milestone_id = ms_id_map.get(milestone_msx_id)
+            if not local_milestone_id:
+                continue
 
-        existing = existing_tasks_map.get(task_id)
-        if existing:
-            existing.subject = t.get("subject") or existing.subject
-            existing.description = t.get("description")
-            existing.task_category = category_code or existing.task_category
-            existing.task_category_name = cat_info.get("name") or existing.task_category_name
-            existing.is_hok = cat_info.get("is_hok", existing.is_hok)
-            existing.duration_minutes = t.get("duration_minutes") or existing.duration_minutes
-            existing.due_date = due_date
-            existing.msx_task_url = t.get("task_url") or existing.msx_task_url
-            existing.milestone_id = local_milestone_id
-            result["tasks_updated"] += 1
-        else:
-            new_task = MsxTask(
-                msx_task_id=task_id,
-                msx_task_url=t.get("task_url"),
-                subject=t.get("subject", ""),
-                description=t.get("description"),
-                task_category=category_code or 0,
-                task_category_name=cat_info.get("name"),
-                is_hok=cat_info.get("is_hok", False),
-                duration_minutes=t.get("duration_minutes") or 60,
-                due_date=due_date,
-                milestone_id=local_milestone_id,
-            )
-            db.session.add(new_task)
-            existing_tasks_map[task_id] = new_task
-            result["tasks_created"] += 1
+            category_code = t.get("task_category")
+            cat_info = cat_lookup.get(category_code, {})
+            due_date = _parse_msx_date(t.get("due_date"))
+
+            existing = existing_tasks_map.get(task_id)
+            if existing:
+                existing.subject = t.get("subject") or existing.subject
+                existing.description = t.get("description")
+                existing.task_category = category_code or existing.task_category
+                existing.task_category_name = (
+                    cat_info.get("name") or existing.task_category_name
+                )
+                existing.is_hok = cat_info.get("is_hok", existing.is_hok)
+                existing.duration_minutes = (
+                    t.get("duration_minutes") or existing.duration_minutes
+                )
+                existing.due_date = due_date
+                existing.msx_task_url = t.get("task_url") or existing.msx_task_url
+                existing.milestone_id = local_milestone_id
+                result["tasks_updated"] += 1
+                batch_updated += 1
+            else:
+                new_task = MsxTask(
+                    msx_task_id=task_id,
+                    msx_task_url=t.get("task_url"),
+                    subject=t.get("subject", ""),
+                    description=t.get("description"),
+                    task_category=category_code or 0,
+                    task_category_name=cat_info.get("name"),
+                    is_hok=cat_info.get("is_hok", False),
+                    duration_minutes=t.get("duration_minutes") or 60,
+                    due_date=due_date,
+                    milestone_id=local_milestone_id,
+                )
+                db.session.add(new_task)
+                existing_tasks_map[task_id] = new_task
+                result["tasks_created"] += 1
+                batch_created += 1
+
+        yield (
+            batch_num + 1,
+            total_batches,
+            f"Tasks batch {batch_num + 1}/{total_batches} done"
+            f" ({batch_created} new, {batch_updated} updated)",
+            'ok',
+        )
 
     try:
         db.session.commit()
@@ -840,6 +945,114 @@ def _sync_customer_tasks(
     return result
 
 
+def _sync_team_milestone_comments(
+    since: Optional[datetime] = None,
+) -> Generator[
+    Tuple[int, int, str], None, Dict[str, Any]
+]:
+    """
+    Sync forecast comments from MSX for milestones where the user is on the team.
+
+    Skips milestones whose comments were already cached during this sync
+    (details_fetched_at >= since).
+
+    Args:
+        since: If provided, skip milestones with details_fetched_at >= this time
+               (they already got comments from the bulk milestone fetch).
+
+    Yields (current, total, milestone_title) tuples for progress reporting,
+    then returns the final result dict via generator return value.
+
+    Returns (via generator .value after StopIteration):
+        Dict with:
+        - success: bool
+        - comments_synced: int (milestones whose comments were updated)
+        - comments_skipped: int (already cached from bulk fetch)
+        - comments_failed: int
+        - error: str if completely failed
+    """
+    result = {
+        "success": True,
+        "comments_synced": 0,
+        "comments_skipped": 0,
+        "comments_failed": 0,
+        "error": "",
+    }
+
+    # Get on-my-team milestones with MSX IDs that were part of this sync.
+    # The bulk fetch (Phase 1) uses open_opportunities_only + current_fy_only,
+    # so we limit Phase 4 to milestones with a recent last_synced_at to avoid
+    # individually fetching comments for old/closed milestones.
+    since_naive = since.replace(tzinfo=None) if (since and since.tzinfo) else since
+    base_filter = Milestone.query.filter(
+        Milestone.on_my_team.is_(True),
+        Milestone.msx_milestone_id.isnot(None),
+    )
+    if since_naive:
+        base_filter = base_filter.filter(Milestone.last_synced_at >= since_naive)
+    team_milestones = base_filter.all()
+
+    if not team_milestones:
+        return result
+
+    # Filter out milestones already cached during this sync
+    if since_naive:
+        need_fetch = [
+            ms for ms in team_milestones
+            if not ms.details_fetched_at or ms.details_fetched_at < since_naive
+        ]
+        result["comments_skipped"] = len(team_milestones) - len(need_fetch)
+    else:
+        need_fetch = team_milestones
+
+    if not need_fetch:
+        logger.info(
+            f"All {len(team_milestones)} team milestones already have "
+            f"fresh comments from bulk fetch - skipping comment sync"
+        )
+        return result
+
+    total = len(need_fetch)
+    now = datetime.now(timezone.utc)
+
+    for i, ms in enumerate(need_fetch, 1):
+        yield (i, total, ms.title or ms.milestone_number or "Unknown")
+
+        if is_vpn_blocked():
+            result["error"] = "VPN blocked during comment sync"
+            break
+
+        try:
+            comment_result = get_milestone_comments(ms.msx_milestone_id)
+            if comment_result.get("success"):
+                ms.cached_comments_json = json.dumps(
+                    comment_result.get("comments", [])
+                )
+                ms.details_fetched_at = now
+                result["comments_synced"] += 1
+            else:
+                result["comments_failed"] += 1
+                logger.warning(
+                    f"Failed to fetch comments for milestone {ms.msx_milestone_id}: "
+                    f"{comment_result.get('error')}"
+                )
+        except Exception as e:
+            result["comments_failed"] += 1
+            logger.exception(
+                f"Error fetching comments for milestone {ms.msx_milestone_id}"
+            )
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        result["success"] = False
+        result["error"] = f"Database error saving comments: {str(e)}"
+        logger.exception("Error committing milestone comments")
+
+    return result
+
+
 def _update_milestone_from_msx(
     milestone: Milestone,
     msx_data: Dict[str, Any],
@@ -863,6 +1076,11 @@ def _update_milestone_from_msx(
     milestone.last_synced_at = now
     milestone.committed_at = _parse_msx_date(msx_data.get("committed_on"))
     milestone.completed_at = _parse_msx_date(msx_data.get("completed_on"))
+    # Cache comments if included in the bulk fetch (None = field not requested,
+    # so we only update when the key is present in the dict)
+    if "comments_json" in msx_data:
+        milestone.cached_comments_json = msx_data["comments_json"] or "[]"
+        milestone.details_fetched_at = now
 
 
 def _create_milestone_from_msx(
@@ -872,7 +1090,7 @@ def _create_milestone_from_msx(
     now: datetime,
 ) -> Milestone:
     """Create a new Milestone from MSX data."""
-    return Milestone(
+    ms = Milestone(
         msx_milestone_id=msx_data["id"],
         milestone_number=msx_data.get("number", ""),
         url=msx_data.get("url", ""),
@@ -890,6 +1108,11 @@ def _create_milestone_from_msx(
         committed_at=_parse_msx_date(msx_data.get("committed_on")),
         completed_at=_parse_msx_date(msx_data.get("completed_on")),
     )
+    # Cache comments if included in the bulk fetch
+    if "comments_json" in msx_data:
+        ms.cached_comments_json = msx_data["comments_json"] or "[]"
+        ms.details_fetched_at = now
+    return ms
 
 
 def _upsert_opportunity(

@@ -207,6 +207,8 @@ function syncMilestones() {
 
                 if (data.status === 'fetching') {
                     detail.innerHTML = `<i class="bi bi-cloud-download text-info"></i> Fetching: ${data.customer}`;
+                } else if (data.status === 'retrying') {
+                    detail.innerHTML = `<i class="bi bi-arrow-repeat text-warning"></i> ${data.customer}`;
                 } else if (data.status === 'ok') {
                     let info = `<i class="bi bi-check-circle text-success"></i> ${data.customer}`;
                     if (data.created > 0 || data.updated > 0) {
@@ -231,6 +233,22 @@ function syncMilestones() {
                     '<strong>VPN Required:</strong> ' + (data.message || 'IP address is blocked.') +
                     (data.skipped ? ' (' + data.skipped + ' customers skipped)' : '');
                 detail.innerHTML = '';
+            } else if (type === 'task_sync_start') {
+                detail.innerHTML = `<i class="bi bi-list-task text-info"></i> ${data.message}`;
+            } else if (type === 'task_sync_end') {
+                let taskInfo = '';
+                let taskParts = [];
+                if (data.tasks_created > 0) taskParts.push(`${data.tasks_created} new`);
+                if (data.tasks_updated > 0) taskParts.push(`${data.tasks_updated} updated`);
+                taskInfo = taskParts.length > 0 ? taskParts.join(', ') : 'No task changes';
+                detail.innerHTML = `<i class="bi bi-list-task text-success"></i> Tasks: ${taskInfo}`;
+            } else if (type === 'comment_sync_start') {
+                detail.innerHTML = `<i class="bi bi-chat-dots text-info"></i> ${data.message}`;
+            } else if (type === 'comment_sync_end') {
+                let commentInfo = `${data.comments_synced} milestone(s) comments fetched`;
+                if (data.comments_skipped > 0) commentInfo += `, ${data.comments_skipped} already cached`;
+                if (data.comments_failed > 0) commentInfo += `, ${data.comments_failed} failed`;
+                detail.innerHTML = `<i class="bi bi-chat-dots-fill text-success"></i> ${commentInfo}`;
             } else if (type === 'complete') {
                 window.removeEventListener('beforeunload', warnOnLeave);
                 progressBar.classList.remove('progress-bar-animated');
@@ -259,14 +277,21 @@ function syncMilestones() {
                         if (data.tasks_updated > 0) taskParts.push(`${data.tasks_updated} updated`);
                         taskText = ` Tasks: ${taskParts.join(', ')}.`;
                     }
-                    msg.innerHTML = `<i class="bi bi-check-circle-fill"></i> Sync complete! ` +
+                    let commentText = '';
+                    if (data.comments_synced > 0) {
+                        commentText = ` Comments: ${data.comments_synced} cached.`;
+                    }
+                    let resultHtml = `<i class="bi bi-check-circle-fill"></i> Sync complete! ` +
                         `${data.synced} of ${data.total} customers synced in ${data.duration}s. ` +
-                        `Milestones: ${summary}.${oppText}${taskText}`;
+                        `Milestones: ${summary}.${oppText}${taskText}${commentText}`;
                     if (data.errors && data.errors.length > 0) {
-                        msg.innerHTML += `<br><small class="text-warning"><i class="bi bi-exclamation-triangle"></i> ` +
+                        resultHtml += `<br><small class="text-warning"><i class="bi bi-exclamation-triangle"></i> ` +
                             `${data.errors.length} error(s): ${data.errors.slice(0, 3).join('; ')}</small>`;
                     }
-                    setTimeout(() => window.location.reload(), 2500);
+                    sessionStorage.setItem('syncResult', JSON.stringify({
+                        html: resultHtml, className: 'alert alert-success mb-4'
+                    }));
+                    window.location.reload();
                 } else {
                     const brToggle2 = document.getElementById('syncBrainrotToggle');
                     if (brToggle2) brToggle2.classList.add('d-none');
@@ -296,6 +321,24 @@ function syncMilestones() {
         if (window.setBrainrot) window.setBrainrot(false);
     });
 }
+
+// --- Show sync results saved before reload ---
+(function() {
+    const saved = sessionStorage.getItem('syncResult');
+    if (saved) {
+        sessionStorage.removeItem('syncResult');
+        try {
+            const result = JSON.parse(saved);
+            const alertEl = document.getElementById('syncAlert');
+            const msg = document.getElementById('syncMessage');
+            if (alertEl && msg) {
+                alertEl.className = result.className;
+                msg.innerHTML = result.html;
+                document.getElementById('syncProgressWrap').classList.add('d-none');
+            }
+        } catch (e) { /* ignore parse errors */ }
+    }
+})();
 
 // --- Wire up brainrot checkbox for milestone sync ---
 (function() {
