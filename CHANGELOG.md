@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/6/2026
+## 7/6/2026 - bfc866b
 
 - Fixed WorkIQ-powered features (meeting attendee lookup, customer and partner contact scraping, daily meeting sync, and action-item suggestions) silently returning nothing. WorkIQ had started splitting some values across lines, which broke the response parsing. Sales Buddy now repairs those responses before reading them, so these features work again.
 
