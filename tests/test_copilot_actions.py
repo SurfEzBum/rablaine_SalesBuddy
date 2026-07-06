@@ -93,6 +93,22 @@ class TestParseActionItems:
         items = parse_action_items(response)
         assert len(items) == 1
 
+    def test_recovers_raw_newlines_inside_strings(self):
+        """WorkIQ sometimes splits string values across lines with raw
+        newline bytes, which breaks strict json.loads. The parser must
+        repair these and still return the items. Regression for the
+        2026-07-06 boot-time parse failure."""
+        from app.services.copilot_actions import parse_action_items
+        response = (
+            '[{"title":"Provide Purview file-format and third-party integration\n'
+            'documentation","description":"Docs committed as a follow-up and\n'
+            'remains listed as a meeting\ntask.","sourceurl":"",'
+            '"lastactivitydate":"2026-06-30"}]'
+        )
+        items = parse_action_items(response)
+        assert len(items) == 1
+        assert 'Purview' in items[0]['title']
+
 
 class TestShouldSync:
     """Tests for the sync-needed check."""

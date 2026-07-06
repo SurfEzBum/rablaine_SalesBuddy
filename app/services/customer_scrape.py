@@ -133,6 +133,7 @@ def _build_scrape_prompt(customer_name: str, domain_hint: str) -> str:
 
 def _parse_response(raw: str) -> Dict[str, Any]:
     """Parse the WorkIQ response into structured data."""
+    from app.services.workiq_service import repair_json_control_chars
     text = raw.strip()
     text = re.sub(r"^```(?:json)?\s*\n?", "", text)
     text = re.sub(r"\n?```\s*$", "", text)
@@ -141,6 +142,11 @@ def _parse_response(raw: str) -> Dict[str, Any]:
     brace_end = text.rfind("}")
     if brace_start >= 0 and brace_end > brace_start:
         text = text[brace_start:brace_end + 1]
+
+    # WorkIQ sometimes emits raw newline bytes inside JSON string values
+    # (e.g. a contact name split across lines). Escape them so json.loads
+    # doesn't fail with "Invalid control character".
+    text = repair_json_control_chars(text)
 
     try:
         data = json.loads(text)

@@ -128,6 +128,8 @@ def parse_action_items(response: str) -> list[dict]:
     if not response or not response.strip():
         return []
 
+    from app.services.workiq_service import repair_json_control_chars
+
     text = response.strip()
 
     # Try to extract JSON from markdown code block if wrapped
@@ -149,7 +151,7 @@ def parse_action_items(response: str) -> list[dict]:
 
     try:
         import json
-        items = json.loads(text[arr_start:arr_end + 1])
+        items = json.loads(repair_json_control_chars(text[arr_start:arr_end + 1]))
     except (json.JSONDecodeError, ValueError):
         try:
             from app.services.telemetry_shipper import queue_workiq_call

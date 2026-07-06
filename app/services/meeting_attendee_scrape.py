@@ -104,6 +104,7 @@ def _build_attendee_prompt(meeting_title: str, meeting_date: str) -> str:
 
 def _parse_response(raw: str) -> List[Dict[str, str]]:
     """Parse WorkIQ response into list of attendee dicts."""
+    from app.services.workiq_service import repair_json_control_chars
     text = raw.strip()
     text = re.sub(r"^```(?:json)?\s*\n?", "", text)
     text = re.sub(r"\n?```\s*$", "", text)
@@ -112,6 +113,11 @@ def _parse_response(raw: str) -> List[Dict[str, str]]:
     brace_end = text.rfind("}")
     if brace_start >= 0 and brace_end > brace_start:
         text = text[brace_start:brace_end + 1]
+
+    # WorkIQ sometimes wraps attendee names across lines, emitting raw
+    # newline bytes inside JSON string values. Escape them so json.loads
+    # doesn't choke on "Invalid control character".
+    text = repair_json_control_chars(text)
 
     try:
         data = json.loads(text)
