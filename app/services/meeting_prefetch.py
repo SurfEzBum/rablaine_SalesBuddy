@@ -97,10 +97,14 @@ def _extract_json_array(response: str) -> List[Dict[str, Any]]:
     """
     if not response:
         raise ValueError("empty WorkIQ response")
+    from app.services.workiq_service import repair_json_control_chars
     match = _JSON_ARRAY_RE.search(response)
     if not match:
         raise ValueError("no JSON array found in WorkIQ response")
-    raw = match.group(0)
+    # WorkIQ sometimes emits raw newline bytes inside JSON string values
+    # (e.g. an attendee name split across lines). Escape them so json.loads
+    # doesn't fail with "Invalid control character".
+    raw = repair_json_control_chars(match.group(0))
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:

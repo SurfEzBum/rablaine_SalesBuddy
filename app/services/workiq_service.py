@@ -37,6 +37,63 @@ def _strip_terminal_escapes(text: str) -> str:
     return text
 
 
+def repair_json_control_chars(text: str) -> str:
+    """Escape raw control characters that appear inside JSON string values.
+
+    WorkIQ is LLM-backed and sometimes emits literal newline, carriage
+    return, or tab bytes *inside* a JSON string value - e.g. an attendee
+    name wrapped across two lines like ``"name":"Audra\\nCarlisle"`` where
+    the ``\\n`` is a real 0x0A byte, not the two-character escape. The JSON
+    spec forbids unescaped control characters inside strings, so
+    ``json.loads`` raises ``Invalid control character at: ...`` and the
+    whole parse fails.
+
+    This walks the text tracking whether we're inside a quoted string
+    (respecting backslash escapes) and replaces any raw control character
+    found inside a string with its valid JSON escape. Control characters
+    and whitespace *between* tokens (structural formatting) are left
+    untouched, so well-formed responses pass through unchanged.
+    """
+    if not text:
+        return text
+
+    out: List[str] = []
+    in_string = False
+    escaped = False
+    for ch in text:
+        if not in_string:
+            out.append(ch)
+            if ch == '"':
+                in_string = True
+            continue
+
+        # Inside a quoted string.
+        if escaped:
+            out.append(ch)
+            escaped = False
+            continue
+        if ch == '\\':
+            out.append(ch)
+            escaped = True
+            continue
+        if ch == '"':
+            out.append(ch)
+            in_string = False
+            continue
+        if ch == '\n':
+            out.append('\\n')
+        elif ch == '\r':
+            out.append('\\r')
+        elif ch == '\t':
+            out.append('\\t')
+        elif ord(ch) < 0x20:
+            out.append('\\u%04x' % ord(ch))
+        else:
+            out.append(ch)
+
+    return ''.join(out)
+
+
 def _record_workiq_call(operation: str, status: str,
                         failure_type: Optional[str] = None,
                         duration_ms: Optional[float] = None) -> None:

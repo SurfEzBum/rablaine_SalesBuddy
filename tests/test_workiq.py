@@ -736,3 +736,68 @@ class TestNormalizeWorkiqResponse:
         assert eng['Risks/Blockers'] == 'Compliance review pending'
 
 
+class TestRepairJsonControlChars:
+    """Test repair of raw control characters inside JSON string values.
+
+    Regression coverage for the 2026-07-06 WorkIQ output drift where
+    attendee names came back split across lines with literal newline bytes
+    inside the JSON string values, breaking json.loads.
+    """
+
+    def test_raw_newline_inside_string_is_escaped_and_parses(self):
+        """A literal newline inside a string value must become \\n and parse."""
+        import json
+        from app.services.workiq_service import repair_json_control_chars
+        broken = '{"attendees":[{"name":"Audra\nCarlisle","email":"a@x.com"}]}'
+        repaired = repair_json_control_chars(broken)
+        data = json.loads(repaired)  # must not raise
+        assert data['attendees'][0]['name'] == 'Audra\nCarlisle'
+
+    def test_raw_tab_and_carriage_return_inside_string(self):
+        """Tabs and CRs inside strings are escaped too."""
+        import json
+        from app.services.workiq_service import repair_json_control_chars
+        broken = '{"note":"line1\r\n\tindented"}'
+        data = json.loads(repair_json_control_chars(broken))
+        assert data['note'] == 'line1\r\n\tindented'
+
+    def test_structural_whitespace_is_untouched(self):
+        """Newlines/tabs BETWEEN tokens (formatting) stay valid and parse."""
+        import json
+        from app.services.workiq_service import repair_json_control_chars
+        pretty = '{\n  "a": 1,\n\t"b": [\n    2,\n    3\n  ]\n}'
+        assert json.loads(repair_json_control_chars(pretty)) == {'a': 1, 'b': [2, 3]}
+
+    def test_already_escaped_sequences_preserved(self):
+        """Properly escaped \\n (backslash + n) must not be double-escaped."""
+        import json
+        from app.services.workiq_service import repair_json_control_chars
+        good = '{"name":"Line1\\nLine2"}'
+        assert json.loads(repair_json_control_chars(good))['name'] == 'Line1\nLine2'
+
+    def test_escaped_quote_does_not_end_string_early(self):
+        """A \\\" inside a string must not be treated as the closing quote."""
+        import json
+        from app.services.workiq_service import repair_json_control_chars
+        good = '{"q":"He said \\"hi\\"\nthere"}'
+        data = json.loads(repair_json_control_chars(good))
+        assert data['q'] == 'He said "hi"\nthere'
+
+    def test_empty_and_none_safe(self):
+        """Empty string passes through unchanged."""
+        from app.services.workiq_service import repair_json_control_chars
+        assert repair_json_control_chars('') == ''
+
+    def test_attendee_parser_recovers_multiline_names(self):
+        """End-to-end: the attendee parser now recovers from split names."""
+        from app.services.meeting_attendee_scrape import _parse_response
+        raw = (
+            '{"attendees":[{"name":"Audra\nCarlisle","email":"acarlisle@x.com",'
+            '"title":null},{"name":"Alex\nBlaine","email":"alex@x.com",'
+            '"title":null}]}\n'
+        )
+        attendees = _parse_response(raw)
+        assert len(attendees) == 2
+        assert attendees[0]['email'] == 'acarlisle@x.com'
+
+
