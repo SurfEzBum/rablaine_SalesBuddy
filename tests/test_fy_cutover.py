@@ -154,6 +154,35 @@ class TestFYCutoverService:
             assert summary['purged_customers'] == 0
             assert summary['kept_customers'] >= 3
 
+    def test_finalize_purges_customer_with_contacts(self, app, sample_data):
+        """Purging a customer that has contacts must not raise NOT NULL errors.
+
+        Regression: customer_contacts.customer_id is NOT NULL and has no delete
+        cascade, so deleting a customer without first removing its contacts
+        raised an IntegrityError during autoflush.
+        """
+        with app.app_context():
+            from app.models import Customer, CustomerContact, db
+            from app.services.fy_cutover import enter_transition_mode, finalize_alignments
+
+            enter_transition_mode('FY25')
+
+            # Attach contacts to Globex (1002), which will be purged
+            globex = Customer.query.filter_by(tpid=1002).first()
+            db.session.add_all([
+                CustomerContact(customer_id=globex.id, name='Jane Doe'),
+                CustomerContact(customer_id=globex.id, name='John Roe'),
+            ])
+            db.session.commit()
+
+            # Keep only 1001 - should purge Globex and its contacts cleanly
+            summary = finalize_alignments([1001])
+            assert summary['purged_customers'] >= 2
+
+            # Globex and its contacts are gone; no orphaned/NULL contacts remain
+            assert Customer.query.filter_by(tpid=1002).first() is None
+            assert CustomerContact.query.filter_by(customer_id=globex.id).count() == 0
+
 
 class TestFYAdminRoutes:
     """Tests for FY cutover admin API routes."""
