@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/8/2026
+## 7/8/2026 - f7bb47b
 
 - Fixed the fiscal year "Finalize & Purge Orphans" step failing when any purged customer had contacts saved. The purge now removes a customer's contacts along with its notes, engagements, milestones, and opportunities, so finalization completes cleanly.
 
