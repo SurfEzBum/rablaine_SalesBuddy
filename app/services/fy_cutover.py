@@ -20,6 +20,7 @@ from sqlalchemy import create_engine, text
 
 from app.models import (
     Customer,
+    CustomerContact,
     Engagement,
     Milestone,
     MsxTask,
@@ -311,6 +312,7 @@ def finalize_alignments(synced_tpids: list[int]) -> dict:
         Engagement.query.filter_by(customer_id=customer.id).delete()
         Note.query.filter_by(customer_id=customer.id).delete()
         Opportunity.query.filter_by(customer_id=customer.id).delete()
+        CustomerContact.query.filter_by(customer_id=customer.id).delete()
 
         # Delete revenue data via raw SQL (tables may not exist in all environments)
         cid = customer.id
