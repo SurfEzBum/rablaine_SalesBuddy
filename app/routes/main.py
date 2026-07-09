@@ -63,10 +63,27 @@ def health_check():
     try:
         # Test database connectivity with a simple query
         db.session.execute(db.text('SELECT 1'))
-        
+
+        # Informational: worker process liveness. Does NOT affect web health -
+        # the web server is healthy whether or not the worker is running; the
+        # supervisor is responsible for restarting a dead worker.
+        worker = 'unknown'
+        try:
+            from app.models import SyncStatus
+            state = SyncStatus.get_status('worker_process').get('state')
+            if state == 'in_progress':
+                worker = 'alive'
+            elif state == 'never_run':
+                worker = 'not_started'
+            else:
+                worker = 'stale'
+        except Exception:
+            worker = 'unknown'
+
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
+            'worker': worker,
             'timestamp': datetime.now(timezone.utc).isoformat()
         }), 200
     except Exception as e:

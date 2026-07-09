@@ -27,6 +27,7 @@ def lc(tmp_path, monkeypatch):
     monkeypatch.setattr(lifecycle, "_lifecycle_logger", None)
     monkeypatch.setattr(lifecycle, "_marker_path_cache", None)
     monkeypatch.setattr(lifecycle, "_shutdown_recorded", threading.Event())
+    monkeypatch.setattr(lifecycle, "_role", None)
 
     # The named logger is process-global; clear handlers so each test starts
     # clean and does not accumulate duplicate file handlers.
@@ -106,3 +107,13 @@ def test_init_lifecycle_logging_noop_under_testing(lc, tmp_path):
     # Nothing should be written and no marker created under TESTING.
     assert _read_events(tmp_path) == []
     assert lc._read_marker() is None
+
+
+def test_role_tags_events_and_marker(lc, tmp_path, monkeypatch):
+    monkeypatch.setattr(lc, "_role", "worker")
+
+    lc._emit("boot", commit="x")
+
+    events = _read_events(tmp_path)
+    assert events[0]["role"] == "worker"
+    assert lc._marker_path().name == "running-worker.marker"

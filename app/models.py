@@ -1871,6 +1871,52 @@ class SyncStatus(db.Model):
         return f'<SyncStatus {self.sync_type} success={self.success}>'
 
 
+class Job(db.Model):
+    """A durable background job in the SQLite-backed work queue.
+
+    The queue decouples background work (scheduled syncs, backups, prefetch)
+    from the web request process. A separate worker process claims pending
+    jobs, runs them with periodic heartbeats, and marks them done or failed.
+    Because the queue lives in SQLite, jobs survive a restart, and a job that
+    was running when the worker died is detectable (stale heartbeat) and can
+    be reclaimed and retried.
+    """
+    __tablename__ = 'jobs'
+
+    STATUS_PENDING = 'pending'
+    STATUS_RUNNING = 'running'
+    STATUS_DONE = 'done'
+    STATUS_FAILED = 'failed'
+
+    # A running job whose heartbeat is older than this is treated as dead
+    # (worker crashed or was killed mid-job) and is eligible for reclaim.
+    HEARTBEAT_STALE_SECONDS = 120
+
+    id = db.Column(db.Integer, primary_key=True)
+    job_type = db.Column(db.String(64), nullable=False, index=True)
+    status = db.Column(db.String(16), nullable=False,
+                       default=STATUS_PENDING, index=True)
+    payload = db.Column(db.Text, nullable=True)  # JSON string, handler-specific
+    # When set, enqueue is idempotent: a new job is skipped while another job
+    # with the same key is still pending or running (debounce / coalescing).
+    dedupe_key = db.Column(db.String(200), nullable=True, index=True)
+    priority = db.Column(db.Integer, nullable=False, default=0)  # higher first
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    max_attempts = db.Column(db.Integer, nullable=False, default=3)
+    # Earliest time the job may run (retry backoff / deferred scheduling).
+    available_at = db.Column(db.DateTime, nullable=True)
+    heartbeat_at = db.Column(db.DateTime, nullable=True)
+    claimed_by = db.Column(db.String(64), nullable=True)  # worker id
+    last_error = db.Column(db.Text, nullable=True)
+    result = db.Column(db.Text, nullable=True)  # JSON string
+    created_at = db.Column(db.DateTime, default=utc_now, index=True)
+    started_at = db.Column(db.DateTime, nullable=True)
+    finished_at = db.Column(db.DateTime, nullable=True)
+
+    def __repr__(self) -> str:
+        return f'<Job {self.id} {self.job_type} {self.status}>'
+
+
 class ConnectExport(db.Model):
     """Record of a Connect self-evaluation export for tracking date ranges."""
     __tablename__ = 'connect_exports'
