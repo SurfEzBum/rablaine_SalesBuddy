@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/9/2026
+
+- Background jobs (MSX syncs, meeting prefetch, milestone updates, health checks) now run in a separate worker process from the web server. A slow or stuck background sync can no longer freeze or take down the app you're actively using - the web app stays responsive on its own, and it can now report whether the background worker is alive.
+
 ## 7/9/2026 - e205d2a
 
 - Customer backups now save more reliably. The per-customer JSON files written to your OneDrive backup folder no longer get skipped when OneDrive briefly locks a file mid-sync (the write is retried), and any edit made right before you close the app is now flushed to backup instead of being lost.
