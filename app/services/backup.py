@@ -61,7 +61,26 @@ _ONEDRIVE_ORG_NAME = "Microsoft"
 # Subfolder path we create/look for inside the OneDrive root.
 # Changed from "SalesBuddy_Backups" to "Backups/SalesBuddy" for cleaner
 # organization under a shared Backups umbrella.
-_SALESBUDDY_BACKUPS_DIR = os.path.join("Backups", "SalesBuddy")
+#
+# The leaf is environment-aware: development writes to "SalesBuddyDev" so a dev
+# instance never collides with (or overwrites) a production customer's backup,
+# which is keyed by TPID. Both trees live under the same "Backups" umbrella.
+_BACKUPS_UMBRELLA_DIR = "Backups"
+
+
+def _is_development() -> bool:
+    """Return True when running under FLASK_ENV=development."""
+    return os.environ.get("FLASK_ENV", "").strip().lower() == "development"
+
+
+def _backups_subdir() -> str:
+    """Return the OneDrive backup subfolder, isolated per environment.
+
+    Production writes to ``Backups/SalesBuddy``; development writes to
+    ``Backups/SalesBuddyDev``.
+    """
+    leaf = "SalesBuddyDev" if _is_development() else "SalesBuddy"
+    return os.path.join(_BACKUPS_UMBRELLA_DIR, leaf)
 
 
 def _get_onedrive_path_from_db() -> str:
@@ -126,7 +145,7 @@ def detect_onedrive_paths(*, business_only: bool = True) -> List[Dict[str, Any]]
         is_biz = _is_business_path(normalized, source)
         if business_only and not is_biz:
             return
-        suggested = os.path.join(normalized, _SALESBUDDY_BACKUPS_DIR)
+        suggested = os.path.join(normalized, _backups_subdir())
         candidates.append({
             "path": normalized,
             "source": source,
@@ -228,12 +247,12 @@ def _get_backup_root() -> Optional[str]:
 
     Resolution order:
     1. ``UserPreference.onedrive_path`` in the database - derive
-       ``{onedrive_path}/Backups/SalesBuddy``.
+       ``{onedrive_path}/Backups/SalesBuddy`` (``SalesBuddyDev`` in dev).
     2. Auto-detect from OneDrive for Business (``get_auto_detected_backup_path``).
     """
     onedrive = _get_onedrive_path_from_db()
     if onedrive:
-        return os.path.join(onedrive, "Backups", "SalesBuddy")
+        return os.path.join(onedrive, _backups_subdir())
 
     # Fallback: auto-detect
     return get_auto_detected_backup_path()

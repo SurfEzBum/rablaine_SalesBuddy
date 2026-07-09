@@ -5,6 +5,7 @@ file locks, and flush_pending_backups which lands debounced backups on exit.
 """
 import contextlib
 import json
+import os
 
 import pytest
 
@@ -87,3 +88,23 @@ def test_flush_pending_backups_empty_is_noop():
     with backup._pending_backups_lock:
         backup._pending_backups.clear()
     assert backup.flush_pending_backups() == 0
+
+
+def test_backups_subdir_isolates_dev_from_prod(monkeypatch):
+    monkeypatch.setenv("FLASK_ENV", "development")
+    dev_sub = backup._backups_subdir()
+    assert dev_sub == os.path.join("Backups", "SalesBuddyDev")
+
+    monkeypatch.setenv("FLASK_ENV", "production")
+    prod_sub = backup._backups_subdir()
+    assert prod_sub == os.path.join("Backups", "SalesBuddy")
+    assert "SalesBuddyDev" not in prod_sub
+
+
+def test_get_backup_root_uses_dev_subdir(monkeypatch):
+    monkeypatch.setenv("FLASK_ENV", "development")
+    monkeypatch.setattr(backup, "_get_onedrive_path_from_db", lambda: r"C:\od")
+
+    root = backup._get_backup_root()
+
+    assert root == os.path.join(r"C:\od", "Backups", "SalesBuddyDev")
