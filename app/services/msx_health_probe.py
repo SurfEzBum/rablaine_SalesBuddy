@@ -274,12 +274,16 @@ def get_last_probe() -> dict:
 
 
 def start_probe_thread(
+    app=None,
     interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     startup_delay_seconds: int = DEFAULT_STARTUP_DELAY_SECONDS,
 ) -> None:
     """Start the background probe loop. Idempotent.
 
     Args:
+        app: Flask app used to push an application context around each probe.
+            The probe resolves a target via ``Customer.query``, which requires
+            an active app context in the background thread.
         interval_seconds: Time between probes (default 1 hour).
         startup_delay_seconds: Wait this long after start before the first
             probe.
@@ -293,6 +297,14 @@ def start_probe_thread(
     # Per-instance random offset. Spreads probes from many installs across
     # the hour rather than hammering MSX on the top of every hour.
     _probe_offset_seconds = random.randint(0, max(0, interval_seconds - 1))
+
+    def _run_probe_in_context() -> None:
+        """Run one probe inside an app context so DB access works."""
+        if app is not None:
+            with app.app_context():
+                run_probe()
+        else:
+            run_probe()
 
     def _loop() -> None:
         global _probe_running
@@ -311,7 +323,7 @@ def start_probe_thread(
 
         # First probe.
         try:
-            run_probe()
+            _run_probe_in_context()
         except Exception:
             logger.exception('MSX probe failed')
 
@@ -327,7 +339,7 @@ def start_probe_thread(
                     return
                 time.sleep(1)
             try:
-                run_probe()
+                _run_probe_in_context()
             except Exception:
                 logger.exception('MSX probe failed')
 

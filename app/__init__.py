@@ -276,7 +276,7 @@ def create_app():
 
         # Start MSX Account Teams health probe (hourly, with per-instance offset)
         from app.services.msx_health_probe import start_probe_thread
-        start_probe_thread()
+        start_probe_thread(app)
         schedulers_started.append('msx_health_probe')
 
         # Initialize structured lifecycle/crash logging. Records boot, detects
