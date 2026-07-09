@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/9/2026
+## 7/9/2026 - 7c07aa8
 
 - Background jobs (MSX syncs, meeting prefetch, milestone updates, health checks) now run in a separate worker process from the web server. A slow or stuck background sync can no longer freeze or take down the app you're actively using - the web app stays responsive on its own, and it can now report whether the background worker is alive.
 
