@@ -56,17 +56,31 @@ _initialized = False
 def _resolve_log_dir() -> Path:
     """Return a writable log directory, creating it if needed.
 
-    Tries SALESBUDDY_HOME, then %LOCALAPPDATA%\\SalesBuddy, then the repo
-    ``logs/`` folder, then the OS temp dir as a last resort.
+    Resolution order:
+        1. SALESBUDDY_HOME\\logs        (set by scripts/server.ps1; dev uses
+           the isolated SalesBuddyDev home, prod uses SalesBuddy)
+        2. repo ``logs/``               (only when FLASK_ENV=development and
+           SALESBUDDY_HOME is unset, e.g. plain ``flask run`` - keeps dev
+           events out of the production %LOCALAPPDATA%\\SalesBuddy folder)
+        3. %LOCALAPPDATA%\\SalesBuddy\\logs
+        4. repo ``logs/``               (final fallback)
+        5. OS temp dir                  (last resort)
     """
+    repo_logs = Path(__file__).resolve().parent.parent.parent / "logs"
+    is_dev = os.environ.get("FLASK_ENV", "").strip().lower() == "development"
+
     candidates = []
     home = os.environ.get("SALESBUDDY_HOME")
     if home:
         candidates.append(Path(home) / "logs")
+    # In dev without an explicit home, isolate into the repo logs/ folder so
+    # we never write a run marker into the production LocalAppData folder.
+    if is_dev:
+        candidates.append(repo_logs)
     local = os.environ.get("LOCALAPPDATA")
     if local:
         candidates.append(Path(local) / "SalesBuddy" / "logs")
-    candidates.append(Path(__file__).resolve().parent.parent.parent / "logs")
+    candidates.append(repo_logs)
 
     for candidate in candidates:
         try:
