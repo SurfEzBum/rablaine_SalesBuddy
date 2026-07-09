@@ -25,6 +25,7 @@ import os
 import re
 import sys
 import threading
+import time
 import winreg
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,7 +61,26 @@ _ONEDRIVE_ORG_NAME = "Microsoft"
 # Subfolder path we create/look for inside the OneDrive root.
 # Changed from "SalesBuddy_Backups" to "Backups/SalesBuddy" for cleaner
 # organization under a shared Backups umbrella.
-_SALESBUDDY_BACKUPS_DIR = os.path.join("Backups", "SalesBuddy")
+#
+# The leaf is environment-aware: development writes to "SalesBuddyDev" so a dev
+# instance never collides with (or overwrites) a production customer's backup,
+# which is keyed by TPID. Both trees live under the same "Backups" umbrella.
+_BACKUPS_UMBRELLA_DIR = "Backups"
+
+
+def _is_development() -> bool:
+    """Return True when running under FLASK_ENV=development."""
+    return os.environ.get("FLASK_ENV", "").strip().lower() == "development"
+
+
+def _backups_subdir() -> str:
+    """Return the OneDrive backup subfolder, isolated per environment.
+
+    Production writes to ``Backups/SalesBuddy``; development writes to
+    ``Backups/SalesBuddyDev``.
+    """
+    leaf = "SalesBuddyDev" if _is_development() else "SalesBuddy"
+    return os.path.join(_BACKUPS_UMBRELLA_DIR, leaf)
 
 
 def _get_onedrive_path_from_db() -> str:
@@ -125,7 +145,7 @@ def detect_onedrive_paths(*, business_only: bool = True) -> List[Dict[str, Any]]
         is_biz = _is_business_path(normalized, source)
         if business_only and not is_biz:
             return
-        suggested = os.path.join(normalized, _SALESBUDDY_BACKUPS_DIR)
+        suggested = os.path.join(normalized, _backups_subdir())
         candidates.append({
             "path": normalized,
             "source": source,
@@ -227,12 +247,12 @@ def _get_backup_root() -> Optional[str]:
 
     Resolution order:
     1. ``UserPreference.onedrive_path`` in the database - derive
-       ``{onedrive_path}/Backups/SalesBuddy``.
+       ``{onedrive_path}/Backups/SalesBuddy`` (``SalesBuddyDev`` in dev).
     2. Auto-detect from OneDrive for Business (``get_auto_detected_backup_path``).
     """
     onedrive = _get_onedrive_path_from_db()
     if onedrive:
-        return os.path.join(onedrive, "Backups", "SalesBuddy")
+        return os.path.join(onedrive, _backups_subdir())
 
     # Fallback: auto-detect
     return get_auto_detected_backup_path()
@@ -465,6 +485,45 @@ def _template_to_dict(template: NoteTemplate) -> Dict[str, Any]:
 _PARTNERS_DIR = "partners"
 _TEMPLATES_DIR = "templates"
 
+# Number of times to retry the final atomic rename when the destination is
+# transiently locked. OneDrive's sync engine briefly locks files it is
+# uploading, which makes os.replace raise PermissionError / WinError 32.
+_WRITE_MAX_ATTEMPTS = 5
+_WRITE_RETRY_DELAY = 0.4  # seconds, multiplied by attempt number (linear backoff)
+
+
+def _atomic_write_json(filepath: str, data: Any) -> None:
+    """Write *data* as pretty JSON to *filepath* atomically and durably.
+
+    Writes to a temporary file first, then atomically renames it into place.
+    The rename is retried with a short linear backoff to ride out transient
+    Windows sharing violations (WinError 32) that OneDrive causes while it is
+    syncing the destination file. If every attempt fails, the temp file is
+    cleaned up and the final exception propagates to the caller.
+
+    Args:
+        filepath: Destination path for the JSON file.
+        data: JSON-serializable object to write.
+    """
+    tmp_path = filepath + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+    for attempt in range(1, _WRITE_MAX_ATTEMPTS + 1):
+        try:
+            os.replace(tmp_path, filepath)
+            return
+        except OSError:
+            # PermissionError is a subclass of OSError; both surface the
+            # OneDrive lock. Retry unless this was the last attempt.
+            if attempt >= _WRITE_MAX_ATTEMPTS:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+                raise
+            time.sleep(_WRITE_RETRY_DELAY * attempt)
+
 
 def backup_partner(partner_id: int) -> bool:
     """Write the backup JSON file for a single partner.
@@ -500,10 +559,7 @@ def backup_partner(partner_id: int) -> bool:
     try:
         Path(folder).mkdir(parents=True, exist_ok=True)
         data = _partner_to_dict(partner)
-        tmp_path = filepath + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp_path, filepath)
+        _atomic_write_json(filepath, data)
         logger.debug("Partner backup written: %s", filepath)
         return True
     except Exception:
@@ -561,10 +617,7 @@ def backup_template(template_id: int) -> bool:
     try:
         Path(folder).mkdir(parents=True, exist_ok=True)
         data = _template_to_dict(template)
-        tmp_path = filepath + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp_path, filepath)
+        _atomic_write_json(filepath, data)
         logger.debug("Template backup written: %s", filepath)
         return True
     except Exception:
@@ -650,11 +703,7 @@ def backup_customer(customer_id: int) -> bool:
             db.session.close()
         except Exception:
             pass
-        # Atomic-ish write: write to temp file then rename
-        tmp_path = filepath + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp_path, filepath)
+        _atomic_write_json(filepath, data)
         logger.debug("Backup written: %s", filepath)
         return True
     except Exception:
@@ -673,7 +722,7 @@ def backup_customer(customer_id: int) -> bool:
 # rapid edits to the same customer so we only write once per quiet window.
 
 _BACKUP_DEBOUNCE_SECONDS = 5.0
-_pending_backups: Dict[int, threading.Timer] = {}
+_pending_backups: Dict[int, tuple] = {}  # customer_id -> (timer, app)
 _pending_backups_lock = threading.Lock()
 
 
@@ -721,15 +770,45 @@ def schedule_customer_backup(customer_id: Optional[int], app=None) -> None:
     with _pending_backups_lock:
         existing = _pending_backups.get(customer_id)
         if existing is not None:
-            existing.cancel()
+            existing[0].cancel()
         timer = threading.Timer(
             _BACKUP_DEBOUNCE_SECONDS,
             _run_scheduled_backup,
             args=(customer_id, app),
         )
         timer.daemon = True
-        _pending_backups[customer_id] = timer
+        _pending_backups[customer_id] = (timer, app)
         timer.start()
+
+
+def flush_pending_backups() -> int:
+    """Run all pending debounced customer backups immediately.
+
+    Cancels each pending debounce timer and writes its backup synchronously so
+    the most recent edits are persisted before the process exits. Intended to
+    be called from the clean-shutdown path so a close/restart within the
+    debounce window does not drop the last edit.
+
+    Returns:
+        The number of customer backups successfully written.
+    """
+    with _pending_backups_lock:
+        pending = list(_pending_backups.items())
+        _pending_backups.clear()
+
+    flushed = 0
+    for customer_id, (timer, app) in pending:
+        try:
+            timer.cancel()
+        except Exception:
+            pass
+        try:
+            with app.app_context():
+                if backup_customer(customer_id):
+                    flushed += 1
+        except Exception:
+            logger.exception("Flush backup failed for customer %d", customer_id)
+    return flushed
 
 
 def backup_all_customers() -> Dict[str, int]:
@@ -771,10 +850,7 @@ def backup_all_customers() -> Dict[str, int]:
         try:
             Path(folder).mkdir(parents=True, exist_ok=True)
             data = _customer_to_dict(customer)
-            tmp_path = filepath + ".tmp"
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            os.replace(tmp_path, filepath)
+            _atomic_write_json(filepath, data)
             backed_up += 1
         except Exception:
             logger.exception("Failed to back up customer %d", customer.id)
@@ -983,10 +1059,7 @@ def backup_global_data() -> bool:
     try:
         Path(folder).mkdir(parents=True, exist_ok=True)
         data = _global_data_to_dict()
-        tmp_path = filepath + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp_path, filepath)
+        _atomic_write_json(filepath, data)
         logger.debug("Global backup written: %s", filepath)
         return True
     except Exception:

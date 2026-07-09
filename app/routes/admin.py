@@ -279,6 +279,11 @@ def api_shutdown_server():
     port = os.environ.get('PORT', '5151')
 
     def _shutdown():
+        try:
+            from app.services.lifecycle import record_clean_shutdown
+            record_clean_shutdown(reason='admin_shutdown')
+        except Exception:
+            pass
         os.kill(os.getpid(), signal.SIGTERM)
 
     threading.Timer(1.0, _shutdown).start()
@@ -364,6 +369,11 @@ def api_update_apply():
     # Cooperatively shut ourselves down after a short delay so server.ps1
     # finds the port free. The detached child will start a fresh server.
     def _self_terminate():
+        try:
+            from app.services.lifecycle import record_clean_shutdown
+            record_clean_shutdown(reason='admin_update')
+        except Exception:
+            pass
         os.kill(os.getpid(), signal.SIGTERM)
 
     threading.Timer(1.5, _self_terminate).start()
