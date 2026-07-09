@@ -255,22 +255,35 @@ def create_app():
     import os as _os
     _is_reloader_parent = app.debug and not _os.environ.get('WERKZEUG_RUN_MAIN')
     if not app.config.get('TESTING') and not _is_reloader_parent:
+        schedulers_started = ['update_checker', 'telemetry_flush']
+
         from app.services.copilot_actions import start_copilot_sync_background, start_daily_scheduler
         start_copilot_sync_background(app)
         start_daily_scheduler(app)
+        schedulers_started.append('copilot_actions')
 
         # Start milestone sync scheduler (catchup on startup, then daily at random time)
         from app.services.scheduled_sync import start_milestone_sync_background, start_daily_milestone_scheduler
         start_milestone_sync_background(app)
         start_daily_milestone_scheduler(app)
+        schedulers_started.append('milestone_sync')
 
         # Start daily meeting cache (catchup on startup, then daily at 7 AM)
         from app.services.meeting_sync import start_meeting_sync_background, start_daily_meeting_scheduler
         start_meeting_sync_background(app)
         start_daily_meeting_scheduler(app)
+        schedulers_started.append('meeting_aura')
 
         # Start MSX Account Teams health probe (hourly, with per-instance offset)
         from app.services.msx_health_probe import start_probe_thread
         start_probe_thread()
+        schedulers_started.append('msx_health_probe')
+
+        # Initialize structured lifecycle/crash logging. Records boot, detects
+        # an un-clean previous shutdown, and installs crash/shutdown hooks that
+        # flush pending backups. Must run after schedulers so the boot event
+        # captures which ones started.
+        from app.services.lifecycle import init_lifecycle_logging
+        init_lifecycle_logging(app, schedulers_started)
 
     return app
