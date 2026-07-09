@@ -1,5 +1,7 @@
 """Tests for the durable SQLite job queue (app/services/job_queue.py)."""
 import json
+import threading
+import time
 from datetime import timedelta
 
 import pytest
@@ -183,3 +185,38 @@ def test_process_one_unregistered_type_fails_without_retry(app):
 def test_process_one_empty_queue_returns_none(app):
     with app.app_context():
         assert jq.process_one("w1") is None
+
+
+def test_run_worker_loop_processes_then_stops(app):
+    processed = {"n": 0}
+
+    @jq.job_handler("looped")
+    def _looped(payload):
+        processed["n"] += 1
+        return {"ok": True}
+
+    with app.app_context():
+        jq.enqueue("looped")
+
+    stop = threading.Event()
+    thread = threading.Thread(
+        target=jq.run_worker_loop,
+        kwargs={"app": app, "stop_event": stop, "poll_interval": 0.05,
+                "reclaim_interval": 1000},
+        daemon=True,
+    )
+    thread.start()
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        with app.app_context():
+            if Job.query.filter_by(status=Job.STATUS_DONE).count() == 1:
+                break
+        time.sleep(0.05)
+
+    stop.set()
+    thread.join(timeout=5)
+
+    assert processed["n"] == 1
+    with app.app_context():
+        assert Job.query.filter_by(status=Job.STATUS_DONE).count() == 1

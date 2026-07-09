@@ -47,6 +47,10 @@ _marker_path_cache: Optional[Path] = None
 _shutdown_recorded = threading.Event()
 _init_lock = threading.Lock()
 _initialized = False
+# Process role ('web' or 'worker'), set by init_lifecycle_logging. Tags every
+# event and gives each role its own run marker so the two processes don't
+# clobber each other's clean/dirty-shutdown state.
+_role: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -124,10 +128,11 @@ def _get_logger() -> logging.Logger:
 
 
 def _marker_path() -> Path:
-    """Return the run-marker file path (cached)."""
+    """Return the run-marker file path (cached, role-specific)."""
     global _marker_path_cache
     if _marker_path_cache is None:
-        _marker_path_cache = _resolve_log_dir() / _MARKER_FILENAME
+        name = f"running-{_role}.marker" if _role else _MARKER_FILENAME
+        _marker_path_cache = _resolve_log_dir() / name
     return _marker_path_cache
 
 
@@ -142,6 +147,8 @@ def _emit(event: str, **fields: Any) -> None:
         "event": event,
         "pid": os.getpid(),
     }
+    if _role is not None:
+        record["role"] = _role
     record.update(fields)
     try:
         _get_logger().info(json.dumps(record, ensure_ascii=False, default=str))
@@ -299,7 +306,8 @@ def _install_signal_handlers() -> None:
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def init_lifecycle_logging(app, schedulers_started: Optional[list] = None) -> None:
+def init_lifecycle_logging(app, schedulers_started: Optional[list] = None,
+                           role: str = "web") -> None:
     """Initialize lifecycle logging for the running process.
 
     Detects an un-clean previous shutdown, emits a ``boot`` event, writes the
@@ -312,15 +320,18 @@ def init_lifecycle_logging(app, schedulers_started: Optional[list] = None) -> No
         app: The Flask application.
         schedulers_started: Names of background schedulers that were started,
             recorded on the boot event for observability.
+        role: Process role ('web' or 'worker'). Tags events and selects a
+            role-specific run marker so the two processes don't collide.
     """
     if app.config.get("TESTING"):
         return
 
-    global _initialized
+    global _initialized, _role
     with _init_lock:
         if _initialized:
             return
         _initialized = True
+        _role = role
 
     prev_exit = _detect_dirty_start()
 

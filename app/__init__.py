@@ -253,37 +253,52 @@ def create_app():
     # In Flask debug mode, the reloader starts the app twice. Only run background
     # tasks in the child process (WERKZEUG_RUN_MAIN='true') or in non-debug mode.
     import os as _os
-    _is_reloader_parent = app.debug and not _os.environ.get('WERKZEUG_RUN_MAIN')
+    # Process role: 'web' (default, serves requests) or 'worker' (runs the heavy
+    # background schedulers + job queue). Set by app/worker.py before create_app.
+    _role = _os.environ.get('SALESBUDDY_ROLE', 'web').strip().lower()
+    # The werkzeug reloader (flask run --debug) starts the app twice; skip
+    # background startup in the parent so threads aren't doubled. This only
+    # applies to the web role - the worker never runs under the reloader, and in
+    # dev FLASK_DEBUG=True would otherwise make it look like a reloader parent.
+    _is_reloader_parent = (
+        _role != 'worker'
+        and app.debug
+        and not _os.environ.get('WERKZEUG_RUN_MAIN')
+    )
     if not app.config.get('TESTING') and not _is_reloader_parent:
         schedulers_started = ['update_checker', 'telemetry_flush']
 
-        from app.services.copilot_actions import start_copilot_sync_background, start_daily_scheduler
-        start_copilot_sync_background(app)
-        start_daily_scheduler(app)
-        schedulers_started.append('copilot_actions')
+        # Heavy background jobs (MSX / WorkIQ / meeting aura) run ONLY in the
+        # dedicated worker process, so a slow or hung sync can never wedge the
+        # web server. The web process just serves requests.
+        if _role == 'worker':
+            from app.services.copilot_actions import start_copilot_sync_background, start_daily_scheduler
+            start_copilot_sync_background(app)
+            start_daily_scheduler(app)
+            schedulers_started.append('copilot_actions')
 
-        # Start milestone sync scheduler (catchup on startup, then daily at random time)
-        from app.services.scheduled_sync import start_milestone_sync_background, start_daily_milestone_scheduler
-        start_milestone_sync_background(app)
-        start_daily_milestone_scheduler(app)
-        schedulers_started.append('milestone_sync')
+            # Start milestone sync scheduler (catchup on startup, then daily at random time)
+            from app.services.scheduled_sync import start_milestone_sync_background, start_daily_milestone_scheduler
+            start_milestone_sync_background(app)
+            start_daily_milestone_scheduler(app)
+            schedulers_started.append('milestone_sync')
 
-        # Start daily meeting cache (catchup on startup, then daily at 7 AM)
-        from app.services.meeting_sync import start_meeting_sync_background, start_daily_meeting_scheduler
-        start_meeting_sync_background(app)
-        start_daily_meeting_scheduler(app)
-        schedulers_started.append('meeting_aura')
+            # Start daily meeting cache (catchup on startup, then daily at 7 AM)
+            from app.services.meeting_sync import start_meeting_sync_background, start_daily_meeting_scheduler
+            start_meeting_sync_background(app)
+            start_daily_meeting_scheduler(app)
+            schedulers_started.append('meeting_aura')
 
-        # Start MSX Account Teams health probe (hourly, with per-instance offset)
-        from app.services.msx_health_probe import start_probe_thread
-        start_probe_thread(app)
-        schedulers_started.append('msx_health_probe')
+            # Start MSX Account Teams health probe (hourly, with per-instance offset)
+            from app.services.msx_health_probe import start_probe_thread
+            start_probe_thread(app)
+            schedulers_started.append('msx_health_probe')
 
         # Initialize structured lifecycle/crash logging. Records boot, detects
         # an un-clean previous shutdown, and installs crash/shutdown hooks that
-        # flush pending backups. Must run after schedulers so the boot event
-        # captures which ones started.
+        # flush pending backups. Runs for every real process (web and worker),
+        # tagged by role so their run markers don't collide.
         from app.services.lifecycle import init_lifecycle_logging
-        init_lifecycle_logging(app, schedulers_started)
+        init_lifecycle_logging(app, schedulers_started, role=_role)
 
     return app
