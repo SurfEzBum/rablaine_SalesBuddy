@@ -19,4 +19,23 @@ if (Test-Path $Activate) {
     & $Activate
 }
 
+# Share the app's isolated Azure CLI context (matches scripts/server.ps1) so both
+# the web and worker children the supervisor spawns use the same file-based MSX
+# token cache. Respects an already-set AZURE_CONFIG_DIR (e.g. from server.ps1).
+if (-not $env:AZURE_CONFIG_DIR) {
+    $flaskEnv = 'production'
+    $envFile = Join-Path $RepoRoot '.env'
+    if (Test-Path $envFile) {
+        foreach ($line in Get-Content $envFile) {
+            if ($line -match '^\s*FLASK_ENV\s*=\s*(.+?)\s*$') {
+                $flaskEnv = $Matches[1].Trim().Trim('"').Trim("'"); break
+            }
+        }
+    }
+    $profileFolder = if ($flaskEnv -match '^(?i)development$') { 'SalesBuddyDev' } else { 'SalesBuddy' }
+    $sbHome = Join-Path $env:USERPROFILE $profileFolder
+    $env:SALESBUDDY_HOME = $sbHome
+    $env:AZURE_CONFIG_DIR = Join-Path $sbHome '.azure'
+}
+
 python -m app.supervisor
