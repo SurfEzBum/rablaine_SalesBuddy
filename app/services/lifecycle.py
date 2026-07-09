@@ -127,6 +127,21 @@ def _get_logger() -> logging.Logger:
     return lg
 
 
+def set_role(role: str) -> None:
+    """Set the process role used to tag lifecycle events.
+
+    For processes like the supervisor that emit events without calling
+    :func:`init_lifecycle_logging` (they have no Flask app).
+    """
+    global _role
+    _role = role
+
+
+def emit_event(event: str, **fields: Any) -> None:
+    """Public one-off lifecycle event emitter (JSONL). Never raises."""
+    _emit(event, **fields)
+
+
 def _marker_path() -> Path:
     """Return the run-marker file path (cached, role-specific)."""
     global _marker_path_cache

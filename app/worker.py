@@ -31,6 +31,10 @@ def _start_worker_heartbeat(app, stop_event: threading.Event) -> None:
 
     with app.app_context():
         SyncStatus.mark_started(WORKER_HEARTBEAT_KEY)
+        # Beat immediately so /health reports the worker alive right away,
+        # instead of 'stale' for the first heartbeat interval (which would make
+        # the supervisor falsely restart a healthy, just-started worker).
+        SyncStatus.update_heartbeat(WORKER_HEARTBEAT_KEY)
 
     def _beat() -> None:
         while not stop_event.wait(_HEARTBEAT_INTERVAL_SECONDS):
