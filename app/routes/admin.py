@@ -269,6 +269,25 @@ def api_update_check():
     return jsonify(state)
 
 
+def _is_supervised() -> bool:
+    """True when a supervisor (or Electron main) is managing this process."""
+    return os.environ.get('SALESBUDDY_SUPERVISED', '').strip().lower() in ('1', 'true', 'yes')
+
+
+def _spawn_server_script(*args: str) -> None:
+    """Spawn scripts/server.ps1 detached with the given args (e.g. -StopOnly).
+
+    Detached (CREATE_NO_WINDOW) so it survives this process - and, under a
+    supervisor, the whole process tree - being torn down.
+    """
+    CREATE_NO_WINDOW = 0x08000000
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    server_script = repo_root / 'scripts' / 'server.ps1'
+    cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass',
+           '-File', str(server_script), *args]
+    subprocess.Popen(cmd, cwd=str(repo_root), creationflags=CREATE_NO_WINDOW)
+
+
 @admin_bp.route('/api/admin/shutdown', methods=['POST'])
 def api_shutdown_server():
     """Shut down the running server process.
@@ -284,7 +303,15 @@ def api_shutdown_server():
             record_clean_shutdown(reason='admin_shutdown')
         except Exception:
             pass
-        os.kill(os.getpid(), signal.SIGTERM)
+        if _is_supervised():
+            # Killing just this web process would only make the supervisor
+            # respawn it. Tell server.ps1 to stop the whole tree instead.
+            try:
+                _spawn_server_script('-StopOnly')
+            except Exception:
+                os.kill(os.getpid(), signal.SIGTERM)
+        else:
+            os.kill(os.getpid(), signal.SIGTERM)
 
     threading.Timer(1.0, _shutdown).start()
     return jsonify({
@@ -374,7 +401,11 @@ def api_update_apply():
             record_clean_shutdown(reason='admin_update')
         except Exception:
             pass
-        os.kill(os.getpid(), signal.SIGTERM)
+        # Under a supervisor, the update's Stop-Server tree-kills the supervisor
+        # (and this web process); self-terminating would just cause a respawn the
+        # updater then has to kill. Only free the port ourselves when monolithic.
+        if not _is_supervised():
+            os.kill(os.getpid(), signal.SIGTERM)
 
     threading.Timer(1.5, _self_terminate).start()
 
