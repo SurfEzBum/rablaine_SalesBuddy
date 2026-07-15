@@ -68,14 +68,14 @@ function Stop-Server {
 
 function Start-Server {
     param([int]$Port)
-    $waitress = Join-Path $RepoRoot 'venv\Scripts\waitress-serve.exe'
-    if (-not (Test-Path $waitress)) {
-        Write-Host "  [WARNING] Waitress not found. Start manually with start.bat" -ForegroundColor Yellow
+    $python = Join-Path $RepoRoot 'venv\Scripts\python.exe'
+    if (-not (Test-Path $python)) {
+        Write-Host "  [WARNING] Python venv not found. Start manually with start.bat" -ForegroundColor Yellow
         return
     }
-    $serverArgs = @('--host=0.0.0.0', "--port=$Port", '--call', 'app:create_app')
-    Write-Host "  Starting server on port $Port..." -ForegroundColor Yellow
-    Start-Process -FilePath $waitress -ArgumentList $serverArgs -WorkingDirectory $RepoRoot -WindowStyle Hidden
+    Write-Host "  Starting supervisor (web + worker) on port $Port..." -ForegroundColor Yellow
+    $env:PORT = "$Port"
+    Start-Process -FilePath $python -ArgumentList @('-m', 'app.supervisor') -WorkingDirectory $RepoRoot -WindowStyle Hidden
     Start-Sleep -Seconds 3
     if (Test-ServerRunning -Port $Port) {
         Write-Host "  [OK] Server running at http://localhost:$Port" -ForegroundColor Green
