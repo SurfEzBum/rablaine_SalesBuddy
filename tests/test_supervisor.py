@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app import should_run_schedulers
 from app import supervisor as sup
 
 
@@ -148,3 +149,23 @@ def test_check_healthy_child_is_left_alone():
     assert child.starts == 1
     assert child.terminates == 0
     assert child.health_failures == 0
+
+
+# --- graceful-degradation scheduler gating ---------------------------------
+
+def test_worker_always_runs_schedulers():
+    assert should_run_schedulers("worker", supervised=True) is True
+    assert should_run_schedulers("worker", supervised=False) is True
+
+
+def test_unsupervised_web_runs_schedulers_inline():
+    assert should_run_schedulers("web", supervised=False) is True
+
+
+def test_supervised_web_defers_schedulers():
+    assert should_run_schedulers("web", supervised=True) is False
+
+
+def test_managed_child_stores_env():
+    child = sup.ManagedChild("web", ["x"], env={"SALESBUDDY_SUPERVISED": "1"})
+    assert child.env == {"SALESBUDDY_SUPERVISED": "1"}

@@ -13,6 +13,18 @@ load_dotenv()
 from app.models import db
 
 
+def should_run_schedulers(role: str, supervised: bool) -> bool:
+    """Whether this process should run the heavy background schedulers.
+
+    Schedulers run in the dedicated worker process, OR inline in a web process
+    that has no supervisor (a direct / monolithic launch - e.g. a git-pull user
+    running waitress directly, or the transitional first update). Under the
+    supervisor the web process is 'supervised' and the worker owns them, so a
+    slow or hung sync can never wedge the web server.
+    """
+    return role == 'worker' or (role == 'web' and not supervised)
+
+
 def create_app():
     """Create and configure the Flask application."""
     app = Flask(__name__, 
@@ -256,6 +268,10 @@ def create_app():
     # Process role: 'web' (default, serves requests) or 'worker' (runs the heavy
     # background schedulers + job queue). Set by app/worker.py before create_app.
     _role = _os.environ.get('SALESBUDDY_ROLE', 'web').strip().lower()
+    # 'supervised' means a supervisor (or Electron main) is managing this process
+    # and running a separate worker, so the web process must NOT run schedulers.
+    # When unsupervised, the web falls back to running them inline (monolithic).
+    _supervised = _os.environ.get('SALESBUDDY_SUPERVISED', '').strip().lower() in ('1', 'true', 'yes')
     # The werkzeug reloader (flask run --debug) starts the app twice; skip
     # background startup in the parent so threads aren't doubled. This only
     # applies to the web role - the worker never runs under the reloader, and in
@@ -268,10 +284,11 @@ def create_app():
     if not app.config.get('TESTING') and not _is_reloader_parent:
         schedulers_started = ['update_checker', 'telemetry_flush']
 
-        # Heavy background jobs (MSX / WorkIQ / meeting aura) run ONLY in the
-        # dedicated worker process, so a slow or hung sync can never wedge the
-        # web server. The web process just serves requests.
-        if _role == 'worker':
+        # Heavy background jobs (MSX / WorkIQ / meeting aura) run in the worker
+        # process, or inline in an unsupervised web process (graceful
+        # degradation) so a directly-launched web server still does background
+        # work. Under the supervisor the worker owns them and the web is idle.
+        if should_run_schedulers(_role, _supervised):
             from app.services.copilot_actions import start_copilot_sync_background, start_daily_scheduler
             start_copilot_sync_background(app)
             start_daily_scheduler(app)

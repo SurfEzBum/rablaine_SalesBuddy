@@ -132,10 +132,12 @@ class ManagedChild:
     """A supervised subprocess with restart bookkeeping."""
 
     def __init__(self, name: str, argv: List[str],
-                 health_check: Optional[Callable[[], Optional[bool]]] = None):
+                 health_check: Optional[Callable[[], Optional[bool]]] = None,
+                 env: Optional[dict] = None):
         self.name = name
         self.argv = argv
         self.health_check = health_check
+        self.env = env
         self.process: Optional[subprocess.Popen] = None
         self.started_at = 0.0
         self.health_failures = 0
@@ -143,7 +145,7 @@ class ManagedChild:
 
     def start(self, now: Optional[float] = None) -> None:
         now = time.monotonic() if now is None else now
-        self.process = subprocess.Popen(self.argv, cwd=str(_repo_root()))
+        self.process = subprocess.Popen(self.argv, cwd=str(_repo_root()), env=self.env)
         self.started_at = now
         self.health_failures = 0
 
@@ -276,10 +278,13 @@ def _web_argv(port: int) -> List[str]:
 
 def main() -> None:
     port = _default_port()
+    # Mark children as supervised so the web process defers the heavy schedulers
+    # to the worker instead of running them inline.
+    child_env = {**os.environ, "SALESBUDDY_SUPERVISED": "1"}
     children = [
-        ManagedChild("web", _web_argv(port),
+        ManagedChild("web", _web_argv(port), env=child_env,
                      health_check=lambda: web_health(port)),
-        ManagedChild("worker", [sys.executable, "-m", "app.worker"],
+        ManagedChild("worker", [sys.executable, "-m", "app.worker"], env=child_env,
                      health_check=lambda: worker_health(port)),
     ]
     supervisor = Supervisor(children)
