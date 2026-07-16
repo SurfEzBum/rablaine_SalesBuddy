@@ -274,6 +274,11 @@ def _is_supervised() -> bool:
     return os.environ.get('SALESBUDDY_SUPERVISED', '').strip().lower() in ('1', 'true', 'yes')
 
 
+def _is_electron() -> bool:
+    """True when the stack was launched by the Electron desktop shell."""
+    return os.environ.get('SALESBUDDY_ELECTRON', '').strip().lower() in ('1', 'true', 'yes')
+
+
 def _spawn_server_script(*args: str) -> None:
     """Spawn scripts/server.ps1 detached with the given args (e.g. -StopOnly).
 
@@ -358,6 +363,25 @@ def api_update_apply():
         # Don't block the deploy on bookkeeping. Worst case: the next
         # "View last update" is empty until the user updates again.
         db.session.rollback()
+
+    # Under the Electron shell, Electron owns the update: it owns the supervisor
+    # process, so letting server.ps1 tear the tree down here would race with
+    # Electron's own restart handler. Instead, drop a sentinel file the shell
+    # watches for; it runs git pull + pip install and relaunches itself. This
+    # works whether the click came from the Electron window or a browser tab.
+    if _is_electron():
+        try:
+            sentinel = repo_root / 'data' / 'electron-update.request'
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            sentinel.write_text(
+                datetime.now(timezone.utc).isoformat(), encoding='utf-8'
+            )
+        except Exception as e:
+            return jsonify({'error': f'Failed to request update: {e}'}), 500
+        return jsonify({
+            'success': True,
+            'message': 'Update started. Sales Buddy will restart momentarily.',
+        })
 
     # Read PORT from .env so we can pass through elevation if needed
     port = int(os.environ.get('PORT', '5151'))
