@@ -1263,31 +1263,35 @@ Write-Host 'winget installation complete.'
         }
 
         /// <summary>
-        /// Start the Sales Buddy server in the background using waitress.
+        /// Start the Sales Buddy supervisor (which spawns the web server and the
+        /// background worker) in the background.
         /// </summary>
         private static void StartServer(Session session, string installDir)
         {
             int port = GetPortFromEnv(installDir);
-            var waitress = Path.Combine(installDir, "venv", "Scripts",
-                "waitress-serve.exe");
+            var python = Path.Combine(installDir, "venv", "Scripts",
+                "python.exe");
 
-            if (!File.Exists(waitress))
+            if (!File.Exists(python))
             {
-                session.Log("waitress-serve.exe not found. Server not started.");
+                session.Log("python.exe not found. Server not started.");
                 return;
             }
 
             var psi = new ProcessStartInfo
             {
-                FileName = waitress,
-                Arguments = $"--host=0.0.0.0 --port={port} --call app:create_app",
+                FileName = python,
+                Arguments = "-m app.supervisor",
                 WorkingDirectory = installDir,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
+            // The supervisor reads the port from the environment and passes it
+            // through to the web child it spawns.
+            psi.EnvironmentVariables["PORT"] = port.ToString();
 
             Process.Start(psi);
-            session.Log($"Server started on port {port}.");
+            session.Log($"Supervisor (web + worker) started on port {port}.");
         }
 
         // =====================================================================
