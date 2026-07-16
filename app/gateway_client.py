@@ -70,6 +70,29 @@ def clear_token_cache() -> None:
     _token_expiry = 0
 
 
+def _decode_claims(token: str) -> dict:
+    """Decode a JWT payload (claims) without verifying the signature."""
+    import base64
+    import json as _json
+    try:
+        payload_b64 = token.split(".")[1]
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += "=" * padding
+        return _json.loads(base64.urlsafe_b64decode(payload_b64))
+    except Exception:
+        return {}
+
+
+def _auth_diag(event: str, **fields) -> None:
+    """Emit an 'auth' diagnostic event for the gateway credential path."""
+    try:
+        from app.services.diagnostic_log import diag_log
+        diag_log("auth", source="gateway", event=event, **fields)
+    except Exception:
+        pass
+
+
 def _get_token() -> str:
     """Acquire a JWT for the gateway audience. Caches until near expiry.
 
@@ -91,12 +114,18 @@ def _get_token() -> str:
             cred = AzureCliCredential()
             cred.get_token(f"{_GATEWAY_RESOURCE}/.default")
             _credential = cred
-        except Exception:
+        except Exception as cli_exc:
+            logger.warning(
+                "AzureCliCredential unavailable, falling back to "
+                "DefaultAzureCredential: %s", cli_exc
+            )
             _credential = DefaultAzureCredential()
 
     try:
         token_obj = _credential.get_token(f"{_GATEWAY_RESOURCE}/.default")
     except Exception as exc:
+        logger.error("Failed to acquire gateway token: %s", exc, exc_info=True)
+        _auth_diag("token_failure", error=str(exc))
         raise GatewayError(f"Failed to acquire gateway token: {exc}") from exc
 
     _cached_token = token_obj.token
@@ -104,6 +133,15 @@ def _get_token() -> str:
 
     # Verify the token comes from the expected Microsoft tenant
     _verify_tenant(_cached_token)
+
+    claims = _decode_claims(_cached_token)
+    logger.info(
+        "Acquired gateway token (tid=%s user=%s expires_on=%s)",
+        claims.get("tid"), claims.get("name") or claims.get("upn"), _token_expiry,
+    )
+    _auth_diag("token_success", tid=claims.get("tid"),
+               user=claims.get("name") or claims.get("upn"),
+               expires_on=_token_expiry)
 
     return _cached_token
 
@@ -117,25 +155,22 @@ def _verify_tenant(token: str) -> None:
     import base64
     import json as _json
 
-    try:
-        # JWT is header.payload.signature — we only need the payload
-        payload_b64 = token.split(".")[1]
-        # Add padding if needed
-        padding = 4 - len(payload_b64) % 4
-        if padding != 4:
-            payload_b64 += "=" * padding
-        payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
-        tid = payload.get("tid", "")
-    except Exception:
+    tid = _decode_claims(token).get("tid", "")
+    if not tid:
         # If we can't decode, let APIM decide
         return
 
-    if tid and tid != _REQUIRED_TENANT_ID:
+    if tid != _REQUIRED_TENANT_ID:
         # Clear the cached token so the next attempt can try again
         global _cached_token, _token_expiry, _credential
         _cached_token = None
         _token_expiry = 0
         _credential = None
+        logger.warning(
+            "Rejected gateway token from wrong tenant tid=%s (expected %s)",
+            tid, _REQUIRED_TENANT_ID,
+        )
+        _auth_diag("wrong_tenant", tid=tid)
         raise GatewayError(
             "You are signed in with a non-Microsoft account. "
             "Please sign out and sign back in with your "
