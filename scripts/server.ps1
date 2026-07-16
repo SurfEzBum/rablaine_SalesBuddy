@@ -298,28 +298,47 @@ function Test-ServerRunning {
     return $null -ne $conn
 }
 
-# Kill whatever is listening on a port (and its process tree)
+# Recursively kill a process and all its descendants. ExcludePid protects one
+# process (e.g. the update process that is itself driving this stop) so it
+# doesn't terminate itself while tearing down the tree.
+function Stop-ProcessTree {
+    param([int]$ProcessId, [int]$ExcludePid = 0)
+    if ($ProcessId -le 0 -or $ProcessId -eq $ExcludePid) { return }
+    Get-CimInstance Win32_Process -Filter "ParentProcessId=$ProcessId" -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-ProcessTree -ProcessId $_.ProcessId -ExcludePid $ExcludePid }
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+}
+
+# Stop the whole app: the supervisor and its children (web + worker), plus any
+# process still listening on the port (covers a monolithic/unsupervised launch).
+# Excludes the current process ($PID) so an in-flight update driving this stop
+# doesn't kill itself.
 function Stop-Server {
     param([int]$Port)
     Write-Host "  Stopping server on port $Port..." -ForegroundColor Yellow
+
+    # 1. Kill the supervisor tree first so it can't respawn the web child mid-stop.
+    $supervisors = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -match 'app\.supervisor' -and $_.ProcessId -ne $PID }
+    foreach ($sup in $supervisors) {
+        Stop-ProcessTree -ProcessId $sup.ProcessId -ExcludePid $PID
+    }
+
+    # 2. Kill whatever still listens on the port (monolithic waitress, orphans).
     $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     if ($conns) {
         $procIds = @($conns | Select-Object -ExpandProperty OwningProcess -Unique)
-        foreach ($p in $procIds) {
-            # Kill the process and any children (waitress workers)
-            Get-CimInstance Win32_Process -Filter "ParentProcessId=$p" -ErrorAction SilentlyContinue |
-                ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-            Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
-        }
-        # Wait and verify the port is free
-        $retries = 0
-        while ($retries -lt 5) {
-            Start-Sleep -Seconds 1
-            $still = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-            if (-not $still) { return }
-            $still | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
-            $retries++
-        }
+        foreach ($p in $procIds) { Stop-ProcessTree -ProcessId $p -ExcludePid $PID }
+    }
+
+    # 3. Verify the port is free.
+    $retries = 0
+    while ($retries -lt 5) {
+        Start-Sleep -Seconds 1
+        $still = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+        if (-not $still) { return }
+        $still | ForEach-Object { Stop-ProcessTree -ProcessId $_.OwningProcess -ExcludePid $PID }
+        $retries++
     }
 }
 
@@ -380,41 +399,49 @@ function Invoke-ServerLogRotation {
     }
 }
 
-# Start waitress in a hidden window (no lingering console)
+# Start the supervisor (which spawns web + worker) in a hidden window.
 function Start-Server {
     param([int]$Port)
-    $waitress = Join-Path $RepoRoot 'venv\Scripts\waitress-serve.exe'
-    $serverArgs = @('--host=0.0.0.0', "--port=$Port", '--call', 'app:create_app')
+    $python = Join-Path $RepoRoot 'venv\Scripts\python.exe'
+    if (-not (Test-Path $python)) { $python = 'python' }
+    $serverArgs = @('-m', 'app.supervisor')
 
-    Write-Host "  Starting server on port $Port..." -ForegroundColor Yellow
+    Write-Host "  Starting supervisor (web + worker) on port $Port..." -ForegroundColor Yellow
 
     $logDir = Get-ServerLogDir
     $logPath = Join-Path $logDir 'server.log'
     Invoke-ServerLogRotation -LogPath $logPath
 
     # Use ProcessStartInfo to explicitly pass environment variables (e.g., AZURE_CONFIG_DIR)
-    # to the waitress subprocess, ensuring Azure CLI commands inherit the correct config path.
+    # so the supervisor and the children it spawns inherit the correct az config path.
     # Redirect stdout/stderr via cmd.exe to a rotated log file. Redirecting through
-    # ProcessStartInfo pipes without a reader deadlocks waitress once the pipe buffer
-    # fills (~4-64 KB), which is why headless auto-start used to wedge after a while.
+    # ProcessStartInfo pipes without a reader deadlocks once the pipe buffer fills
+    # (~4-64 KB), which is why headless auto-start used to wedge after a while.
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $env:ComSpec
     $argLine = ($serverArgs -join ' ')
-    $psi.Arguments = '/d /c ""' + $waitress + '" ' + $argLine + ' >> "' + $logPath + '" 2>&1"'
+    $psi.Arguments = '/d /c ""' + $python + '" ' + $argLine + ' >> "' + $logPath + '" 2>&1"'
     $psi.WorkingDirectory = $RepoRoot
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
 
-    # Copy current environment and set AZURE_CONFIG_DIR for the subprocess
+    # Copy current environment and set the vars the children rely on.
     foreach ($key in [System.Environment]::GetEnvironmentVariables([System.EnvironmentVariableTarget]::Process).Keys) {
         $psi.EnvironmentVariables[$key] = [System.Environment]::GetEnvironmentVariable($key, [System.EnvironmentVariableTarget]::Process)
     }
     $psi.EnvironmentVariables['AZURE_CONFIG_DIR'] = $env:AZURE_CONFIG_DIR
     $psi.EnvironmentVariables['SALESBUDDY_HOME'] = $env:SALESBUDDY_HOME
+    $psi.EnvironmentVariables['PORT'] = "$Port"
 
     [System.Diagnostics.Process]::Start($psi) | Out-Null
-    Start-Sleep -Seconds 3
-    if (Test-ServerRunning -Port $Port) {
+
+    # The supervisor spawns waitress + worker; poll for the web child to bind.
+    $bound = $false
+    for ($i = 0; $i -lt 15; $i++) {
+        Start-Sleep -Seconds 1
+        if (Test-ServerRunning -Port $Port) { $bound = $true; break }
+    }
+    if ($bound) {
         Write-Host "  [OK] Server running at http://localhost:$Port" -ForegroundColor Green
         Write-Host "  Logs: $logPath" -ForegroundColor DarkGray
     } else {

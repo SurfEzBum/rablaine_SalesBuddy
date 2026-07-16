@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/16/2026
+
+- Sales Buddy now runs under a supervisor that watches the web server and the background worker and automatically restarts either one if it crashes or hangs. If a background sync wedges or a process dies, it comes back on its own within seconds instead of silently staying down - so the app you rely on in the morning is far less likely to need a manual restart.
+
 ## 7/9/2026 - 7c07aa8
 
 - Background jobs (MSX syncs, meeting prefetch, milestone updates, health checks) now run in a separate worker process from the web server. A slow or stuck background sync can no longer freeze or take down the app you're actively using - the web app stays responsive on its own, and it can now report whether the background worker is alive.

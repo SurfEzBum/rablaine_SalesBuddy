@@ -1,16 +1,15 @@
-# Sales Buddy - Background worker (dev)
+# Sales Buddy - Supervisor (dev)
 #
-# Runs the heavy background schedulers (MSX / WorkIQ / meeting aura) and the
-# durable job-queue consumer in a process separate from the web server, so a
-# slow or hung background job can never wedge the UI.
+# Runs the whole stack under one watchdog: spawns the web server AND the
+# background worker, and restarts either one if it crashes or hangs. This is the
+# local stand-in for what an Electron/Tauri main process will eventually do.
 #
-# Dev usage: run the web server in one terminal (`flask run`) and this worker
-# in another:
+# Dev usage: stop any separate `flask run` / `worker.ps1` first, then:
 #
-#   .\scripts\worker.ps1
+#   .\scripts\supervisor.ps1
 #
-# The worker tags its lifecycle events with role='worker' and keeps a heartbeat
-# that the web /health endpoint reports.
+# The supervisor spawns waitress on $PORT (from .env, default 5151) plus the
+# worker, and logs supervisor/child events to the lifecycle log (role=supervisor).
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $RepoRoot
@@ -20,9 +19,9 @@ if (Test-Path $Activate) {
     & $Activate
 }
 
-# Share the app's isolated Azure CLI context (matches scripts/server.ps1) so MSX
-# token acquisition uses the same file-based cache the web server uses. Respects
-# an already-set AZURE_CONFIG_DIR (e.g. when launched by the supervisor).
+# Share the app's isolated Azure CLI context (matches scripts/server.ps1) so both
+# the web and worker children the supervisor spawns use the same file-based MSX
+# token cache. Respects an already-set AZURE_CONFIG_DIR (e.g. from server.ps1).
 if (-not $env:AZURE_CONFIG_DIR) {
     $flaskEnv = 'production'
     $envFile = Join-Path $RepoRoot '.env'
@@ -39,5 +38,4 @@ if (-not $env:AZURE_CONFIG_DIR) {
     $env:AZURE_CONFIG_DIR = Join-Path $sbHome '.azure'
 }
 
-$env:SALESBUDDY_ROLE = 'worker'
-python -m app.worker
+python -m app.supervisor

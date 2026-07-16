@@ -498,17 +498,18 @@ $migrationOutput | ForEach-Object { Write-Log "  [migrate] $_" }
 Write-Log "Migrations complete (exit code: $LASTEXITCODE)."
 Pop-Location
 
-# 4e: Start the server (background - waitress in a hidden window)
-$waitressExe = Join-Path $InstallDir 'venv\Scripts\waitress-serve.exe'
-if (Test-Path $waitressExe) {
-    Write-Log "Starting server on port $DefaultPort..."
-    Start-Process -FilePath $waitressExe `
-        -ArgumentList '--host=0.0.0.0', "--port=$DefaultPort", '--call', 'app:create_app' `
+# 4e: Start the server (supervisor: web + worker, in a hidden window)
+$pythonExe = Join-Path $InstallDir 'venv\Scripts\python.exe'
+if (Test-Path $pythonExe) {
+    Write-Log "Starting supervisor (web + worker) on port $DefaultPort..."
+    $env:PORT = "$DefaultPort"
+    Start-Process -FilePath $pythonExe `
+        -ArgumentList '-m', 'app.supervisor' `
         -WorkingDirectory $InstallDir `
         -WindowStyle Hidden
     Write-Log "Server launched in background."
 } else {
-    Write-Log "waitress-serve.exe not found. Server not started. User can run start.bat." 'WARN'
+    Write-Log "python.exe not found. Server not started. User can run start.bat." 'WARN'
 }
 
 # -- Step 5: Create shortcuts -------------------------------------------------
