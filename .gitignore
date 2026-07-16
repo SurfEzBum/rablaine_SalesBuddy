@@ -118,6 +118,11 @@ migrations/versions/*.pyc
 # Issue plans (local only)
 issue_plans/
 
+# Electron
+electron/node_modules/
+electron/dist/
+electron/out/
+
 # Temp APIM policy files (may contain secrets)
 apim-policy*.json
 
