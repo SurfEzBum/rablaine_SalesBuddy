@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/17/2026
+## 7/17/2026 - 40e10db
 
 - Sales Buddy can now run as a desktop app - a real window with a system-tray icon that keeps your background tasks running - while still opening in your browser whenever you prefer. It has a proper app menu, back/forward navigation, and an About box.
 - Added a "Move to desktop app" button in the admin Updates card so you can switch an existing install over to the desktop app in one click, without reinstalling.
