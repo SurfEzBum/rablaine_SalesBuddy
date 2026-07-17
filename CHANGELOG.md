@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/17/2026
+## 7/17/2026 - 89c2ac6
 
 - Off-VPN milestone syncs now bail in about a second. Before starting, the sync makes a single quick check that it can actually reach MSX - if you're off VPN/corpnet, it stops right away with the "connect to VPN and retry" banner instead of grinding through batch after batch for 15+ seconds first. Nothing gets touched.
 - All MSX-backed syncs (milestones, marketing, and the rest) also bail out fast when a call confirms MSX is unreachable, instead of sitting through minutes of doomed retries.
