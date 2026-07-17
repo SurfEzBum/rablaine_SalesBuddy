@@ -682,6 +682,23 @@ class TestAutoStartStatusAPI:
         data = response.get_json()
         assert data['task_exists'] is False
 
+    def test_autostart_status_uses_run_entry_under_electron(self, client, app):
+        """Under the Electron shell, status reflects the HKCU Run entry."""
+        with patch('app.routes.admin._is_electron', return_value=True), \
+                patch('app.routes.admin._check_electron_autostart') as mock_run, \
+                patch('app.routes.admin._check_scheduled_task') as mock_task:
+            mock_run.return_value = {
+                'exists': True, 'next_run': None, 'status': 'Active'
+            }
+            response = client.get('/api/admin/tasks/autostart/status')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['task_exists'] is True
+        assert data['task_status'] == 'Active'
+        # The scheduled-task path must NOT be consulted in Electron mode.
+        mock_task.assert_not_called()
+
 
 # =========================================================================
 # Export / Import round-trip tests

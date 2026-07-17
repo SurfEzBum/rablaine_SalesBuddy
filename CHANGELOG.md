@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/17/2026
+
+- Fixed the admin panel's Auto-Start status showing "Not registered" in the desktop app even when login autostart was actually set up. The desktop app registers autostart differently than the older browser install, and the admin panel was only checking the old spot. It now reads the right one, and the enable/disable toggle and Register button work in the desktop app too.
+
 ## 7/17/2026 - 29dd273
 
 - Removed the old "install as an app" (PWA) support now that Sales Buddy has a real desktop app. This drops the service worker, web manifest, and offline page - which also clears out a class of stale-cache gremlins where an installed shortcut could show an old cached version. Use the desktop app (or just a browser tab) going forward.

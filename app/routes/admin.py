@@ -938,6 +938,77 @@ def _register_scheduled_task(task_key: str) -> dict:
         return {'success': False, 'error': str(e)}
 
 
+# Electron desktop autostart lives in the per-user Run key (written by
+# scripts/migrate-to-electron.ps1), NOT a scheduled task. The web app runs
+# non-elevated, so HKCU is the only hive it can touch - which is exactly
+# where the Electron launcher registers itself.
+_ELECTRON_RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
+_ELECTRON_RUN_VALUE = 'SalesBuddy'
+
+
+def _electron_exe_path() -> Path:
+    """Path to the staged Electron executable used for login autostart."""
+    install_dir = Path(current_app.root_path).parent
+    return install_dir / 'electron-dist' / 'Sales Buddy.exe'
+
+
+def _check_electron_autostart() -> dict:
+    """Query the HKCU Run entry that launches the Electron app at login.
+
+    Returns the same shape as ``_check_scheduled_task`` so the autostart
+    endpoints can treat both mechanisms uniformly. HKCU Run has no
+    enabled/disabled state - presence means "runs at login".
+    """
+    result = {'exists': False, 'next_run': None, 'status': None}
+    if sys.platform != 'win32':
+        return result
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _ELECTRON_RUN_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, _ELECTRON_RUN_VALUE)
+            if value:
+                result['exists'] = True
+                result['status'] = 'Active'
+    except FileNotFoundError:
+        pass  # Key or value absent - autostart not registered.
+    except OSError:
+        pass
+    return result
+
+
+def _set_electron_autostart(enabled: bool) -> dict:
+    """Add or remove the HKCU Run entry for the Electron app.
+
+    Enabling writes the quoted exe path (matching migrate-to-electron.ps1);
+    disabling deletes the value, since HKCU Run has no disabled state.
+    """
+    if sys.platform != 'win32':
+        return {'success': False, 'error': 'Autostart is only supported on Windows.'}
+    try:
+        import winreg
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, _ELECTRON_RUN_KEY, 0, winreg.KEY_SET_VALUE
+        ) as key:
+            if enabled:
+                exe = _electron_exe_path()
+                if not exe.is_file():
+                    return {
+                        'success': False,
+                        'error': f'Desktop app not found at {exe}.',
+                    }
+                winreg.SetValueEx(
+                    key, _ELECTRON_RUN_VALUE, 0, winreg.REG_SZ, f'"{exe}"'
+                )
+            else:
+                try:
+                    winreg.DeleteValue(key, _ELECTRON_RUN_VALUE)
+                except FileNotFoundError:
+                    pass  # Already absent - nothing to disable.
+        return {'success': True}
+    except OSError as e:
+        return {'success': False, 'error': str(e)}
+
+
 @admin_bp.route('/api/admin/backup/status', methods=['GET'])
 def api_backup_status():
     """Return backup configuration and recent backup list."""
@@ -1015,6 +1086,18 @@ def api_task_toggle(task_key: str):
     if enabled is None:
         return jsonify({'success': False, 'error': 'Missing enabled field.'}), 400
 
+    # Under the Electron shell, autostart is an HKCU Run entry, not a task.
+    if task_key == 'autostart' and _is_electron():
+        result = _set_electron_autostart(bool(enabled))
+        if result['success']:
+            info = _check_electron_autostart()
+            return jsonify({
+                'success': True,
+                'task_status': info['status'],
+                'task_exists': info['exists'],
+            })
+        return jsonify(result), 500
+
     result = _set_scheduled_task_enabled(task_name, bool(enabled))
     if result['success']:
         task_info = _check_scheduled_task(task_name)
@@ -1039,6 +1122,27 @@ def api_task_register(task_key: str):
     """
     if task_key not in ('backup', 'autostart'):
         return jsonify({'success': False, 'error': 'Unknown task key.'}), 400
+
+    # Under the Electron shell, autostart is an HKCU Run entry, not a task.
+    if task_key == 'autostart' and _is_electron():
+        existing = _check_electron_autostart()
+        if existing['exists']:
+            return jsonify({
+                'success': True,
+                'task_exists': True,
+                'task_status': existing['status'],
+                'already_existed': True,
+            })
+        result = _set_electron_autostart(True)
+        if not result['success']:
+            return jsonify(result), 500
+        info = _check_electron_autostart()
+        return jsonify({
+            'success': True,
+            'task_exists': info['exists'],
+            'task_status': info['status'],
+            'task_next_run': info['next_run'],
+        })
 
     # If the task already exists, treat as success (idempotent UX).
     task_name = _BACKUP_TASK_NAME if task_key == 'backup' else _AUTOSTART_TASK_NAME
@@ -1066,8 +1170,11 @@ def api_task_register(task_key: str):
 
 @admin_bp.route('/api/admin/tasks/autostart/status', methods=['GET'])
 def api_autostart_status():
-    """Return the autostart scheduled task status."""
-    task_info = _check_scheduled_task(_AUTOSTART_TASK_NAME)
+    """Return login-autostart status (Electron Run entry or Flask scheduled task)."""
+    if _is_electron():
+        task_info = _check_electron_autostart()
+    else:
+        task_info = _check_scheduled_task(_AUTOSTART_TASK_NAME)
     return jsonify({
         'task_exists': task_info['exists'],
         'task_next_run': task_info['next_run'],
