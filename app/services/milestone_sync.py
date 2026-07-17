@@ -33,7 +33,7 @@ from app.services.msx_api import (
     TASK_CATEGORIES,
     HOK_TASK_CATEGORIES,
 )
-from app.services.msx_auth import is_vpn_blocked
+from app.services.msx_auth import is_vpn_blocked, set_vpn_blocked
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +312,8 @@ def sync_all_customer_milestones_stream(
     vpn_hit = False
     total_opps_synced = 0
     total_opps_updated = 0
+    opp_fetch_failures = 0
+    total_opp_chunks = 0
     _OPP_CHUNK = 15  # accounts per OData call
 
     if opp_account_ids:
@@ -344,6 +346,9 @@ def sync_all_customer_milestones_stream(
                     logger.exception("Phase 1a opp chunk failed")
                     batch_opp_result = {"success": False}
 
+                if not batch_opp_result.get("success"):
+                    opp_fetch_failures += 1
+
                 if batch_opp_result.get("success"):
                     for acct_id, opps in batch_opp_result.get(
                         "by_account", {}
@@ -367,6 +372,20 @@ def sync_all_customer_milestones_stream(
                     'progress': min(pct, 8),
                 })
 
+    # If we couldn't reach MSX for ANY opportunity chunk, this is almost always
+    # an off-VPN / off-corpnet connectivity failure. Abort BEFORE the write
+    # phase so we never misreport active milestones as "deactivated" just
+    # because the fetch failed - and surface a clear VPN message instead of
+    # scary numbers.
+    if is_vpn_blocked() or (total_opp_chunks > 0 and opp_fetch_failures >= total_opp_chunks):
+        if not is_vpn_blocked():
+            set_vpn_blocked("Couldn't reach MSX - connect to VPN/corpnet and retry.")
+        yield _sse_event('vpn_blocked', {
+            'message': "Couldn't reach MSX. If you're off VPN/corpnet, connect "
+                       "and try again - no milestones were changed.",
+        })
+        return
+
     # -----------------------------------------------------------------
     # Phase 1b: Batch fetch milestones by opportunity ID (batched OData)
     # -----------------------------------------------------------------
@@ -375,6 +394,8 @@ def sync_all_customer_milestones_stream(
         cid: [] for cid, _, _ in customer_tasks
     }
     all_opp_ids = list(opp_map.keys())
+    ms_fetch_failures = 0
+    total_ms_chunks = 0
     _MS_CHUNK = 20  # opp IDs per OData call (matches batch_get_milestones default)
 
     if all_opp_ids:
@@ -383,6 +404,7 @@ def sync_all_customer_milestones_stream(
             for i in range(0, len(all_opp_ids), _MS_CHUNK)
         ]
         total_chunks = len(opp_chunks)
+        total_ms_chunks = total_chunks
         ms_total = 0
 
         # Phase 1b: parallelize milestone chunks with 3 workers. Milestones
@@ -405,6 +427,9 @@ def sync_all_customer_milestones_stream(
                 except Exception:
                     logger.exception("Phase 1b milestone chunk failed")
                     ms_batch_result = {"success": False}
+
+                if not ms_batch_result.get("success"):
+                    ms_fetch_failures += 1
 
                 if ms_batch_result.get("success"):
                     for opp_id, ms_list in ms_batch_result.get(
@@ -460,6 +485,18 @@ def sync_all_customer_milestones_stream(
                     'status': 'fetching',
                     'progress': min(pct, 76),
                 })
+
+    # Same connectivity guard for the milestone fetch phase: if we had
+    # opportunities but every milestone chunk failed, bail before writing so we
+    # don't misreport deactivations.
+    if is_vpn_blocked() or (total_ms_chunks > 0 and ms_fetch_failures >= total_ms_chunks):
+        if not is_vpn_blocked():
+            set_vpn_blocked("Couldn't reach MSX - connect to VPN/corpnet and retry.")
+        yield _sse_event('vpn_blocked', {
+            'message': "Couldn't reach MSX. If you're off VPN/corpnet, connect "
+                       "and try again - no milestones were changed.",
+        })
+        return
 
     ms_count = sum(len(v) for v in milestones_by_customer.values())
     yield _sse_event('progress', {
