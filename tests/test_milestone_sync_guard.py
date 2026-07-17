@@ -32,8 +32,11 @@ def test_stream_aborts_on_wholesale_fetch_failure(app, sample_data):
         ms_id = ms.id
 
         # Simulate off-VPN: account id extracts fine, but every opportunity
-        # fetch fails.
-        with patch.object(milestone_sync, 'extract_account_id_from_url',
+        # fetch fails. The preflight connectivity check passes (this test
+        # targets the per-phase wholesale-failure guard, not the preflight).
+        with patch.object(milestone_sync, 'test_connection',
+                          return_value={'success': True}), \
+                patch.object(milestone_sync, 'extract_account_id_from_url',
                           return_value='acct-123'), \
                 patch.object(milestone_sync, 'batch_get_opportunities',
                              return_value={'success': False}):
@@ -45,6 +48,42 @@ def test_stream_aborts_on_wholesale_fetch_failure(app, sample_data):
         assert 'event: complete' not in joined
 
         # The active milestone was NOT touched.
+        refreshed = db.session.get(Milestone, ms_id)
+        assert refreshed.last_synced_at is None
+        assert refreshed.msx_status == 'On Track'
+
+
+def test_stream_bails_immediately_when_preflight_detects_vpn(app, sample_data):
+    """Off-VPN preflight -> vpn_blocked before any batch fetch is dispatched."""
+    with app.app_context():
+        cust = Customer.query.filter(
+            Customer.tpid_url.isnot(None), Customer.tpid_url != ''
+        ).first()
+
+        ms = Milestone(
+            url='https://example.com/ms',
+            title='Keep me active',
+            msx_milestone_id='guid-keepme-preflight',
+            msx_status='On Track',
+            customer_id=cust.id,
+            on_my_team=False,
+        )
+        db.session.add(ms)
+        db.session.commit()
+        ms_id = ms.id
+
+        # Preflight reports VPN blocked. The batch fetch must never run.
+        with patch.object(milestone_sync, 'test_connection',
+                          return_value={'success': False, 'vpn_blocked': True}), \
+                patch.object(milestone_sync, 'batch_get_opportunities') as mock_batch:
+            events = list(milestone_sync.sync_all_customer_milestones_stream())
+
+        joined = '\n'.join(events)
+        assert 'event: vpn_blocked' in joined
+        assert 'event: complete' not in joined
+        # We bailed on the single preflight call - no batches dispatched.
+        mock_batch.assert_not_called()
+
         refreshed = db.session.get(Milestone, ms_id)
         assert refreshed.last_synced_at is None
         assert refreshed.msx_status == 'On Track'

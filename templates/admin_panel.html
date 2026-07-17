@@ -2183,6 +2183,12 @@ function applyUpdate() {
     // disable the buttons.
     const last = window._lastUpdateCheckData || {};
     const pending = (last.changelog && Array.isArray(last.changelog.pending)) ? last.changelog.pending : [];
+    // Snapshot the commit the running server booted from. The poller uses
+    // this to tell the OLD server (still answering /health during the
+    // restart window) apart from the NEW one that booted the update. Under
+    // the supervisor the old web process stays up until the tree is torn
+    // down, so "any 200 from /health" is NOT proof the update landed.
+    const preCommit = last.boot_commit || last.local_commit || null;
     card.innerHTML = `
         <div class="d-flex align-items-center mb-2">
             <span class="spinner-border spinner-border-sm text-primary me-2" role="status"></span>
@@ -2205,16 +2211,19 @@ function applyUpdate() {
             }
             const msgEl = document.getElementById('updateProgressMsg');
             if (msgEl) msgEl.textContent = 'Waiting for server to restart...';
-            // Start a display timer and poll /health independently
+            // Start a display timer and poll /health independently. Wait a
+            // little longer before the first poll so the old server has a
+            // chance to actually go down - the commit check below is the real
+            // guard, this just avoids a burst of pointless early polls.
             startUpdateTimer();
-            setTimeout(() => pollForServer(0), 3000);
+            setTimeout(() => pollForServer(0, preCommit, false), 5000);
         })
         .catch(() => {
             // Connection lost means the server is restarting -- that's expected
             const msgEl = document.getElementById('updateProgressMsg');
             if (msgEl) msgEl.textContent = 'Server is restarting...';
             startUpdateTimer();
-            setTimeout(() => pollForServer(0), 3000);
+            setTimeout(() => pollForServer(0, preCommit, false), 5000);
         });
 }
 
@@ -2244,8 +2253,8 @@ function moveToElectron() {
         });
 }
 
-function pollForServer(attempts) {
-    const maxAttempts = 60;  // Give up after 60 seconds
+function pollForServer(attempts, preCommit, sawDown) {
+    const maxAttempts = 90;  // Give up after ~90s (pip install can be slow)
 
     if (attempts >= maxAttempts) {
         // Stop the display timer
@@ -2261,17 +2270,41 @@ function pollForServer(attempts) {
 
     fetch('/health', { cache: 'no-store' })
         .then(r => {
-            if (r.ok) {
-                if (window._updateTimerId) clearInterval(window._updateTimerId);
-                const msgEl = document.getElementById('updateProgressMsg');
-                if (msgEl) msgEl.textContent = 'Server is back! Reloading...';
-                setTimeout(() => location.reload(), 500);
-            } else {
-                setTimeout(() => pollForServer(attempts + 1), 1000);
+            if (!r.ok) {
+                // Server answered but isn't ready (e.g. DB warming up). Treat
+                // it as still-restarting and remember we saw it degraded.
+                setTimeout(() => pollForServer(attempts + 1, preCommit, true), 1000);
+                return;
             }
+            return r.json().then(data => {
+                const nowCommit = (data && data.commit) ? data.commit : null;
+                // Decide whether THIS response is the NEW server:
+                //  - Best signal: the running build's commit changed.
+                //  - Fallback (old build with no /health commit yet): only
+                //    trust a 200 once we've actually seen the server go down,
+                //    so we don't latch onto the old process still answering
+                //    during the restart window.
+                let isNewServer;
+                if (preCommit && nowCommit) {
+                    isNewServer = (nowCommit !== preCommit);
+                } else {
+                    isNewServer = !!sawDown;
+                }
+                if (isNewServer) {
+                    if (window._updateTimerId) clearInterval(window._updateTimerId);
+                    const msgEl = document.getElementById('updateProgressMsg');
+                    if (msgEl) msgEl.textContent = 'Server is back! Reloading...';
+                    setTimeout(() => location.reload(), 500);
+                } else {
+                    // Old server still up - keep waiting for the real restart.
+                    setTimeout(() => pollForServer(attempts + 1, preCommit, sawDown), 1000);
+                }
+            });
         })
         .catch(() => {
-            setTimeout(() => pollForServer(attempts + 1), 1000);
+            // Connection refused = server is down mid-restart. Record that we
+            // saw it go down so the fallback path can trust the next 200.
+            setTimeout(() => pollForServer(attempts + 1, preCommit, true), 1000);
         });
 }
 

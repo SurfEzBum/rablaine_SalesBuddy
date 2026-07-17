@@ -8,6 +8,13 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/17/2026
+
+- Off-VPN milestone syncs now bail in about a second. Before starting, the sync makes a single quick check that it can actually reach MSX - if you're off VPN/corpnet, it stops right away with the "connect to VPN and retry" banner instead of grinding through batch after batch for 15+ seconds first. Nothing gets touched.
+- All MSX-backed syncs (milestones, marketing, and the rest) also bail out fast when a call confirms MSX is unreachable, instead of sitting through minutes of doomed retries.
+- Fixed the admin "Update Now" button falsely reporting "update available" right after you clicked it. It now waits for the *new* version to actually come up before reloading, instead of latching onto the old server that's still shutting down.
+- The desktop app is now officially version 1.0.
+
 ## 7/17/2026 - 6bbe2a9
 
 - Fixed the milestone tracker's MSX sync misbehaving when you're off VPN: it used to churn through and report a scary number of milestones as "deactivated" (with error noise) even though nothing had actually changed. It now detects that it can't reach MSX, stops immediately, and shows a clear "connect to VPN and retry" message - without touching any of your milestones.

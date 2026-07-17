@@ -30,6 +30,7 @@ from app.services.msx_api import (
     build_milestone_url,
     build_opportunity_url,
     build_task_url,
+    test_connection,
     TASK_CATEGORIES,
     HOK_TASK_CATEGORIES,
 )
@@ -281,6 +282,23 @@ def sync_all_customer_milestones_stream(
     # Mark sync as started so interrupted syncs are detectable
     SyncStatus.mark_started('milestones')
     yield _sse_event('start', {'total': total})
+
+    # -----------------------------------------------------------------
+    # Preflight: one lightweight MSX call (WhoAmI) to confirm we can
+    # actually reach MSX before fanning out into dozens of batched
+    # queries. Off VPN/corpnet this fails in ~1s, so we bail immediately
+    # with a clear banner instead of dispatching every batch first and
+    # only noticing 15s later. Non-VPN failures fall through to the normal
+    # flow, whose per-phase guards handle them as before.
+    # -----------------------------------------------------------------
+    conn = test_connection(quick=True)
+    if not conn.get('success') and (conn.get('vpn_blocked') or is_vpn_blocked()):
+        set_vpn_blocked("Couldn't reach MSX - connect to VPN/corpnet and retry.")
+        yield _sse_event('vpn_blocked', {
+            'message': "Couldn't reach MSX. If you're off VPN/corpnet, connect "
+                       "and try again - no milestones were changed.",
+        })
+        return
 
     # -----------------------------------------------------------------
     # Prep: extract account IDs (fast, main thread)

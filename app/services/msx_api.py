@@ -71,7 +71,8 @@ def _msx_request(
     url: str,
     headers: Optional[Dict[str, str]] = None,
     json_data: Optional[Dict] = None,
-    retry_on_auth_failure: bool = True
+    retry_on_auth_failure: bool = True,
+    max_attempts: Optional[int] = None
 ) -> requests.Response:
     """
     Make an MSX API request with automatic retries.
@@ -133,26 +134,38 @@ def _msx_request(
     # Retry loop for transient failures (timeouts, connection errors)
     retry_cb = getattr(msx_retry_state, 'callback', None)
     last_exception = None
-    for attempt in range(MAX_RETRIES):
+    attempt_limit = max_attempts if max_attempts is not None else MAX_RETRIES
+    for attempt in range(attempt_limit):
         try:
             response = _do_request(headers)
             last_exception = None
             break  # Success — got a response (even if it's an error status)
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             last_exception = e
-            if attempt < MAX_RETRIES - 1:
+            # If a concurrent MSX call already flagged us off-VPN, stop burning
+            # the (long) retry budget - bail this request immediately so syncs
+            # don't sit through minutes of doomed retries.
+            if is_vpn_blocked():
+                logger.warning("MSX already flagged off-VPN - aborting retries early")
+                raise
+            if attempt < attempt_limit - 1:
                 wait = RETRY_BACKOFF_SECONDS[min(attempt, len(RETRY_BACKOFF_SECONDS) - 1)]
                 logger.warning(
-                    f"MSX request {method} attempt {attempt + 1}/{MAX_RETRIES} failed "
+                    f"MSX request {method} attempt {attempt + 1}/{attempt_limit} failed "
                     f"({type(e).__name__}), retrying in {wait}s..."
                 )
                 if retry_cb:
-                    retry_cb(attempt + 1, MAX_RETRIES, wait, type(e).__name__)
+                    retry_cb(attempt + 1, attempt_limit, wait, type(e).__name__)
                 time.sleep(wait)
             else:
                 logger.error(
                     f"MSX request {method} failed after {MAX_RETRIES} attempts: {e}"
                 )
+                # Unreachable after every retry = we can't get to MSX at all,
+                # which is almost always off-VPN/corpnet (or an MSX outage).
+                # Flag it centrally so every sync's is_vpn_blocked() check bails
+                # early and shows the banner instead of grinding through.
+                set_vpn_blocked("Couldn't reach MSX after retries - connect to VPN/corpnet and retry.")
                 raise
     
     # Check for auth failures that might be due to stale token
@@ -181,6 +194,9 @@ def _msx_request(
                 response = _do_request(fresh_headers)
                 break
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                if is_vpn_blocked():
+                    logger.warning("MSX already flagged off-VPN - aborting retries early")
+                    raise
                 if attempt < MAX_RETRIES - 1:
                     wait = RETRY_BACKOFF_SECONDS[min(attempt, len(RETRY_BACKOFF_SECONDS) - 1)]
                     logger.warning(
@@ -190,6 +206,7 @@ def _msx_request(
                     time.sleep(wait)
                 else:
                     logger.error(f"MSX retry (fresh token) failed after {MAX_RETRIES} attempts: {e}")
+                    set_vpn_blocked("Couldn't reach MSX after retries - connect to VPN/corpnet and retry.")
                     raise
         
         if response.status_code in (401, 403):
@@ -225,10 +242,15 @@ def _msx_request(
     return response
 
 
-def test_connection() -> Dict[str, Any]:
+def test_connection(quick: bool = False) -> Dict[str, Any]:
     """
     Test the MSX connection by calling WhoAmI.
-    
+
+    Args:
+        quick: When True, make a single attempt (no retry backoff) so callers
+            using this purely as a connectivity preflight bail in ~1s off
+            VPN/corpnet instead of grinding through the full retry budget.
+
     Returns:
         Dict with:
         - success: bool
@@ -236,7 +258,10 @@ def test_connection() -> Dict[str, Any]:
         - error: str if failed
     """
     try:
-        response = _msx_request('GET', f"{CRM_BASE_URL}/WhoAmI")
+        response = _msx_request(
+            'GET', f"{CRM_BASE_URL}/WhoAmI",
+            max_attempts=1 if quick else None,
+        )
         
         if response.status_code == 200:
             data = response.json()
