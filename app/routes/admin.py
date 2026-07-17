@@ -80,7 +80,8 @@ def admin_panel():
         if started.year == now.year and started.month >= 7:
             fy_season = False
 
-    return render_template('admin_panel.html', stats=stats, fy_season=fy_season)
+    return render_template('admin_panel.html', stats=stats, fy_season=fy_season,
+                           is_electron=_is_electron())
 
 
 @admin_bp.route('/admin/ai-logs')
@@ -436,6 +437,48 @@ def api_update_apply():
     return jsonify({
         'success': True,
         'message': 'Update started. The server will restart momentarily.',
+    })
+
+
+@admin_bp.route('/api/admin/migrate-to-electron', methods=['POST'])
+def api_migrate_to_electron():
+    """Launch the Flask -> Electron desktop migration in a visible console.
+
+    Mirrors the Update button, but opens a real console window so the user can
+    watch the (longer, one-time) desktop-app build and read any error directly,
+    instead of the web page having to poll through its own Flask stack being
+    torn down. The migration script builds the shell BEFORE stopping the stack,
+    so a build failure leaves the current app running.
+    """
+    if sys.platform != 'win32':
+        return jsonify({'error': 'The desktop app is only supported on Windows'}), 400
+    if _is_electron():
+        return jsonify({'error': 'Already running as the desktop app'}), 400
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    script = repo_root / 'scripts' / 'migrate-to-electron.ps1'
+    if not script.exists():
+        return jsonify({'error': 'migrate-to-electron.ps1 not found'}), 500
+
+    # CREATE_NEW_CONSOLE gives the child its own visible window on the user's
+    # desktop (the autostart task runs in the interactive session). Wrap the
+    # script in a Read-Host so the window stays up after it finishes or fails.
+    CREATE_NEW_CONSOLE = 0x00000010
+    inner = (
+        f"& '{script}'; Write-Host ''; "
+        "Read-Host 'Setup finished - press Enter to close this window'"
+    )
+    cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-NoProfile',
+           '-Command', inner]
+    try:
+        subprocess.Popen(cmd, cwd=str(repo_root), creationflags=CREATE_NEW_CONSOLE)
+    except Exception as e:
+        return jsonify({'error': f'Failed to start setup: {e}'}), 500
+
+    return jsonify({
+        'success': True,
+        'message': ('A setup window has opened - follow it there. Sales Buddy '
+                    'will reopen as a desktop app when it finishes.'),
     })
 
 
