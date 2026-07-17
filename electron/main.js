@@ -338,6 +338,11 @@ function createWindow() {
     }
   });
 
+  // Keep the top-level Back/Forward buttons' enabled state in sync with the
+  // active page's history.
+  mainWindow.webContents.on('did-navigate', buildAppMenu);
+  mainWindow.webContents.on('did-navigate-in-page', buildAppMenu);
+
   // Close button hides to tray instead of quitting, so the background worker
   // keeps running.
   mainWindow.on('close', (e) => {
@@ -348,9 +353,27 @@ function createWindow() {
   });
 }
 
+// Direct-action navigation bound to the active page's history. Used by the
+// top-level "< Back" / "Forward >" menu buttons and their accelerators.
+function navHistory() {
+  return (mainWindow && !mainWindow.isDestroyed())
+    ? mainWindow.webContents.navigationHistory : null;
+}
+function goBack() {
+  const h = navHistory();
+  if (h && h.canGoBack()) h.goBack();
+}
+function goForward() {
+  const h = navHistory();
+  if (h && h.canGoForward()) h.goForward();
+}
+
 // Native application menu. Gives the shell the standard File/Edit/View/Window/
-// Help structure users expect from a desktop app (plus our own actions).
+// Help structure users expect from a desktop app (plus our own actions). The
+// leading "< Back" / "Forward >" entries are top-level buttons: clicking them
+// navigates immediately, no submenu.
 function buildAppMenu() {
+  const h = navHistory();
   const template = [
     {
       label: 'File',
@@ -423,6 +446,18 @@ function buildAppMenu() {
         { type: 'separator' },
         { label: 'About Sales Buddy', click: showAbout },
       ],
+    },
+    {
+      label: '< Back',
+      enabled: !!(h && h.canGoBack()),
+      accelerator: 'Alt+Left',
+      click: goBack,
+    },
+    {
+      label: 'Forward >',
+      enabled: !!(h && h.canGoForward()),
+      accelerator: 'Alt+Right',
+      click: goForward,
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
