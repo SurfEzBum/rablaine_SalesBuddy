@@ -122,6 +122,7 @@ issue_plans/
 electron/node_modules/
 electron/dist/
 electron/out/
+electron-dist/
 
 # Temp APIM policy files (may contain secrets)
 apim-policy*.json

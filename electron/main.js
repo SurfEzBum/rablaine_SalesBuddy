@@ -19,7 +19,17 @@ const path = require('path');
 const http = require('http');
 
 const APP_VERSION = require('./package.json').version;
-const REPO_ROOT = path.resolve(__dirname, '..');
+
+// Where the git-pulled Flask app lives (venv, supervisor, static, .env). In dev
+// we run `electron .` from inside the repo, so the repo is one level up from
+// electron/. When packaged, the signed exe is dropped in a subfolder of the
+// install dir (e.g. <install>\electron-dist\Sales Buddy.exe), so the repo is one
+// level up from the exe's folder. SALESBUDDY_REPO overrides both if set.
+const REPO_ROOT = process.env.SALESBUDDY_REPO
+  ? process.env.SALESBUDDY_REPO
+  : (app.isPackaged
+    ? path.resolve(path.dirname(process.execPath), '..')
+    : path.resolve(__dirname, '..'));
 const IS_WIN = process.platform === 'win32';
 const PYTHON = path.join(
   REPO_ROOT, 'venv', 'Scripts', IS_WIN ? 'python.exe' : 'python'
@@ -513,7 +523,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showWindow);
 
   app.whenReady().then(() => {
-    log('Electron ready');
+    log(`Electron ready (v${APP_VERSION}, packaged=${app.isPackaged}, repo=${REPO_ROOT})`);
     // Group under one taskbar icon and identify our notifications on Windows.
     if (IS_WIN) app.setAppUserModelId('com.salesbuddy.desktop');
     buildAppMenu();
