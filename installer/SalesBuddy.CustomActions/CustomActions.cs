@@ -186,6 +186,14 @@ namespace SalesBuddy.CustomActions
                     return ActionResult.Failure;
                 }
 
+                // Stop any running Sales Buddy (shell + backend) BEFORE we touch
+                // the repo, venv, or shell. A running app holds file handles that
+                // make git clean, pip install, and the shell restage race and leave
+                // a corrupt install (observed 2026-07-17: half-staged electron-dist
+                // + a dependency-less venv). No-op on a fresh box.
+                ProcessRunner.UpdateStatus(session, "Closing Sales Buddy if it's running...");
+                StopRunningApp(session, installDir);
+
                 // Step 6: Clone/update repository
                 ProcessRunner.UpdateStatus(session, "Setting up Sales Buddy...");
                 CloneOrUpdateRepo(session, installDir);
@@ -1263,6 +1271,73 @@ Write-Host 'winget installation complete.'
             bool ok = File.Exists(exe);
             session.Log($"Electron setup {(ok ? "succeeded" : "did NOT produce the exe")}: {exe}");
             return ok;
+        }
+
+        /// <summary>
+        /// Stop any running Sales Buddy (shell + backend) for THIS install before
+        /// the installer touches the repo, venv, or shell. A running app holds file
+        /// handles that make git clean, pip install, and the shell restage race and
+        /// leave a corrupt install - observed 2026-07-17 as a half-staged
+        /// electron-dist (missing icudtl.dat -> ICU crash) plus a dependency-less
+        /// venv. No-op on a fresh box (nothing matches).
+        /// </summary>
+        private static void StopRunningApp(Session session, string installDir)
+        {
+            string installLower = installDir.TrimEnd('\\').ToLowerInvariant();
+
+            // 1. Electron shell processes (unique product name; kills main + helpers).
+            foreach (var p in SafeGetProcesses("Sales Buddy"))
+            {
+                TryKill(session, p);
+            }
+
+            // 2. Backend python / waitress launched from THIS install's venv.
+            foreach (var name in new[] { "python", "pythonw", "waitress-serve" })
+            {
+                foreach (var p in SafeGetProcesses(name))
+                {
+                    string path = "";
+                    try { path = (p.MainModule?.FileName ?? "").ToLowerInvariant(); }
+                    catch { /* cross-bitness / access denied - can't confirm, so skip */ }
+                    if (path.Length > 0 && path.StartsWith(installLower))
+                    {
+                        TryKill(session, p);
+                    }
+                }
+            }
+
+            // 3. Wait (up to ~10s) for the shell exe handle to release so the later
+            //    restage can delete it cleanly instead of half-copying over a lock.
+            string exe = Path.Combine(installDir, "electron-dist", "Sales Buddy.exe");
+            for (int i = 0; i < 20 && File.Exists(exe); i++)
+            {
+                try
+                {
+                    using (File.Open(exe, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { break; }
+                }
+                catch { Thread.Sleep(500); }
+            }
+            session.Log("StopRunningApp: complete.");
+        }
+
+        private static Process[] SafeGetProcesses(string name)
+        {
+            try { return Process.GetProcessesByName(name); }
+            catch { return new Process[0]; }
+        }
+
+        private static void TryKill(Session session, Process p)
+        {
+            try
+            {
+                p.Kill();
+                p.WaitForExit(5000);
+                session.Log($"StopRunningApp: killed {p.ProcessName} pid {p.Id}.");
+            }
+            catch (Exception ex)
+            {
+                session.Log($"StopRunningApp: could not kill pid {p.Id}: {ex.Message}");
+            }
         }
 
         private static void ConfigureAutoStartTask(Session session, string installDir)

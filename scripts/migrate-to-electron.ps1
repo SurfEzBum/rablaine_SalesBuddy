@@ -110,13 +110,45 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe' O
     ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>$null | Out-Null }
 
 # --- 4. Stage the signed shell into <install>\electron-dist\ ---
+# Killing the shell above does NOT release its file handles instantly. Staging
+# before the lock clears is what corrupts electron-dist (a partial delete/copy
+# drops files like icudtl.dat -> "Invalid ICU data" crash on launch). So: wait
+# for the old exe to become deletable, then stage with retry + a completeness
+# check (file count + the two files whose absence we've actually been burned by).
 Write-Host "Staging Electron shell -> $destDir" -ForegroundColor Yellow
-if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force }
-New-Item -ItemType Directory -Path $destDir | Out-Null
-Copy-Item -Path (Join-Path $ElectronSource '*') -Destination $destDir -Recurse -Force
 $destExe = Join-Path $destDir $exeName
-if (-not (Test-Path $destExe)) {
-    Write-Host "ERROR: staging failed, $destExe missing." -ForegroundColor Red
+if (Test-Path $destExe) {
+    for ($w = 0; $w -lt 20; $w++) {
+        try {
+            $probe = [System.IO.File]::Open($destExe, 'Open', 'ReadWrite', 'None')
+            $probe.Close(); $probe.Dispose()
+            break  # got an exclusive handle -> the shell has fully released it
+        } catch { Start-Sleep -Milliseconds 500 }
+    }
+}
+$srcFileCount = (Get-ChildItem $ElectronSource -Recurse -File -ErrorAction SilentlyContinue).Count
+$staged = $false
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+        if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force -ErrorAction Stop }
+    } catch {
+        Write-Host "  Couldn't fully clear the old shell (attempt $attempt): $($_.Exception.Message)" -ForegroundColor DarkYellow
+        Start-Sleep -Seconds 1
+    }
+    if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir | Out-Null }
+    Copy-Item -Path (Join-Path $ElectronSource '*') -Destination $destDir -Recurse -Force -ErrorAction SilentlyContinue
+    $dstFileCount = (Get-ChildItem $destDir -Recurse -File -ErrorAction SilentlyContinue).Count
+    if ((Test-Path (Join-Path $destDir $exeName)) -and
+        (Test-Path (Join-Path $destDir 'icudtl.dat')) -and
+        ($dstFileCount -ge $srcFileCount)) {
+        $staged = $true
+        break
+    }
+    Write-Host "  Stage incomplete ($dstFileCount/$srcFileCount files) - retrying..." -ForegroundColor DarkYellow
+    Start-Sleep -Seconds 1
+}
+if (-not $staged) {
+    Write-Host "ERROR: could not fully stage the desktop shell after 3 attempts." -ForegroundColor Red
     exit 1
 }
 
@@ -169,6 +201,20 @@ if (-not $NoDesktop) {
 if (-not $NoStartMenu) {
     if (-not (Test-Path $startMenu)) { New-Item -ItemType Directory -Path $startMenu | Out-Null }
     New-AppShortcut (Join-Path $startMenu "$appName.lnk") $destExe $icon 'Open Sales Buddy'
+}
+
+# --- 6.5 Verify the backend venv is usable; self-heal if deps are missing ---
+# A prior interrupted install can leave a fresh venv with no packages
+# ("No module named flask"), which crash-loops the supervisor forever. Cheap
+# import probe; only reinstalls when actually broken so healthy installs stay fast.
+$venvPy = Join-Path $repoRoot 'venv\Scripts\python.exe'
+$reqFile = Join-Path $repoRoot 'requirements.txt'
+if ((Test-Path $venvPy) -and (Test-Path $reqFile)) {
+    & $venvPy -c "import flask" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Backend dependencies missing - installing (one-time)..." -ForegroundColor Yellow
+        & $venvPy -m pip install -q -r $reqFile
+    }
 }
 
 # --- 7. Launch Electron now ---
