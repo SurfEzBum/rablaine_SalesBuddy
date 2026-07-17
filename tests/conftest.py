@@ -8,6 +8,16 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 
+# The dev .env sets FLASK_ENV=development, which load_dotenv() (called at import
+# time in app/__init__.py) pulls into the process. That flips env-aware code
+# paths - backup writes to "SalesBuddyDev", telemetry disables itself - and makes
+# the suite's result depend on the ambient shell (green when FLASK_ENV is already
+# set, red in a fresh post-reboot shell). Force a deterministic production env
+# BEFORE app is imported. Tests that exercise dev behavior set FLASK_ENV
+# explicitly via monkeypatch / patch.dict, which overrides this.
+os.environ['FLASK_ENV'] = 'production'
+
+
 @pytest.fixture(autouse=True)
 def _block_msx_comment_calls():
     """Prevent any test from making real MSX milestone comment API calls.
