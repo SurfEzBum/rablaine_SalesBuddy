@@ -18,6 +18,7 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 
+const APP_VERSION = require('./package.json').version;
 const REPO_ROOT = path.resolve(__dirname, '..');
 const IS_WIN = process.platform === 'win32';
 const PYTHON = path.join(
@@ -299,15 +300,43 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
+    minWidth: 900,
+    minHeight: 600,
     show: false,
     title: 'Sales Buddy',
     icon: ICON,
-    autoHideMenuBar: true,
+    backgroundColor: '#0d1117',
+    autoHideMenuBar: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
 
   mainWindow.loadURL(BASE_URL);
   mainWindow.once('ready-to-show', () => mainWindow.show());
+
+  // Keep the window title in sync with the page (falls back to 'Sales Buddy').
+  mainWindow.on('page-title-updated', (e) => {
+    e.preventDefault();
+    const t = mainWindow.webContents.getTitle();
+    mainWindow.setTitle(t ? `${t} - Sales Buddy` : 'Sales Buddy');
+  });
+
+  // Keep in-app navigation on the local server; send anything else (external
+  // links, target=_blank, http(s) to other hosts) to the user's real browser.
+  const isLocal = (url) => url.startsWith(BASE_URL) ||
+    url.startsWith(`http://localhost:${PORT}`) ||
+    url.startsWith(`http://127.0.0.1:${PORT}`) ||
+    url.startsWith('data:');
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isLocal(url)) return { action: 'allow' };
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (!isLocal(url)) {
+      e.preventDefault();
+      shell.openExternal(url);
+    }
+  });
 
   // Close button hides to tray instead of quitting, so the background worker
   // keeps running.
@@ -316,6 +345,102 @@ function createWindow() {
       e.preventDefault();
       mainWindow.hide();
     }
+  });
+}
+
+// Native application menu. Gives the shell the standard File/Edit/View/Window/
+// Help structure users expect from a desktop app (plus our own actions).
+function buildAppMenu() {
+  const template = [
+    {
+      label: 'File',
+      submenu: [
+        { label: 'Open in Browser', click: () => shell.openExternal(BASE_URL) },
+        { type: 'separator' },
+        { label: 'Check for Updates...', click: () => checkForUpdates(true) },
+        {
+          label: 'Restart Backend',
+          click: () => {
+            stopStack();
+            startStack();
+            if (mainWindow) mainWindow.loadURL(BASE_URL);
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Quit',
+          accelerator: 'CmdOrCtrl+Q',
+          click: () => { isQuitting = true; app.quit(); },
+        },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Reload',
+          accelerator: 'CmdOrCtrl+R',
+          click: () => { if (mainWindow) mainWindow.loadURL(BASE_URL); },
+        },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        {
+          label: 'Hide to Tray',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => { if (mainWindow) mainWindow.hide(); },
+        },
+      ],
+    },
+    {
+      role: 'help',
+      submenu: [
+        { label: 'Open Logs Folder', click: () => shell.openPath(LOG_DIR) },
+        { label: 'Open App Folder', click: () => shell.openPath(REPO_ROOT) },
+        { type: 'separator' },
+        { label: 'About Sales Buddy', click: showAbout },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function showAbout() {
+  dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: 'About Sales Buddy',
+    message: 'Sales Buddy',
+    detail:
+      `Version ${APP_VERSION}\n` +
+      `Electron ${process.versions.electron}  •  ` +
+      `Chromium ${process.versions.chrome}  •  Node ${process.versions.node}\n\n` +
+      'A note-taking desktop app for Azure technical sellers.',
+    buttons: ['OK'],
+    icon: fs.existsSync(ICON) ? ICON : undefined,
+    noLink: true,
   });
 }
 
@@ -354,6 +479,9 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     log('Electron ready');
+    // Group under one taskbar icon and identify our notifications on Windows.
+    if (IS_WIN) app.setAppUserModelId('com.salesbuddy.desktop');
+    buildAppMenu();
     startStack();
     waitForServer(() => {
       createWindow();
