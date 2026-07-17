@@ -323,11 +323,13 @@ function createWindow() {
   mainWindow.loadURL(BASE_URL);
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
-  // Keep the window title in sync with the page (falls back to 'Sales Buddy').
+  // Mirror the page's <title>, which already ends in "- Sales Buddy". Appending
+  // the app name here would double it ("Home - Sales Buddy - Sales Buddy"); only
+  // fall back to the bare app name when a page provides no title.
   mainWindow.on('page-title-updated', (e) => {
     e.preventDefault();
     const t = mainWindow.webContents.getTitle();
-    mainWindow.setTitle(t ? `${t} - Sales Buddy` : 'Sales Buddy');
+    mainWindow.setTitle(t || 'Sales Buddy');
   });
 
   // Keep in-app navigation on the local server; send anything else (external
