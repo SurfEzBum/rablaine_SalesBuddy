@@ -82,8 +82,6 @@ class TestTelemetryHelpers:
         assert _should_log('/static/css/style.css') is False
         assert _should_log('/static/js/app.js') is False
         assert _should_log('/health') is False
-        assert _should_log('/sw.js') is False
-        assert _should_log('/manifest.json') is False
         assert _should_log('/favicon.ico') is False
 
 
@@ -234,22 +232,23 @@ class TestTelemetryCapture:
             assert event.response_time_ms is not None
             assert event.response_time_ms >= 0
 
-    def test_pwa_cookie_passed_to_shipper(self, client, app):
-        """The sb_app_mode cookie should be forwarded to the telemetry shipper."""
+    def test_app_mode_electron_when_env_set(self, client, app, monkeypatch):
+        """With SALESBUDDY_ELECTRON set, app_mode should be 'electron'."""
+        monkeypatch.setenv('SALESBUDDY_ELECTRON', '1')
         with patch('app.services.telemetry_shipper.queue_event') as mock_queue:
-            client.set_cookie('sb_app_mode', 'standalone')
             client.get('/customers')
             assert mock_queue.called
             _, kwargs = mock_queue.call_args
-            assert kwargs.get('app_mode') == 'standalone'
+            assert kwargs.get('app_mode') == 'electron'
 
-    def test_pwa_cookie_defaults_to_unknown(self, client, app):
-        """Without the cookie, app_mode should default to 'unknown'."""
+    def test_app_mode_defaults_to_browser(self, client, app, monkeypatch):
+        """Without the Electron env, app_mode should default to 'browser'."""
+        monkeypatch.delenv('SALESBUDDY_ELECTRON', raising=False)
         with patch('app.services.telemetry_shipper.queue_event') as mock_queue:
             client.get('/customers')
             assert mock_queue.called
             _, kwargs = mock_queue.call_args
-            assert kwargs.get('app_mode') == 'unknown'
+            assert kwargs.get('app_mode') == 'browser'
 
 
 # =============================================================================

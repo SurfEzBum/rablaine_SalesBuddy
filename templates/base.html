@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Sales Buddy{% endblock %}</title>
-    <script>if(window.matchMedia('(display-mode: standalone)').matches){document.title=document.title.replace(/ - Sales Buddy$/,'')}</script>
     {% if dark_mode is none %}
     <script>
         // Auto-detect OS theme on first launch, before Bootstrap paints, to
@@ -27,8 +26,6 @@
     {% endif %}
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon.png') }}">
-    <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="{{ '#0E1A2B' if dark_mode else '#F6F8FA' }}">
     
     <!-- DNS Prefetch and Preconnect for faster CDN loading -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -1611,38 +1608,6 @@
     });
     </script>
 
-    <!-- PWA: strip redundant app name from title, hide navbar brand, set telemetry cookie,
-         and keep all same-origin navigation inside the PWA window -->
-    <script>
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-        document.title = document.title.replace(/ - Sales Buddy$/, '');
-        var brand = document.querySelector('.navbar-brand');
-        if (brand) brand.style.display = 'none';
-        document.cookie = 'sb_app_mode=standalone;path=/;SameSite=Strict';
-
-        // In standalone PWA mode, clicking <a> tags can sometimes open the
-        // default browser instead of navigating inside the PWA window.
-        // Intercept clicks on same-origin links and force in-app navigation.
-        document.addEventListener('click', function(e) {
-            var link = e.target.closest('a[href]');
-            if (!link) return;
-            var href = link.getAttribute('href');
-            if (!href || href === '#' || href.startsWith('javascript:')) return;
-            // Skip links that explicitly want a new window
-            if (link.getAttribute('target') === '_blank') return;
-            // Only handle same-origin URLs
-            try {
-                var url = new URL(href, window.location.origin);
-                if (url.origin !== window.location.origin) return;
-            } catch(ex) { return; }
-            e.preventDefault();
-            window.location.href = href;
-        });
-    } else if (!document.cookie.includes('sb_app_mode=')) {
-        document.cookie = 'sb_app_mode=browser;path=/;SameSite=Strict';
-    }
-    </script>
-
     <!-- Share Modal (global — used by all share features) -->
     <div class="modal fade" id="shareModal" tabindex="-1" aria-labelledby="shareModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
@@ -1806,11 +1771,6 @@
                 const progressBar = document.getElementById('onboardingProgress');
                 const nextBtn = document.getElementById('onboardNextBtn');
                 const backBtn = document.getElementById('onboardBackBtn');
-
-                // PWA install prompt removed from onboarding. Browsers
-                // surface the install affordance on their own (URL-bar
-                // icon); putting it here led non-technical users to install
-                // the app without realizing what they'd done.
 
 
                 function showStep(step) {
@@ -2945,10 +2905,6 @@
             darkModeIcon.className = newTheme === 'dark' ? 'bi bi-moon-fill' : 'bi bi-sun-fill';
             darkModeLabel.textContent = newTheme === 'dark' ? 'Light Mode' : 'Dark Mode';
             
-            // Update PWA title bar color
-            var metaTheme = document.querySelector('meta[name="theme-color"]');
-            if (metaTheme) metaTheme.content = newTheme === 'dark' ? '#0E1A2B' : '#F6F8FA';
-            
             // Save preference to server
             try {
                 await fetch('/api/preferences/dark-mode', {
@@ -3778,12 +3734,6 @@
             tourDriver.drive();
         }, 500);
     });
-    </script>
-    <script>
-    // Register PWA service worker
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js');
-    }
     </script>
 
     {% if config.DEBUG %}

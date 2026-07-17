@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/17/2026
+
+- Removed the old "install as an app" (PWA) support now that Sales Buddy has a real desktop app. This drops the service worker, web manifest, and offline page - which also clears out a class of stale-cache gremlins where an installed shortcut could show an old cached version. Use the desktop app (or just a browser tab) going forward.
+
 ## 7/17/2026 - 89c2ac6
 
 - Off-VPN milestone syncs now bail in about a second. Before starting, the sync makes a single quick check that it can actually reach MSX - if you're off VPN/corpnet, it stops right away with the "connect to VPN and retry" banner instead of grinding through batch after batch for 15+ seconds first. Nothing gets touched.

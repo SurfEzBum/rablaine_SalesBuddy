@@ -227,7 +227,7 @@ def queue_event(
         status_code: HTTP response status code.
         response_time_ms: Request duration in milliseconds.
         is_api: Whether the request was to an API endpoint.
-        app_mode: Client app mode - "standalone" (PWA), "browser", or "unknown".
+        app_mode: Which shell served the request - "electron" or "browser".
     """
     if not is_telemetry_enabled():
         return

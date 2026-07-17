@@ -3,7 +3,7 @@ Main routes for Sales Buddy.
 Handles index, search, preferences, and API endpoints.
 """
 from flask import (Blueprint, render_template, request, redirect, url_for,
-                   flash, jsonify, session, g, send_from_directory, current_app)
+                   flash, jsonify, session, g, current_app)
 from datetime import datetime, timezone, date, timedelta
 from sqlalchemy import func, extract
 import calendar as cal
@@ -20,34 +20,6 @@ from app.services.seller_mode import get_seller_mode_seller_id
 
 # Create blueprint
 main_bp = Blueprint('main', __name__)
-
-
-# =============================================================================
-# PWA Support
-# =============================================================================
-
-@main_bp.route('/sw.js')
-def service_worker():
-    """Serve service worker from root scope so it can control all routes."""
-    response = send_from_directory(
-        os.path.join(current_app.root_path, '..', 'static'),
-        'sw.js',
-        mimetype='application/javascript'
-    )
-    # Always revalidate - service worker updates must propagate quickly
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    response.headers['Service-Worker-Allowed'] = '/'
-    return response
-
-
-@main_bp.route('/manifest.json')
-def manifest():
-    """Serve PWA manifest from root path."""
-    return send_from_directory(
-        os.path.join(current_app.root_path, '..', 'static'),
-        'manifest.json',
-        mimetype='application/json'
-    )
 
 
 # =============================================================================

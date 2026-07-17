@@ -15,6 +15,7 @@ use?" or "which API calls fail most often?"
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Optional
 from urllib.parse import urlparse
@@ -53,8 +54,6 @@ _BLUEPRINT_CATEGORIES: dict[str, str] = {
 _EXCLUDE_PREFIXES: tuple[str, ...] = (
     '/static/',
     '/health',
-    '/sw.js',
-    '/manifest.json',
     '/favicon.ico',
 )
 
@@ -218,7 +217,11 @@ def init_telemetry(app: Flask) -> None:
         # local DB failure doesn't prevent central shipping.
         try:
             from app.services.telemetry_shipper import queue_event
-            app_mode = request.cookies.get('sb_app_mode', 'unknown')
+            # Which shell served this request: the Electron desktop app sets
+            # SALESBUDDY_ELECTRON; anything else is a plain browser tab.
+            app_mode = 'electron' if os.environ.get(
+                'SALESBUDDY_ELECTRON', ''
+            ).strip().lower() in ('1', 'true', 'yes') else 'browser'
             queue_event(
                 category=category,
                 method=request.method,
