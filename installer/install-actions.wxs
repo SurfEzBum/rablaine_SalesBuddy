@@ -72,7 +72,27 @@
                       Impersonate="yes"
                       Return="ignore" />
 
+        <!-- ================================================================
+             RUNNING-APP GATE: immediate action (runs as the interactive user,
+             before LaunchConditions in BOTH sequences) that sets the
+             SALESBUDDYRUNNING property. The <Launch> condition in Package.wxs
+             then refuses the install when the desktop app is running, so it
+             can't hold file locks and corrupt the upgrade. Runs in the UI
+             sequence (interactive) and the execute sequence (covers silent).
+             ================================================================ -->
+        <CustomAction Id="CheckAppRunning"
+                      BinaryRef="CustomActionsDll"
+                      DllEntry="CheckAppRunning"
+                      Execute="immediate"
+                      Impersonate="yes"
+                      Return="check" />
+
+        <InstallUISequence>
+            <Custom Action="CheckAppRunning" Before="LaunchConditions" />
+        </InstallUISequence>
+
         <InstallExecuteSequence>
+            <Custom Action="CheckAppRunning" Before="LaunchConditions" />
             <Custom Action="SetInstallActionData" Before="InstallAction" Condition="NOT REMOVE" />
             <Custom Action="InstallAction" After="InstallFiles" Condition="NOT REMOVE" />
             <Custom Action="SetUninstallActionData" Before="UninstallAction" Condition="REMOVE=&quot;ALL&quot;" />

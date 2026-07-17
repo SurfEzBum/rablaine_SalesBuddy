@@ -369,6 +369,37 @@ namespace SalesBuddy.CustomActions
             return ActionResult.Success;
         }
 
+        /// <summary>
+        /// Immediate custom action - runs in the UI phase as the interactive user,
+        /// early (before LaunchConditions), so it reliably sees the user's GUI
+        /// processes (unlike the deferred InstallAction). Sets SALESBUDDYRUNNING="1"
+        /// when the desktop app is running. A running app holds file locks that make
+        /// the install corrupt itself (half-staged shell + dependency-less venv), so
+        /// a LaunchCondition uses this to refuse the install until the user quits the
+        /// app from the system tray. Never throws - on any error it reports "not
+        /// running" so a detection hiccup can't wedge the installer.
+        /// </summary>
+        [CustomAction]
+        public static ActionResult CheckAppRunning(Session session)
+        {
+            bool running = false;
+            try
+            {
+                foreach (var p in Process.GetProcessesByName("Sales Buddy"))
+                {
+                    running = true;
+                    p.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                session.Log($"CheckAppRunning: detection error (treating as not running): {ex.Message}");
+            }
+            session["SALESBUDDYRUNNING"] = running ? "1" : "";
+            session.Log($"CheckAppRunning: SALESBUDDYRUNNING='{session["SALESBUDDYRUNNING"]}'");
+            return ActionResult.Success;
+        }
+
         // =====================================================================
         // Progress helpers
         // =====================================================================
