@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!--
+    Localization overrides for Sales Buddy.
+
+    Rewrites the standard WixUI "Files In Use" dialog so that, when an upgrade
+    finds the desktop app running, it tells the user exactly how to close it:
+    quit from the system tray (the window's X only hides to tray, so generic
+    "close the application" guidance is misleading here). Restart Manager is
+    disabled (MSIRESTARTMANAGERCONTROL=Disable in Package.wxs), so this classic
+    dialog - Retry / Exit, no "close automatically" - is what users see.
+
+    These IDs are marked Overridable in WixToolset.UI.wixext, so defining them
+    here takes precedence.
+-->
+
+<WixLocalization Culture="en-us" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+
+  <String Id="FilesInUseDlg_Title" Value="{\WixUI_Font_Title}Sales Buddy Is Running" />
+
+  <String Id="FilesInUseDlg_Description" Value="Sales Buddy must be closed before the update can continue." />
+
+  <String Id="FilesInUseDlg_Text" Value="Sales Buddy is still running. Right-click the Sales Buddy icon in your system tray (bottom-right of the taskbar - it may be hidden under the up-arrow), choose Quit, then click Retry to continue the update. Choose Exit to stop." />
+
+</WixLocalization>

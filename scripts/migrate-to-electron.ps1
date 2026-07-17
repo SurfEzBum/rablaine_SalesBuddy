@@ -27,6 +27,7 @@
 param(
     [string]$ElectronSource,
     [switch]$SkipPull,
+    [switch]$Rebuild,
     [switch]$NoDesktop,
     [switch]$NoStartMenu,
     [switch]$NoAutoStart,
@@ -49,6 +50,17 @@ Write-Host "Install: $repoRoot"
 # install (the installer ships it as a prereq), so we can build on demand.
 if (-not $ElectronSource) {
     $ElectronSource = Join-Path $repoRoot 'electron\dist\win-unpacked'
+}
+# -Rebuild forces a fresh build from the CURRENT source. The MSI passes this on
+# every install/upgrade: the repo was just reset to origin/main, but the old
+# win-unpacked is gitignored (survives `git clean -fd`), so without this we'd
+# re-stage the stale shell and never pick up new main.js. Only ever removes the
+# local build output, never an explicitly supplied -ElectronSource.
+if ($Rebuild -and -not $PSBoundParameters.ContainsKey('ElectronSource')) {
+    if (Test-Path $ElectronSource) {
+        Write-Host "Rebuild requested - removing stale shell build..." -ForegroundColor Yellow
+        Remove-Item $ElectronSource -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 $srcExe = Join-Path $ElectronSource $exeName
 if (-not (Test-Path $srcExe)) {

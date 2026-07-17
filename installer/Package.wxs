@@ -18,7 +18,7 @@
 
     <Package Name="Sales Buddy"
              Manufacturer="Microsoft Corporation"
-             Version="1.1.0"
+             Version="1.1.1"
              UpgradeCode="f3a7c2d1-8e4b-4f9a-b6c5-1d2e3f4a5b6c"
              Scope="perUser"
              InstallerVersion="500">
@@ -42,6 +42,13 @@
         <Property Id="STARTMENUSHORTCUT" Value="1" />
         <Property Id="DESKTOPSHORTCUT" Value="1" />
         <Property Id="AUTOSTART" Value="1" />
+
+        <!-- Disable Restart Manager so upgrades never offer to "close
+             automatically" (which would hard-terminate the Electron shell and
+             orphan the Python supervisor/worker). Instead the classic
+             Files-In-Use dialog shows, and its text (see the .wxl override)
+             tells the user to Quit from the system tray, then Retry. -->
+        <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
 
         <!-- Exit dialog: always launch Sales Buddy on finish (no checkbox) -->
         <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT" Value="Sales Buddy will launch when you click Finish." />

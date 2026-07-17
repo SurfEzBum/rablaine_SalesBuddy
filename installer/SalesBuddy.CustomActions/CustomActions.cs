@@ -1252,7 +1252,7 @@ Write-Host 'winget installation complete.'
                 return false;
             }
 
-            string args = $"-ExecutionPolicy Bypass -NoProfile -File \"{script}\" -SkipPull -NoLaunch";
+            string args = $"-ExecutionPolicy Bypass -NoProfile -File \"{script}\" -SkipPull -Rebuild -NoLaunch";
             if (!desktop) args += " -NoDesktop";
             if (!startMenu) args += " -NoStartMenu";
             if (!autoStart) args += " -NoAutoStart";
