@@ -140,6 +140,12 @@ def _msx_request(
             break  # Success — got a response (even if it's an error status)
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             last_exception = e
+            # If a concurrent MSX call already flagged us off-VPN, stop burning
+            # the (long) retry budget - bail this request immediately so syncs
+            # don't sit through minutes of doomed retries.
+            if is_vpn_blocked():
+                logger.warning("MSX already flagged off-VPN - aborting retries early")
+                raise
             if attempt < MAX_RETRIES - 1:
                 wait = RETRY_BACKOFF_SECONDS[min(attempt, len(RETRY_BACKOFF_SECONDS) - 1)]
                 logger.warning(
@@ -153,6 +159,11 @@ def _msx_request(
                 logger.error(
                     f"MSX request {method} failed after {MAX_RETRIES} attempts: {e}"
                 )
+                # Unreachable after every retry = we can't get to MSX at all,
+                # which is almost always off-VPN/corpnet (or an MSX outage).
+                # Flag it centrally so every sync's is_vpn_blocked() check bails
+                # early and shows the banner instead of grinding through.
+                set_vpn_blocked("Couldn't reach MSX after retries - connect to VPN/corpnet and retry.")
                 raise
     
     # Check for auth failures that might be due to stale token
@@ -181,6 +192,9 @@ def _msx_request(
                 response = _do_request(fresh_headers)
                 break
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                if is_vpn_blocked():
+                    logger.warning("MSX already flagged off-VPN - aborting retries early")
+                    raise
                 if attempt < MAX_RETRIES - 1:
                     wait = RETRY_BACKOFF_SECONDS[min(attempt, len(RETRY_BACKOFF_SECONDS) - 1)]
                     logger.warning(
@@ -190,6 +204,7 @@ def _msx_request(
                     time.sleep(wait)
                 else:
                     logger.error(f"MSX retry (fresh token) failed after {MAX_RETRIES} attempts: {e}")
+                    set_vpn_blocked("Couldn't reach MSX after retries - connect to VPN/corpnet and retry.")
                     raise
         
         if response.status_code in (401, 403):

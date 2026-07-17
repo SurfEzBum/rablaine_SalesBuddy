@@ -166,6 +166,20 @@ class TestMsxRequestVpnDetection:
         mock_refresh.assert_called_once()
         assert is_vpn_blocked() is False
 
+    @patch('time.sleep', return_value=None)
+    @patch('app.services.msx_api.get_msx_token', return_value='fake-token')
+    def test_connection_failure_after_retries_sets_vpn_blocked(self, mock_token, mock_sleep):
+        """MSX unreachable after all retries flags VPN so every sync bails early."""
+        from requests.exceptions import ConnectionError as ReqConnError
+        from app.services.msx_api import _msx_request
+
+        with patch('app.services.msx_api.requests.get',
+                   side_effect=ReqConnError('unreachable')):
+            with pytest.raises(ReqConnError):
+                _msx_request('GET', 'https://example.com/test')
+
+        assert is_vpn_blocked() is True
+
     @patch('app.services.msx_api.get_msx_token', return_value='fake-token')
     @patch('app.services.msx_api.requests')
     def test_successful_response_clears_vpn_block(self, mock_requests, mock_token):
