@@ -80,7 +80,8 @@ def admin_panel():
         if started.year == now.year and started.month >= 7:
             fy_season = False
 
-    return render_template('admin_panel.html', stats=stats, fy_season=fy_season)
+    return render_template('admin_panel.html', stats=stats, fy_season=fy_season,
+                           is_electron=_is_electron())
 
 
 @admin_bp.route('/admin/ai-logs')
@@ -274,6 +275,11 @@ def _is_supervised() -> bool:
     return os.environ.get('SALESBUDDY_SUPERVISED', '').strip().lower() in ('1', 'true', 'yes')
 
 
+def _is_electron() -> bool:
+    """True when the stack was launched by the Electron desktop shell."""
+    return os.environ.get('SALESBUDDY_ELECTRON', '').strip().lower() in ('1', 'true', 'yes')
+
+
 def _spawn_server_script(*args: str) -> None:
     """Spawn scripts/server.ps1 detached with the given args (e.g. -StopOnly).
 
@@ -359,6 +365,25 @@ def api_update_apply():
         # "View last update" is empty until the user updates again.
         db.session.rollback()
 
+    # Under the Electron shell, Electron owns the update: it owns the supervisor
+    # process, so letting server.ps1 tear the tree down here would race with
+    # Electron's own restart handler. Instead, drop a sentinel file the shell
+    # watches for; it runs git pull + pip install and relaunches itself. This
+    # works whether the click came from the Electron window or a browser tab.
+    if _is_electron():
+        try:
+            sentinel = repo_root / 'data' / 'electron-update.request'
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            sentinel.write_text(
+                datetime.now(timezone.utc).isoformat(), encoding='utf-8'
+            )
+        except Exception as e:
+            return jsonify({'error': f'Failed to request update: {e}'}), 500
+        return jsonify({
+            'success': True,
+            'message': 'Update started. Sales Buddy will restart momentarily.',
+        })
+
     # Read PORT from .env so we can pass through elevation if needed
     port = int(os.environ.get('PORT', '5151'))
 
@@ -413,6 +438,59 @@ def api_update_apply():
         'success': True,
         'message': 'Update started. The server will restart momentarily.',
     })
+
+
+@admin_bp.route('/api/admin/migrate-to-electron', methods=['POST'])
+def api_migrate_to_electron():
+    """Launch the Flask -> Electron desktop migration in a visible console.
+
+    Mirrors the Update button, but opens a real console window so the user can
+    watch the (longer, one-time) desktop-app build and read any error directly,
+    instead of the web page having to poll through its own Flask stack being
+    torn down. The migration script builds the shell BEFORE stopping the stack,
+    so a build failure leaves the current app running.
+    """
+    if sys.platform != 'win32':
+        return jsonify({'error': 'The desktop app is only supported on Windows'}), 400
+    if _is_electron():
+        return jsonify({'error': 'Already running as the desktop app'}), 400
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+
+    # In development, launch a harmless console test script instead of the real
+    # migration. This lets you verify the button -> endpoint -> visible console
+    # wiring without building anything or hijacking your dev machine's autostart.
+    # Err safe: treat as dev if the app is in debug OR FLASK_ENV=development, so
+    # a misconfigured env never fires a real migration on a dev box.
+    is_dev = bool(current_app.debug) or \
+        os.environ.get('FLASK_ENV', '').strip().lower() == 'development'
+    script_name = '_migrate_console_test.ps1' if is_dev else 'migrate-to-electron.ps1'
+    script = repo_root / 'scripts' / script_name
+    if not script.exists():
+        return jsonify({'error': f'{script_name} not found'}), 500
+
+    # CREATE_NEW_CONSOLE gives the child its own visible window on the user's
+    # desktop (the autostart task runs in the interactive session). Wrap the
+    # script in a Read-Host so the window stays up after it finishes or fails.
+    CREATE_NEW_CONSOLE = 0x00000010
+    inner = (
+        f"& '{script}'; Write-Host ''; "
+        "Read-Host 'Setup finished - press Enter to close this window'"
+    )
+    cmd = ['powershell.exe', '-ExecutionPolicy', 'Bypass', '-NoProfile',
+           '-Command', inner]
+    try:
+        subprocess.Popen(cmd, cwd=str(repo_root), creationflags=CREATE_NEW_CONSOLE)
+    except Exception as e:
+        return jsonify({'error': f'Failed to start setup: {e}'}), 500
+
+    if is_dev:
+        message = ('Dev test: a console window opened running the wiring test '
+                   'script (no real migration performed).')
+    else:
+        message = ('A setup window has opened - follow it there. Sales Buddy '
+                   'will reopen as a desktop app when it finishes.')
+    return jsonify({'success': True, 'message': message})
 
 
 @admin_bp.route('/api/admin/update-dismiss', methods=['POST'])

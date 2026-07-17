@@ -280,6 +280,21 @@
                                 </div>
                             </div>
                         </div>
+                        {% if not is_electron %}
+                        <div id="moveToElectron" class="mt-3 pt-3 border-top">
+                            <div class="d-flex align-items-start gap-2">
+                                <i class="bi bi-window-desktop fs-5 text-primary"></i>
+                                <div class="flex-grow-1">
+                                    <div class="fw-semibold">Desktop app available</div>
+                                    <div class="small text-muted">Run Sales Buddy as a desktop app (system tray + window) instead of a browser tab. Your data and settings stay exactly the same, and it still opens in your browser too.</div>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary btn-sm mt-2" id="moveToElectronBtn" onclick="moveToElectron()">
+                                <i class="bi bi-box-arrow-in-down"></i> Move to desktop app
+                            </button>
+                            <div id="moveToElectronMsg" class="small mt-2"></div>
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -2200,6 +2215,32 @@ function applyUpdate() {
             if (msgEl) msgEl.textContent = 'Server is restarting...';
             startUpdateTimer();
             setTimeout(() => pollForServer(0), 3000);
+        });
+}
+
+function moveToElectron() {
+    const btn = document.getElementById('moveToElectronBtn');
+    const msg = document.getElementById('moveToElectronMsg');
+    if (!confirm('Set up the Sales Buddy desktop app?\n\nA setup window will open and walk through the one-time build. Sales Buddy will briefly restart and reopen as a desktop app - your data is untouched.')) return;
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Starting setup...';
+    }
+    if (msg) msg.innerHTML = '';
+    fetch('/api/admin/migrate-to-electron', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                if (msg) msg.innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> ' + (data.error || 'Could not start setup.') + '</span>';
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-box-arrow-in-down"></i> Move to desktop app'; }
+                return;
+            }
+            if (msg) msg.innerHTML = '<span class="text-info"><i class="bi bi-window-desktop"></i> ' + (data.message || 'Setup window opened. Follow it there.') + '</span>';
+            if (btn) btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Setup in progress...';
+        })
+        .catch((err) => {
+            if (msg) msg.innerHTML = '<span class="text-danger">Failed to start setup: ' + err + '</span>';
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-box-arrow-in-down"></i> Move to desktop app'; }
         });
 }
 

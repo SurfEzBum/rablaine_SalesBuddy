@@ -242,12 +242,14 @@ def refresh_token() -> bool:
             }
 
             logger.info(f"MSX token refreshed, expires at {_token_cache['expires_on']}")
+            _auth_diag("token_success", expires_on=str(_token_cache["expires_on"]))
             return True
 
         except RuntimeError as e:
             _token_cache["error"] = str(e)
             _token_cache["last_refresh"] = datetime.now(timezone.utc)
             logger.warning(f"MSX token refresh failed: {e}")
+            _auth_diag("token_failure", error=str(e))
             return False
 
 
@@ -464,6 +466,15 @@ def check_az_cli_installed() -> tuple[bool, str | None]:
         return (False, "check_failed")
 
 
+def _auth_diag(event: str, **fields) -> None:
+    """Emit an 'auth' diagnostic event for the MSX az CLI path."""
+    try:
+        from app.services.diagnostic_log import diag_log
+        diag_log("auth", source="msx", event=event, **fields)
+    except Exception:
+        pass
+
+
 def check_az_logged_in() -> tuple[bool, Optional[str], Optional[str]]:
     """Check if user is logged in to Azure CLI.
 
@@ -486,8 +497,16 @@ def check_az_logged_in() -> tuple[bool, Optional[str], Optional[str]]:
             user = account.get("user", {})
             tenant_id = account.get("tenantId")
             return True, user.get("name"), tenant_id
+        # Non-zero exit is usually "not logged in" (az reports it on stderr),
+        # but log the stderr so a genuine az error isn't mistaken for logged-out.
+        logger.info("az account show returned %d: %s", result.returncode,
+                    (result.stderr or "").strip()[:200])
         return False, None, None
-    except (subprocess.SubprocessError, json.JSONDecodeError):
+    except subprocess.TimeoutExpired:
+        logger.warning("az account show timed out - treating as not logged in")
+        return False, None, None
+    except (subprocess.SubprocessError, json.JSONDecodeError) as e:
+        logger.warning("az account show failed (%s) - treating as not logged in", e)
         return False, None, None
 
 

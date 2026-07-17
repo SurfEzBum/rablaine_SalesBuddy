@@ -277,6 +277,11 @@ def _web_argv(port: int) -> List[str]:
 
 
 def main() -> None:
+    # Bootstrap the isolated Azure CLI auth profile BEFORE spawning children so
+    # they inherit the resolved AZURE_CONFIG_DIR and a broker-disabled config.
+    from app.services.azure_profile import ensure_azure_profile
+    ensure_azure_profile()
+
     port = _default_port()
     # Mark children as supervised so the web process defers the heavy schedulers
     # to the worker instead of running them inline.

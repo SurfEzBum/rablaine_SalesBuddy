@@ -51,7 +51,19 @@ def create_app():
     # Allow large form submissions (notes with inline screenshots are base64-encoded)
     app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB
     app.config['MAX_FORM_MEMORY_SIZE'] = 50 * 1024 * 1024  # 50 MB
-    
+
+    # Bootstrap the isolated Azure CLI auth profile so az-based auth (MSX +
+    # gateway) is self-contained regardless of which launcher started us
+    # (Electron, supervisor, bare flask run). Skipped under tests so we never
+    # touch the real ~/.azure. Guarded on the env var because app.config's
+    # TESTING flag is not set yet at this point.
+    if not os.environ.get('TESTING'):
+        try:
+            from app.services.azure_profile import ensure_azure_profile
+            ensure_azure_profile()
+        except Exception:
+            pass
+
     # Initialize extensions with app
     db.init_app(app)
 
