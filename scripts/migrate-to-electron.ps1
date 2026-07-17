@@ -26,7 +26,11 @@
 #>
 param(
     [string]$ElectronSource,
-    [switch]$SkipPull
+    [switch]$SkipPull,
+    [switch]$NoDesktop,
+    [switch]$NoStartMenu,
+    [switch]$NoAutoStart,
+    [switch]$NoLaunch
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,11 +44,24 @@ $destDir = Join-Path $repoRoot 'electron-dist'
 Write-Host "=== Migrate Sales Buddy to the Electron desktop app ===" -ForegroundColor Cyan
 Write-Host "Install: $repoRoot"
 
-# --- 1. Locate the packaged Electron shell ---
+# --- 1. Locate (or build) the packaged Electron shell ---
+# Option 1 distribution: the shell is built locally. Node is present on every
+# install (the installer ships it as a prereq), so we can build on demand.
 if (-not $ElectronSource) {
     $ElectronSource = Join-Path $repoRoot 'electron\dist\win-unpacked'
 }
 $srcExe = Join-Path $ElectronSource $exeName
+if (-not (Test-Path $srcExe)) {
+    $buildScript = Join-Path $repoRoot 'electron\build.ps1'
+    if (Test-Path $buildScript) {
+        Write-Host "`nElectron shell not built yet - building it (this may take a minute)..." -ForegroundColor Yellow
+        & $buildScript -SkipSign
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR: Electron build failed." -ForegroundColor Red
+            exit 1
+        }
+    }
+}
 if (-not (Test-Path $srcExe)) {
     Write-Host "`nERROR: packaged Electron shell not found at:" -ForegroundColor Red
     Write-Host "  $srcExe" -ForegroundColor Red
@@ -92,14 +109,18 @@ if (-not (Test-Path $destExe)) {
 }
 
 # --- 5. Repoint the ON LOGON scheduled task to Electron (delete-before-create) ---
-Write-Host "Repointing login task '$taskName' -> Electron..." -ForegroundColor Yellow
-Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-$action = New-ScheduledTaskAction -Execute $destExe
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
-    -Principal $principal -Settings $settings -Force | Out-Null
+if ($NoAutoStart) {
+    Write-Host "Skipping auto-start task (-NoAutoStart)." -ForegroundColor DarkYellow
+} else {
+    Write-Host "Repointing login task '$taskName' -> Electron..." -ForegroundColor Yellow
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    $action = New-ScheduledTaskAction -Execute $destExe
+    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+        -Principal $principal -Settings $settings -Force | Out-Null
+}
 
 # --- 6. Replace shortcuts (remove old browser links, add Electron ones) ---
 Write-Host "Updating desktop + Start Menu shortcuts..." -ForegroundColor Yellow
@@ -124,13 +145,21 @@ Remove-Item (Join-Path $desktop "$appName (web).lnk") -Force -ErrorAction Silent
 Remove-Item (Join-Path $startMenu "$appName (web).lnk") -Force -ErrorAction SilentlyContinue
 
 # Create the new Electron shortcuts.
-if (-not (Test-Path $startMenu)) { New-Item -ItemType Directory -Path $startMenu | Out-Null }
-New-AppShortcut (Join-Path $desktop "$appName.lnk") $destExe $icon 'Open Sales Buddy'
-New-AppShortcut (Join-Path $startMenu "$appName.lnk") $destExe $icon 'Open Sales Buddy'
+if (-not $NoDesktop) {
+    New-AppShortcut (Join-Path $desktop "$appName.lnk") $destExe $icon 'Open Sales Buddy'
+}
+if (-not $NoStartMenu) {
+    if (-not (Test-Path $startMenu)) { New-Item -ItemType Directory -Path $startMenu | Out-Null }
+    New-AppShortcut (Join-Path $startMenu "$appName.lnk") $destExe $icon 'Open Sales Buddy'
+}
 
 # --- 7. Launch Electron now ---
-Write-Host "Launching Sales Buddy..." -ForegroundColor Yellow
-Start-Process -FilePath $destExe
+if ($NoLaunch) {
+    Write-Host "Skipping launch (-NoLaunch)." -ForegroundColor DarkYellow
+} else {
+    Write-Host "Launching Sales Buddy..." -ForegroundColor Yellow
+    Start-Process -FilePath $destExe
+}
 
 Write-Host "`n=== Migration complete ===" -ForegroundColor Green
 Write-Host "Sales Buddy now runs as a desktop app (system tray + window)." -ForegroundColor Green

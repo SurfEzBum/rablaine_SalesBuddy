@@ -85,6 +85,12 @@ namespace SalesBuddy.CustomActions
             session.Log($"Options: StartMenu={startMenu}, Desktop={desktop}, " +
                         $"AutoStart={autoStart}");
 
+            // An existing checkout means this run is really a migration (Flask ->
+            // desktop) rather than a first-time install. The steps converge, but
+            // we use this for the status text.
+            bool existingInstall = Directory.Exists(Path.Combine(installDir, ".git"));
+            session.Log($"Existing install detected: {existingInstall}");
+
             // Pre-scan installed tools to rebalance the progress bar.
             // Steps that are already installed get weight=1 (brief blip),
             // so the bar's full range is distributed across actual work.
@@ -197,30 +203,36 @@ namespace SalesBuddy.CustomActions
                 ConfigureApp(session, installDir);
                 AdvanceProgress(session, WeightConfig);
 
-                // Step 9: Shortcuts
-                if (startMenu || desktop)
-                {
-                    ProcessRunner.UpdateStatus(session, "Creating shortcuts...");
-                    CreateShortcuts(session, installDir, startMenu, desktop);
-                }
+                // Steps 9-11: Build and wire the Electron desktop shell. Delegates
+                // to scripts/migrate-to-electron.ps1 so the MSI and the standalone
+                // migration share one source of truth: it builds the shell locally
+                // (Node is a prereq), swaps the shortcuts and the ON LOGON task to
+                // Electron, and - on an existing Flask install - stops the old stack
+                // first. The Exit dialog launches the app (hence -NoLaunch).
+                ProcessRunner.UpdateStatus(session,
+                    existingInstall ? "Switching Sales Buddy to the desktop app..."
+                                    : "Building the desktop app... this may take a minute");
+                bool electronOk = RunElectronSetup(session, installDir, startMenu, desktop, autoStart);
                 AdvanceProgress(session, WeightShortcuts);
 
-                // Step 10: Auto-start
-                if (autoStart)
+                if (!electronOk)
                 {
-                    ProcessRunner.UpdateStatus(session, "Configuring auto-start...");
-                    ConfigureAutoStartTask(session, installDir);
+                    // Fallback: keep the user working on the web/Flask stack if the
+                    // desktop build failed for any reason.
+                    session.Log("Electron setup failed; falling back to web wiring.");
+                    if (startMenu || desktop)
+                        CreateShortcuts(session, installDir, startMenu, desktop);
+                    if (autoStart)
+                        ConfigureAutoStartTask(session, installDir);
+                    StartServer(session, installDir);
                 }
+
                 // Always register the daily backup task. It runs every day
                 // regardless of the AUTOSTART option, and the backup script
                 // gracefully no-ops if OneDrive hasn't been configured yet
                 // (the user can configure it later from the admin panel).
                 ConfigureBackupTask(session, installDir);
                 AdvanceProgress(session, WeightAutoStart);
-
-                // Step 11: Start server
-                ProcessRunner.UpdateStatus(session, "Starting Sales Buddy server...");
-                StartServer(session, installDir);
                 AdvanceProgress(session, WeightServer);
 
                 // Step 12: Done
@@ -310,9 +322,9 @@ namespace SalesBuddy.CustomActions
         // =====================================================================
 
         /// <summary>
-        /// Launch Sales Buddy in the default browser. Triggered from the
-        /// Exit dialog checkbox - runs as an immediate action so it can
-        /// read session properties directly.
+        /// Launch Sales Buddy on finish. Prefers the Electron desktop shell; if
+        /// it isn't present (e.g. the desktop build fell back to web wiring),
+        /// opens the web UI in the default browser instead.
         /// </summary>
         [CustomAction]
         public static ActionResult LaunchApp(Session session)
@@ -327,10 +339,19 @@ namespace SalesBuddy.CustomActions
                         "SalesBuddy");
                 }
 
-                int port = GetPortFromEnv(installDir);
-                string url = $"http://localhost:{port}";
-                session.Log($"Launching browser: {url}");
-                Process.Start("explorer.exe", url);
+                string exe = Path.Combine(installDir, "electron-dist", "Sales Buddy.exe");
+                if (File.Exists(exe))
+                {
+                    session.Log($"Launching desktop app: {exe}");
+                    Process.Start(exe);
+                }
+                else
+                {
+                    int port = GetPortFromEnv(installDir);
+                    string url = $"http://localhost:{port}";
+                    session.Log($"Desktop exe not found; launching browser: {url}");
+                    Process.Start("explorer.exe", url);
+                }
             }
             catch (Exception ex)
             {
@@ -1214,6 +1235,36 @@ Write-Host 'winget installation complete.'
         /// <summary>
         /// Register a Windows Task Scheduler task to start the server on login.
         /// </summary>
+        /// <summary>
+        /// Build and wire the Electron desktop shell by running the shared
+        /// scripts/migrate-to-electron.ps1. Passes -SkipPull (the MSI already
+        /// updated the repo) and -NoLaunch (the Exit dialog launches the app),
+        /// and honors the shortcut/auto-start options. Returns true only if the
+        /// packaged exe exists afterward, so callers can fall back to web wiring.
+        /// </summary>
+        private static bool RunElectronSetup(Session session, string installDir,
+            bool startMenu, bool desktop, bool autoStart)
+        {
+            string script = Path.Combine(installDir, "scripts", "migrate-to-electron.ps1");
+            if (!File.Exists(script))
+            {
+                session.Log($"migrate-to-electron.ps1 not found at {script}; skipping Electron setup.");
+                return false;
+            }
+
+            string args = $"-ExecutionPolicy Bypass -NoProfile -File \"{script}\" -SkipPull -NoLaunch";
+            if (!desktop) args += " -NoDesktop";
+            if (!startMenu) args += " -NoStartMenu";
+            if (!autoStart) args += " -NoAutoStart";
+
+            ProcessRunner.Run(session, "powershell.exe", args, workingDirectory: installDir);
+
+            string exe = Path.Combine(installDir, "electron-dist", "Sales Buddy.exe");
+            bool ok = File.Exists(exe);
+            session.Log($"Electron setup {(ok ? "succeeded" : "did NOT produce the exe")}: {exe}");
+            return ok;
+        }
+
         private static void ConfigureAutoStartTask(Session session, string installDir)
         {
             string serverScript = Path.Combine(installDir, "scripts", "server.ps1");
