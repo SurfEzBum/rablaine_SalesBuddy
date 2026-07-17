@@ -17,7 +17,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
 
     <Package Name="Sales Buddy"
-             Manufacturer="Sales Buddy Contributors"
+             Manufacturer="Microsoft Corporation"
              Version="1.1.0"
              UpgradeCode="f3a7c2d1-8e4b-4f9a-b6c5-1d2e3f4a5b6c"
              Scope="perUser"
