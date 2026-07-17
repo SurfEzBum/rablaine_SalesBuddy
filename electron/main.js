@@ -403,9 +403,9 @@ function buildAppMenu() {
         },
         { type: 'separator' },
         {
-          label: 'Quit',
-          accelerator: 'CmdOrCtrl+Q',
-          click: () => { isQuitting = true; app.quit(); },
+          label: 'Close',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => { if (mainWindow) mainWindow.hide(); },
         },
       ],
     },
@@ -443,11 +443,6 @@ function buildAppMenu() {
       label: 'Window',
       submenu: [
         { role: 'minimize' },
-        {
-          label: 'Hide to Tray',
-          accelerator: 'CmdOrCtrl+W',
-          click: () => { if (mainWindow) mainWindow.hide(); },
-        },
       ],
     },
     {
