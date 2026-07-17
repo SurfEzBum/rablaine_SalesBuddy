@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/17/2026
+## 7/17/2026 - 03d822f
 
 - Fixed the admin panel's Auto-Start status showing "Not registered" in the desktop app even when login autostart was actually set up. The desktop app registers autostart differently than the older browser install, and the admin panel was only checking the old spot. It now reads the right one, and the enable/disable toggle and Register button work in the desktop app too.
 
