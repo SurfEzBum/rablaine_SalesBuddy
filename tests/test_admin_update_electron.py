@@ -83,3 +83,33 @@ class TestMigrateToElectron:
         assert resp.status_code == 400
         mock_popen.assert_not_called()
 
+    def test_dev_mode_launches_console_test_script(self, client):
+        """In development, the button launches the harmless wiring test script."""
+        with patch.dict(os.environ, {'FLASK_ENV': 'development'}):
+            os.environ.pop('SALESBUDDY_ELECTRON', None)
+            with patch('app.routes.admin.subprocess.Popen') as mock_popen:
+                resp = client.post('/api/admin/migrate-to-electron')
+
+        assert resp.status_code == 200
+        cmd = ' '.join(mock_popen.call_args[0][0])
+        assert '_migrate_console_test.ps1' in cmd
+
+    def test_prod_mode_launches_real_migration_script(self, client):
+        """In production, the button launches the real migration script."""
+        app = client.application
+        prev_debug = app.debug
+        app.debug = False  # prod runs under waitress with debug off
+        try:
+            with patch.dict(os.environ, {'FLASK_ENV': 'production'}):
+                os.environ.pop('SALESBUDDY_ELECTRON', None)
+                with patch('app.routes.admin.subprocess.Popen') as mock_popen:
+                    resp = client.post('/api/admin/migrate-to-electron')
+
+            assert resp.status_code == 200
+            cmd = ' '.join(mock_popen.call_args[0][0])
+            assert 'migrate-to-electron.ps1' in cmd
+            assert '_migrate_console_test.ps1' not in cmd
+        finally:
+            app.debug = prev_debug
+
+

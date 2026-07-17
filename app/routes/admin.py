@@ -456,9 +456,18 @@ def api_migrate_to_electron():
         return jsonify({'error': 'Already running as the desktop app'}), 400
 
     repo_root = Path(__file__).resolve().parent.parent.parent
-    script = repo_root / 'scripts' / 'migrate-to-electron.ps1'
+
+    # In development, launch a harmless console test script instead of the real
+    # migration. This lets you verify the button -> endpoint -> visible console
+    # wiring without building anything or hijacking your dev machine's autostart.
+    # Err safe: treat as dev if the app is in debug OR FLASK_ENV=development, so
+    # a misconfigured env never fires a real migration on a dev box.
+    is_dev = bool(current_app.debug) or \
+        os.environ.get('FLASK_ENV', '').strip().lower() == 'development'
+    script_name = '_migrate_console_test.ps1' if is_dev else 'migrate-to-electron.ps1'
+    script = repo_root / 'scripts' / script_name
     if not script.exists():
-        return jsonify({'error': 'migrate-to-electron.ps1 not found'}), 500
+        return jsonify({'error': f'{script_name} not found'}), 500
 
     # CREATE_NEW_CONSOLE gives the child its own visible window on the user's
     # desktop (the autostart task runs in the interactive session). Wrap the
@@ -475,11 +484,13 @@ def api_migrate_to_electron():
     except Exception as e:
         return jsonify({'error': f'Failed to start setup: {e}'}), 500
 
-    return jsonify({
-        'success': True,
-        'message': ('A setup window has opened - follow it there. Sales Buddy '
-                    'will reopen as a desktop app when it finishes.'),
-    })
+    if is_dev:
+        message = ('Dev test: a console window opened running the wiring test '
+                   'script (no real migration performed).')
+    else:
+        message = ('A setup window has opened - follow it there. Sales Buddy '
+                   'will reopen as a desktop app when it finishes.')
+    return jsonify({'success': True, 'message': message})
 
 
 @admin_bp.route('/api/admin/update-dismiss', methods=['POST'])
