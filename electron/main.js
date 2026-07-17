@@ -355,6 +355,30 @@ function createWindow() {
   mainWindow.webContents.on('did-navigate', buildAppMenu);
   mainWindow.webContents.on('did-navigate-in-page', buildAppMenu);
 
+  // F5 reloads the current page. Ctrl+R / Ctrl+Shift+R are handled by the
+  // View menu roles; browsers bind F5 too, so wire it up for muscle memory.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key === 'F5') {
+      mainWindow.webContents.reload();
+    }
+  });
+
+  // Right-click context menu with the navigation + clipboard actions people
+  // expect from a browser (Electron ships none by default).
+  mainWindow.webContents.on('context-menu', (_e, params) => {
+    const h = navHistory();
+    Menu.buildFromTemplate([
+      { label: 'Back', enabled: !!(h && h.canGoBack()), click: goBack },
+      { label: 'Forward', enabled: !!(h && h.canGoForward()), click: goForward },
+      { role: 'reload' },
+      { type: 'separator' },
+      { role: 'cut', enabled: params.editFlags.canCut },
+      { role: 'copy', enabled: params.editFlags.canCopy },
+      { role: 'paste', enabled: params.editFlags.canPaste },
+      { role: 'selectAll' },
+    ]).popup({ window: mainWindow });
+  });
+
   // Close button hides to tray instead of quitting, so the background worker
   // keeps running.
   mainWindow.on('close', (e) => {
@@ -424,11 +448,7 @@ function buildAppMenu() {
     {
       label: 'View',
       submenu: [
-        {
-          label: 'Reload',
-          accelerator: 'CmdOrCtrl+R',
-          click: () => { if (mainWindow) mainWindow.loadURL(BASE_URL); },
-        },
+        { role: 'reload' },
         { role: 'forceReload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },

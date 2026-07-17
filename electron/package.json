@@ -1,7 +1,7 @@
 {
   "name": "salesbuddy-desktop",
   "productName": "Sales Buddy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop shell for Sales Buddy - an Electron window + tray over the same git-pulled Flask app. The Electron main process launches the Python supervisor (web + worker) and loads the local web UI.",
   "main": "main.js",
   "license": "MIT",
