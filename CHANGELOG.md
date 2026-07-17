@@ -10,7 +10,10 @@ Format: `## M/D/YYYY - <merge-short-sha>`. See
 
 ## 7/17/2026
 
-- All MSX-backed syncs (milestones, marketing, and the rest) now bail out fast when you're off VPN instead of grinding through minutes of doomed retries. The moment one call confirms MSX is unreachable, the others stop immediately and you get the "connect to VPN and retry" banner - saving CPU and your patience.
+- Off-VPN milestone syncs now bail in about a second. Before starting, the sync makes a single quick check that it can actually reach MSX - if you're off VPN/corpnet, it stops right away with the "connect to VPN and retry" banner instead of grinding through batch after batch for 15+ seconds first. Nothing gets touched.
+- All MSX-backed syncs (milestones, marketing, and the rest) also bail out fast when a call confirms MSX is unreachable, instead of sitting through minutes of doomed retries.
+- Fixed the admin "Update Now" button falsely reporting "update available" right after you clicked it. It now waits for the *new* version to actually come up before reloading, instead of latching onto the old server that's still shutting down.
+- The desktop app is now officially version 1.0.
 
 ## 7/17/2026 - 6bbe2a9
 

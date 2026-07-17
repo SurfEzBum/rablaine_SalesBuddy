@@ -84,6 +84,7 @@ def health_check():
             'status': 'healthy',
             'database': 'connected',
             'worker': worker,
+            'commit': current_app.config.get('BOOT_COMMIT'),
             'timestamp': datetime.now(timezone.utc).isoformat()
         }), 200
     except Exception as e:
