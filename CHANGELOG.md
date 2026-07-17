@@ -8,6 +8,13 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/17/2026
+
+- Sales Buddy can now run as a desktop app - a real window with a system-tray icon that keeps your background tasks running - while still opening in your browser whenever you prefer. It has a proper app menu, back/forward navigation, and an About box.
+- Added a "Move to desktop app" button in the admin Updates card so you can switch an existing install over to the desktop app in one click, without reinstalling.
+- The desktop app can update itself: "Check for Updates" from the tray or menu pulls the latest version and restarts automatically, and it also checks quietly on launch.
+- More reliable Azure sign-in. Fixed intermittent 401/403 sign-in failures caused by the Windows credential broker, and the app now records clear sign-in diagnostics so auth problems are easier to pin down.
+
 ## 7/16/2026 - 0d7527c
 
 - Sales Buddy now runs under a supervisor that watches the web server and the background worker and automatically restarts either one if it crashes or hangs. If a background sync wedges or a process dies, it comes back on its own within seconds instead of silently staying down - so the app you rely on in the morning is far less likely to need a manual restart.
