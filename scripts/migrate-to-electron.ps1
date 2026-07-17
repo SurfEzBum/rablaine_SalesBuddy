@@ -108,18 +108,24 @@ if (-not (Test-Path $destExe)) {
     exit 1
 }
 
-# --- 5. Repoint the ON LOGON scheduled task to Electron (delete-before-create) ---
+# --- 5. Set login autostart -> Electron (per-user, no elevation) ---
+# Use an HKCU\...\Run entry instead of a scheduled task. The old Flask autostart
+# task was created by the MSI running ELEVATED, so this migration - which runs
+# non-elevated when triggered from the web "Move to desktop app" button - can't
+# create or overwrite a root scheduled task (Access denied 0x80070005). HKCU\Run
+# is the user's own hive (no elevation) and launches the GUI exe with no console
+# flash. We still remove the legacy scheduled task so there's exactly one launcher.
 if ($NoAutoStart) {
-    Write-Host "Skipping auto-start task (-NoAutoStart)." -ForegroundColor DarkYellow
+    Write-Host "Skipping auto-start (-NoAutoStart)." -ForegroundColor DarkYellow
 } else {
-    Write-Host "Repointing login task '$taskName' -> Electron..." -ForegroundColor Yellow
+    Write-Host "Setting login autostart -> Electron..." -ForegroundColor Yellow
+    # Remove the legacy Flask scheduled task if present (delete works non-elevated).
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    $action = New-ScheduledTaskAction -Execute $destExe
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
-        -Principal $principal -Settings $settings -Force | Out-Null
+    & schtasks.exe /delete /tn $taskName /f 2>$null | Out-Null
+    # Per-user Run entry -> launch the Electron exe at login.
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    New-ItemProperty -Path $runKey -Name 'SalesBuddy' -Value ('"{0}"' -f $destExe) `
+        -PropertyType String -Force | Out-Null
 }
 
 # --- 6. Replace shortcuts (remove old browser links, add Electron ones) ---

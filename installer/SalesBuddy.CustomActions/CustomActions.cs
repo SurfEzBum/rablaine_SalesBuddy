@@ -1420,6 +1420,26 @@ Write-Host 'winget installation complete.'
                 ProcessRunner.Run(session, "schtasks.exe",
                     $"/delete /tn \"{taskName}\" /f");
             }
+
+            // Electron-era installs autostart via an HKCU Run entry rather than a
+            // scheduled task (the migration runs non-elevated and can't manage a
+            // root task). Clean that up too so uninstall leaves nothing behind.
+            try
+            {
+                using (var runKey = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Run", writable: true))
+                {
+                    if (runKey?.GetValue("SalesBuddy") != null)
+                    {
+                        runKey.DeleteValue("SalesBuddy", throwOnMissingValue: false);
+                        session.Log("Removed HKCU Run autostart entry.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                session.Log($"Could not remove HKCU Run entry: {ex.Message}");
+            }
         }
 
         /// <summary>
