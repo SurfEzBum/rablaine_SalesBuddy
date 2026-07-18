@@ -186,6 +186,11 @@ namespace SalesBuddy.CustomActions
                     return ActionResult.Failure;
                 }
 
+                // Snapshot the database to a location OUTSIDE installDir before we
+                // touch anything. If a later step nukes the clone dir (corrupted
+                // repo fallback), this snapshot is how we get the user's data back.
+                SnapshotDatabase(session, installDir);
+
                 // Stop any running Sales Buddy (shell + backend) BEFORE we touch
                 // the repo, venv, or shell. A running app holds file handles that
                 // make git clean, pip install, and the shell restage race and leave
@@ -198,6 +203,12 @@ namespace SalesBuddy.CustomActions
                 ProcessRunner.UpdateStatus(session, "Setting up Sales Buddy...");
                 CloneOrUpdateRepo(session, installDir);
                 AdvanceProgress(session, WeightClone);
+
+                // If the repo step left an empty or missing database (e.g. a nuke
+                // fallback removed data/), restore it from the snapshot BEFORE
+                // migrations run - otherwise the app would create a fresh empty
+                // schema and silently wipe the user's data.
+                RestoreDatabaseIfMissing(session, installDir);
 
                 // Step 7: Python environment (venv + pip install, ~2.5 min)
                 ProcessRunner.UpdateStatus(session,
@@ -1094,12 +1105,166 @@ Write-Host 'winget installation complete.'
             {
                 File.Copy(backupPath, dbPath, overwrite: true);
                 session.Log($"Database restored from {backupPath}.");
-                File.Delete(backupPath);
+                // NOTE: intentionally do NOT delete the backup. It is a safety
+                // net that must survive across install attempts (a failed install
+                // that leaves an empty DB should still be recoverable next run).
             }
             catch (Exception ex)
             {
                 session.Log($"WARNING: Could not restore database: {ex.Message}");
             }
+        }
+
+        // =====================================================================
+        // Database safety net (July 2026)
+        //
+        // The prod DB lives INSIDE the clone dir (data/salesbuddy.db). Any
+        // "nuke and re-clone" fallback in CloneOrUpdateRepo destroys it, and the
+        // app recreates an empty schema on first launch - silently wiping the
+        // user's data (observed 2026-07-17). These helpers guarantee the DB is
+        // snapshotted OUTSIDE the clone dir before anything destructive runs, and
+        // restored if the post-clone DB is missing or empty. The snapshots live
+        // under %LOCALAPPDATA%\SalesBuddy-backups\preinstall so they survive a
+        // full installDir nuke.
+        // =====================================================================
+
+        // A real DB with data is tens of MB. A freshly-created (never-opened)
+        // SQLite file is ~4 KB; a schema-only DB is larger but we only ever
+        // compare BEFORE migrations run, so anything this small is "empty".
+        private const long EmptyDbThreshold = 64 * 1024; // 64 KB
+        private const int SafeguardKeep = 3;
+
+        private static string SafeguardDir()
+        {
+            string local = Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData);
+            return Path.Combine(local, "SalesBuddy-backups", "preinstall");
+        }
+
+        /// <summary>
+        /// Copy the live DB to the safeguard dir (outside installDir) before any
+        /// destructive install step. No-op if the DB is missing or empty. Prunes
+        /// to the newest SafeguardKeep snapshots. Never throws.
+        /// </summary>
+        private static void SnapshotDatabase(Session session, string installDir)
+        {
+            try
+            {
+                string dbPath = Path.Combine(installDir, "data", "salesbuddy.db");
+                if (!File.Exists(dbPath))
+                {
+                    session.Log("Safeguard: no database to snapshot.");
+                    return;
+                }
+                long len = new FileInfo(dbPath).Length;
+                if (len < EmptyDbThreshold)
+                {
+                    session.Log($"Safeguard: database is empty ({len} bytes); not snapshotting.");
+                    return;
+                }
+                string dir = SafeguardDir();
+                Directory.CreateDirectory(dir);
+                string dest = Path.Combine(dir,
+                    $"salesbuddy-{DateTime.Now:yyyyMMdd-HHmmss}.db");
+                File.Copy(dbPath, dest, overwrite: true);
+                session.Log($"Safeguard: snapshotted database to {dest} ({len} bytes).");
+
+                // Prune old snapshots, keep the newest SafeguardKeep.
+                var snaps = new List<FileInfo>();
+                foreach (string f in Directory.GetFiles(dir, "salesbuddy-*.db"))
+                    snaps.Add(new FileInfo(f));
+                snaps.Sort((a, b) => b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc));
+                for (int i = SafeguardKeep; i < snaps.Count; i++)
+                {
+                    try { snaps[i].Delete(); }
+                    catch (Exception ex) { session.Log($"Safeguard prune skip {snaps[i].Name}: {ex.Message}"); }
+                }
+            }
+            catch (Exception ex)
+            {
+                session.Log($"Safeguard snapshot failed (non-fatal): {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// If data/salesbuddy.db is missing or empty after the repo step, restore
+        /// it from the newest good backup (safeguard dir, then the legacy temp
+        /// backup). This must run BEFORE migrations so the app never lays a fresh
+        /// empty schema over recoverable data. Never throws.
+        /// </summary>
+        private static void RestoreDatabaseIfMissing(Session session, string installDir)
+        {
+            try
+            {
+                string dbPath = Path.Combine(installDir, "data", "salesbuddy.db");
+                bool needRestore = !File.Exists(dbPath)
+                    || new FileInfo(dbPath).Length < EmptyDbThreshold;
+                if (!needRestore)
+                {
+                    session.Log("DB present and non-empty after repo step; no restore needed.");
+                    return;
+                }
+
+                string source = FindNewestGoodBackup(session);
+                if (source == null)
+                {
+                    session.Log("No good DB backup found; a fresh database will be created.");
+                    return;
+                }
+
+                string dataDir = Path.Combine(installDir, "data");
+                Directory.CreateDirectory(dataDir);
+                // Clear any stale WAL/SHM so SQLite doesn't merge junk over the
+                // restored file.
+                foreach (string ext in new[] { "-wal", "-shm" })
+                {
+                    try { File.Delete(dbPath + ext); } catch { }
+                }
+                File.Copy(source, dbPath, overwrite: true);
+                session.Log($"Restored DB from backup {source} " +
+                    $"({new FileInfo(source).Length} bytes) - empty/missing DB recovered.");
+            }
+            catch (Exception ex)
+            {
+                session.Log($"Restore-if-missing failed (non-fatal): {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Find the newest non-empty DB backup across the safeguard dir and the
+        /// legacy temp backup path. Returns null if none qualify.
+        /// </summary>
+        private static string FindNewestGoodBackup(Session session)
+        {
+            var candidates = new List<string>();
+            try
+            {
+                string dir = SafeguardDir();
+                if (Directory.Exists(dir))
+                    candidates.AddRange(Directory.GetFiles(dir, "salesbuddy-*.db"));
+            }
+            catch (Exception ex) { session.Log($"Safeguard scan skip: {ex.Message}"); }
+
+            string legacy = Path.Combine(Path.GetTempPath(), "salesbuddy_db_backup.db");
+            if (File.Exists(legacy)) candidates.Add(legacy);
+
+            string best = null;
+            DateTime bestTime = DateTime.MinValue;
+            foreach (string c in candidates)
+            {
+                try
+                {
+                    var fi = new FileInfo(c);
+                    if (fi.Length < EmptyDbThreshold) continue;
+                    if (fi.LastWriteTimeUtc > bestTime)
+                    {
+                        bestTime = fi.LastWriteTimeUtc;
+                        best = c;
+                    }
+                }
+                catch { }
+            }
+            return best;
         }
 
         /// <summary>
