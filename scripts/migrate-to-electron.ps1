@@ -121,18 +121,24 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe' O
 # check (file count + the two files whose absence we've actually been burned by).
 Write-Host "Staging Electron shell -> $destDir" -ForegroundColor Yellow
 
-# First make sure the SOURCE build is actually complete. electron-builder can
-# return before win-unpacked is fully flushed; staging an incomplete source is
-# what produced an empty/broken electron-dist -> web fallback. Wait for the
-# source exe + icudtl.dat to exist before we copy anything.
-for ($w = 0; $w -lt 60; $w++) {
+# First make sure the SOURCE build is COMPLETE and STABLE. electron-builder
+# finalizes win-unpacked asynchronously (asar integrity, native dlls), and it
+# can return before the last files are flushed. Staging mid-finalization is what
+# produced an empty/partial electron-dist -> web fallback. Wait for exe +
+# icudtl.dat AND a file count that has stopped changing (>= 50 files).
+$prevCount = -1
+for ($w = 0; $w -lt 120; $w++) {
+    $c = (Get-ChildItem $ElectronSource -Recurse -File -ErrorAction SilentlyContinue).Count
     if ((Test-Path (Join-Path $ElectronSource $exeName)) -and
-        (Test-Path (Join-Path $ElectronSource 'icudtl.dat'))) { break }
+        (Test-Path (Join-Path $ElectronSource 'icudtl.dat')) -and
+        ($c -ge 50) -and ($c -eq $prevCount)) { break }
+    $prevCount = $c
     Start-Sleep -Milliseconds 500
 }
+$srcFileCount = (Get-ChildItem $ElectronSource -Recurse -File -ErrorAction SilentlyContinue).Count
 if (-not ((Test-Path (Join-Path $ElectronSource $exeName)) -and
-          (Test-Path (Join-Path $ElectronSource 'icudtl.dat')))) {
-    Write-Host "ERROR: shell build source is incomplete (missing exe or icudtl.dat)." -ForegroundColor Red
+          (Test-Path (Join-Path $ElectronSource 'icudtl.dat')) -and ($srcFileCount -ge 50))) {
+    Write-Host "ERROR: shell build source is incomplete ($srcFileCount files)." -ForegroundColor Red
     exit 1
 }
 
@@ -146,26 +152,27 @@ if (Test-Path $destExe) {
         } catch { Start-Sleep -Milliseconds 500 }
     }
 }
-$srcFileCount = (Get-ChildItem $ElectronSource -Recurse -File -ErrorAction SilentlyContinue).Count
 $staged = $false
 for ($attempt = 1; $attempt -le 3; $attempt++) {
-    try {
-        if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force -ErrorAction Stop }
-    } catch {
-        Write-Host "  Couldn't fully clear the old shell (attempt $attempt): $($_.Exception.Message)" -ForegroundColor DarkYellow
-        Start-Sleep -Seconds 1
-    }
+    if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force -ErrorAction SilentlyContinue }
     if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir | Out-Null }
-    Copy-Item -Path (Join-Path $ElectronSource '*') -Destination $destDir -Recurse -Force -ErrorAction SilentlyContinue
+    # robocopy, not Copy-Item: it natively retries files that are briefly locked
+    # (antivirus scanning the freshly-built exe/dlls under load), which is what
+    # made Copy-Item silently skip files and leave an incomplete/empty stage.
+    # /R:8 /W:2 = up to 8 retries, 2s apart, per locked file. Exit codes 0-7 are
+    # success (files copied / nothing to do); >=8 is a real failure.
+    & robocopy $ElectronSource $destDir /E /R:8 /W:2 /NFL /NDL /NJH /NJS /NP *> $null
+    $roboExit = $LASTEXITCODE
     $dstFileCount = (Get-ChildItem $destDir -Recurse -File -ErrorAction SilentlyContinue).Count
-    if ((Test-Path (Join-Path $destDir $exeName)) -and
+    if (($roboExit -lt 8) -and
+        (Test-Path (Join-Path $destDir $exeName)) -and
         (Test-Path (Join-Path $destDir 'icudtl.dat')) -and
         ($dstFileCount -ge $srcFileCount)) {
         $staged = $true
         break
     }
-    Write-Host "  Stage incomplete ($dstFileCount/$srcFileCount files) - retrying..." -ForegroundColor DarkYellow
-    Start-Sleep -Seconds 1
+    Write-Host "  Stage incomplete (robocopy=$roboExit, $dstFileCount/$srcFileCount files) - retrying..." -ForegroundColor DarkYellow
+    Start-Sleep -Seconds 2
 }
 if (-not $staged) {
     Write-Host "ERROR: could not fully stage the desktop shell after 3 attempts." -ForegroundColor Red
