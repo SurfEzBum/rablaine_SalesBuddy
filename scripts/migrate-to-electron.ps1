@@ -35,6 +35,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Native commands (schtasks, git, build.ps1) may return non-zero or write to
+# stderr for benign reasons (e.g. deleting a task that doesn't exist). Do NOT let
+# that abort the whole migration - we check exit codes explicitly where it matters.
+$PSNativeCommandUseErrorActionPreference = $false
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 $appName = 'Sales Buddy'
@@ -116,6 +120,22 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe' O
 # for the old exe to become deletable, then stage with retry + a completeness
 # check (file count + the two files whose absence we've actually been burned by).
 Write-Host "Staging Electron shell -> $destDir" -ForegroundColor Yellow
+
+# First make sure the SOURCE build is actually complete. electron-builder can
+# return before win-unpacked is fully flushed; staging an incomplete source is
+# what produced an empty/broken electron-dist -> web fallback. Wait for the
+# source exe + icudtl.dat to exist before we copy anything.
+for ($w = 0; $w -lt 60; $w++) {
+    if ((Test-Path (Join-Path $ElectronSource $exeName)) -and
+        (Test-Path (Join-Path $ElectronSource 'icudtl.dat'))) { break }
+    Start-Sleep -Milliseconds 500
+}
+if (-not ((Test-Path (Join-Path $ElectronSource $exeName)) -and
+          (Test-Path (Join-Path $ElectronSource 'icudtl.dat')))) {
+    Write-Host "ERROR: shell build source is incomplete (missing exe or icudtl.dat)." -ForegroundColor Red
+    exit 1
+}
+
 $destExe = Join-Path $destDir $exeName
 if (Test-Path $destExe) {
     for ($w = 0; $w -lt 20; $w++) {
@@ -163,9 +183,11 @@ if ($NoAutoStart) {
     Write-Host "Skipping auto-start (-NoAutoStart)." -ForegroundColor DarkYellow
 } else {
     Write-Host "Setting login autostart -> Electron..." -ForegroundColor Yellow
-    # Remove the legacy Flask scheduled task if present (delete works non-elevated).
+    # Remove the legacy Flask scheduled task if present. Route through cmd with
+    # output fully suppressed so a "task not found" (stderr + exit 1) can never
+    # abort the migration before we set autostart / shortcuts.
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    & schtasks.exe /delete /tn $taskName /f 2>$null | Out-Null
+    try { & cmd.exe /c "schtasks /delete /tn ""$taskName"" /f >nul 2>&1" } catch {}
     # Per-user Run entry -> launch the Electron exe at login.
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     New-ItemProperty -Path $runKey -Name 'SalesBuddy' -Value ('"{0}"' -f $destExe) `
