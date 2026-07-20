@@ -884,6 +884,21 @@
         </div>
     </div>
 
+    <!-- Auth Required Banner (shown reactively when an MSX/AI call returns
+         unauthenticated - mirrors the VPN banner but for sign-in, not corpnet) -->
+    <div id="authRequiredBanner" class="alert alert-warning mb-0 text-center d-none" role="alert" style="border-radius: 0;">
+        <div class="d-flex align-items-center justify-content-center gap-2 flex-wrap">
+            <span>
+                <i class="bi bi-shield-lock"></i>
+                <strong>Signed out of Azure:</strong> AI and MSX features are disabled until you sign in again.
+            </span>
+            <button id="authSignInBtn" class="btn btn-sm btn-primary" onclick="startAuthSignIn()">
+                <i class="bi bi-box-arrow-in-right"></i> Sign In to Azure
+            </button>
+            <span id="authBannerStatus" class="small"></span>
+        </div>
+    </div>
+
     {% if fy_changeover_reminder %}
     <!-- FY Changeover Reminder Banner (Jul 1 – Aug 31, not yet completed) -->
     <div class="alert alert-info mb-0 text-center" role="alert" style="border-radius: 0;">
@@ -3346,6 +3361,124 @@
     });
     </script>
 
+    <!-- Global Auth-Required Detection. Reactive only (mirrors the VPN banner):
+         the fetch interceptor below flips this on when an MSX/AI call comes back
+         unauthenticated. The "Sign In to Azure" button runs the same browser
+         az-login flow the Admin Panel uses, then reloads. -->
+    <script>
+    (function() {
+        const banner = document.getElementById('authRequiredBanner');
+        if (!banner) return;
+        const signInBtn = document.getElementById('authSignInBtn');
+        const statusEl = document.getElementById('authBannerStatus');
+        const AUTH_KEY = 'salesbuddy_auth_required';
+        const POLL_INTERVAL_MS = 2000;
+        const POLL_TIMEOUT_MS = 180000;
+        let _authState = sessionStorage.getItem(AUTH_KEY) === '1';
+        let _pollTimer = null, _elapsedTimer = null, _pollStart = null, _handled = false;
+
+        // Restore banner across navigation if it was showing before.
+        if (_authState) banner.classList.remove('d-none');
+
+        window.showAuthBanner = function() {
+            banner.classList.remove('d-none');
+            _authState = true;
+            sessionStorage.setItem(AUTH_KEY, '1');
+        };
+        window.hideAuthBanner = function() {
+            banner.classList.add('d-none');
+            if (statusEl) statusEl.textContent = '';
+            _authState = false;
+            sessionStorage.removeItem(AUTH_KEY);
+        };
+        window.isAuthRequired = function() { return _authState; };
+
+        // Decide whether a response signals an auth failure. A VPN block is a
+        // separate concern (its own banner) and must never count as auth -
+        // re-signing-in wouldn't reach MSX off corpnet anyway.
+        window.isAuthFailure = function(status, text) {
+            if (window.isVpnBlocked && window.isVpnBlocked(text)) return false;
+            if (status === 401) return true;
+            if (!text) return false;
+            return /not authenticated|not logged in|az login|failed to acquire gateway token|defaultazurecredential|non-microsoft account|auth_required/i.test(text);
+        };
+
+        function stopTimers() {
+            if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+            if (_elapsedTimer) { clearInterval(_elapsedTimer); _elapsedTimer = null; }
+        }
+
+        // "Sign In to Azure" - runs the same flow as the Admin Panel banner:
+        // start az login (opens a browser), poll until logged in, complete to
+        // fetch the CRM token, then reload so the page picks up live data.
+        window.startAuthSignIn = async function() {
+            signInBtn.disabled = true;
+            _handled = false;
+            if (statusEl) { statusEl.className = 'small'; statusEl.textContent = 'Opening sign-in...'; }
+            try {
+                const resp = await fetch('/api/msx/az-login/start', { method: 'POST' });
+                const data = await resp.json();
+                if (data.error) {
+                    if (statusEl) statusEl.textContent = data.error;
+                    signInBtn.disabled = false;
+                    return;
+                }
+                pollAuth();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'Could not start sign-in.';
+                signInBtn.disabled = false;
+            }
+        };
+
+        function pollAuth() {
+            stopTimers();
+            _pollStart = Date.now();
+            _elapsedTimer = setInterval(() => {
+                const s = Math.round((Date.now() - _pollStart) / 1000);
+                if (statusEl) statusEl.textContent =
+                    'A browser window opened - waiting for sign-in... (' + s + 's)';
+            }, 1000);
+            _pollTimer = setInterval(async () => {
+                if (Date.now() - _pollStart > POLL_TIMEOUT_MS) {
+                    stopTimers();
+                    if (statusEl) statusEl.textContent = 'Sign-in timed out. Try again.';
+                    signInBtn.disabled = false;
+                    return;
+                }
+                if (_handled) return;
+                try {
+                    const resp = await fetch('/api/msx/az-status');
+                    const data = await resp.json();
+                    if (_handled) return;
+                    if (data.logged_in) {
+                        _handled = true;
+                        stopTimers();
+                        await completeAuth();
+                    }
+                } catch (e) { /* keep polling */ }
+            }, POLL_INTERVAL_MS);
+        }
+
+        async function completeAuth() {
+            if (statusEl) statusEl.textContent = 'Connecting...';
+            try {
+                const resp = await fetch('/api/msx/az-login/complete', { method: 'POST' });
+                const data = await resp.json();
+                if (data.success) {
+                    if (statusEl) statusEl.textContent = 'Signed in! Reloading...';
+                    setTimeout(() => { window.hideAuthBanner(); window.location.reload(); }, 1200);
+                } else {
+                    if (statusEl) statusEl.textContent = data.error || 'Sign-in failed.';
+                    signInBtn.disabled = false;
+                }
+            } catch (e) {
+                if (statusEl) statusEl.textContent = 'Could not complete sign-in.';
+                signInBtn.disabled = false;
+            }
+        }
+    })();
+    </script>
+
     <!-- Global VPN Block Detection (must be before extra_js so the fetch interceptor is active for page-specific scripts) -->
     <script>
     (function() {
@@ -3414,35 +3547,42 @@
         const _origFetch = window.fetch;
         window.fetch = async function(...args) {
             const response = await _origFetch.apply(this, args);
-            // Only check /api/ calls to MSX-related endpoints
+            // Only inspect /api/ calls to MSX/AI-related endpoints
             const url = (typeof args[0] === 'string') ? args[0] : (args[0]?.url || '');
-            if (url.includes('/api/msx/') || url.includes('/api/milestone') || url.includes('/api/opportunity/')) {
+            if (url.includes('/api/msx/') || url.includes('/api/ai/') || url.includes('/api/milestone') || url.includes('/api/opportunity/')) {
                 // Skip body inspection for streaming responses (SSE) — they can't be cloned safely
                 const ct = response.headers.get('content-type') || '';
                 const isStream = ct.includes('text/event-stream') || ct.includes('octet-stream');
 
-                if (response.status === 403 && !isStream) {
-                    // Clone the response so the caller still gets it
-                    const clone = response.clone();
-                    try {
-                        const text = await clone.text();
-                        if (window.isVpnBlocked(text)) {
-                            window.showVpnBanner();
-                        }
-                    } catch (e) { /* ignore parse errors */ }
-                } else if (response.ok && !isStream) {
-                    // Belt-and-suspenders: also check JSON body for vpn_blocked flag
-                    // (catches cases where route returns 200 with error in body)
-                    try {
-                        const clone = response.clone();
-                        const json = await clone.json();
-                        if (json && json.vpn_blocked) {
-                            window.showVpnBanner();
-                        } else if (_vpnBlockedState && json && json.success !== false) {
-                            // A successful MSX call clears the VPN blocked state
+                if (!isStream) {
+                    // Read the body once (from a clone so the caller is unaffected)
+                    let text = '';
+                    try { text = await response.clone().text(); } catch (e) { text = ''; }
+
+                    // --- VPN block (403 body or a vpn_blocked error string) ---
+                    if ((response.status === 403 || response.status === 200) && window.isVpnBlocked(text)) {
+                        window.showVpnBanner();
+                    }
+
+                    // --- Auth failure (401 / "not authenticated" / gateway token
+                    //     failure). isAuthFailure already excludes VPN blocks. ---
+                    if (window.isAuthFailure && window.isAuthFailure(response.status, text)) {
+                        window.showAuthBanner();
+                    }
+
+                    // --- Clear either banner on a clean, successful response ---
+                    if (response.ok) {
+                        let json = null;
+                        try { json = JSON.parse(text); } catch (e) { /* not JSON */ }
+                        const succeeded = json && json.success !== false;
+                        if (_vpnBlockedState && succeeded && !window.isVpnBlocked(text)) {
                             window.hideVpnBanner();
                         }
-                    } catch (e) { /* not JSON or parse error — ignore */ }
+                        if (window.isAuthRequired && window.isAuthRequired() && succeeded &&
+                            !(window.isAuthFailure && window.isAuthFailure(response.status, text))) {
+                            window.hideAuthBanner();
+                        }
+                    }
                 }
             }
             return response;
