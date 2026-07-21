@@ -848,11 +848,6 @@
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="gearMenuDropdown">
                             <li><a class="dropdown-item" href="{{ url_for('main.preferences') }}"><i class="bi bi-sliders"></i> Settings</a></li>
                             <li>
-                                <a class="dropdown-item" href="{{ url_for('alignment.alignment_panel') }}">
-                                    <i class="bi bi-diagram-3"></i> Account Alignment
-                                </a>
-                            </li>
-                            <li>
                                 <a class="dropdown-item" href="{{ url_for('admin.admin_panel') }}">
                                     <i class="bi bi-shield-lock"></i> Admin Panel
                                     <span class="badge bg-danger ms-1{{ '' if update_available else ' d-none' }}" id="updateMenuBadge">Update</span>

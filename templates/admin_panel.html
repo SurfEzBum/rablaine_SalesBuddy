@@ -205,6 +205,28 @@
                             </div>
                         </div>
 
+                        <!-- Alignment Override -->
+                        <hr class="my-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0"><i class="bi bi-diagram-3"></i> Alignment Override</h6>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" role="switch" id="alignmentOverrideToggle">
+                                <label class="form-check-label small" for="alignmentOverrideToggle" id="alignmentOverrideLabel">Off</label>
+                            </div>
+                        </div>
+                        <small class="text-muted d-block mt-1">
+                            For the "new fiscal year, MSX not updated yet" window. When on, account
+                            sync uses the territories you declare below instead of your MSX account-team
+                            assignments. Turn it off once MSX catches up.
+                        </small>
+                        <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+                            <button class="btn btn-outline-primary btn-sm" type="button" id="alignmentConfigureBtn"
+                                    data-bs-toggle="modal" data-bs-target="#alignmentModal">
+                                <i class="bi bi-pencil-square"></i> Configure territories
+                            </button>
+                            <span class="small text-muted" id="alignmentSummary">No territories selected.</span>
+                        </div>
+
                         <!-- Milestone Sync -->
                         <hr class="my-3">
                         <div class="d-flex justify-content-between align-items-center">
@@ -1030,6 +1052,55 @@
     </div>
 </div>
 
+<!-- Alignment Override: territory configuration modal -->
+<div class="modal fade" id="alignmentModal" tabindex="-1" aria-labelledby="alignmentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title" id="alignmentModalLabel">
+                    <i class="bi bi-diagram-3"></i> Configure alignment territories
+                    <span class="badge bg-secondary" id="alignmentModalFy"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">
+                    Pick the territories you're aligned to. The account sync will treat every
+                    account in these territories as yours (one customer per TPID).
+                </p>
+                <div id="alignmentModalAlert" class="alert d-none py-2" role="alert"></div>
+
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="input-group input-group-sm" style="max-width: 360px;">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="alignTerrSearch"
+                               placeholder="Filter (e.g. SOU, 0206, HLA)">
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" id="alignProbeBtn" type="button">
+                        <i class="bi bi-arrow-repeat"></i> Refresh from MSX
+                    </button>
+                </div>
+                <div id="alignTerrList" class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
+                    <div class="text-muted small p-2">Loading territories...</div>
+                </div>
+                <div class="mt-2 small text-muted" id="alignSelectedCount">0 selected</div>
+
+                <div class="alert alert-info d-none mt-2 mb-0 py-2" id="alignPreviewResult"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-outline-primary btn-sm" id="alignPreviewBtn">
+                    <i class="bi bi-eye"></i> Preview account count
+                </button>
+                <span class="small fw-semibold me-auto d-none" id="alignSaveStatus"></span>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-success btn-sm" id="alignSaveBtn">
+                    <i class="bi bi-save"></i> Save territories
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <style>
     .archive-node { cursor: pointer; padding: 2px 4px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .archive-node:hover { background: var(--bs-light, #f8f9fa); }
@@ -1047,6 +1118,183 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+
+// ---- Alignment Override ----
+(function initAlignmentOverride() {
+    let fyLabel = '';
+    let territories = [];          // cached universe
+    let selectedTerr = new Map();  // msx_territory_id -> name
+    let loaded = false;
+
+    const $ = id => document.getElementById(id);
+
+    async function jf(url, opts) {
+        const res = await fetch(url, opts);
+        let data = {}; try { data = await res.json(); } catch (e) {}
+        return { ok: res.ok, data };
+    }
+
+    function setToggleLabel(on) {
+        $('alignmentOverrideLabel').textContent = on ? 'On' : 'Off';
+        $('alignmentOverrideLabel').className = 'form-check-label small ' + (on ? 'text-success fw-semibold' : 'text-muted');
+    }
+
+    async function loadStatus() {
+        const { data } = await jf('/alignment/api/status');
+        if (!data.success) return;
+        fyLabel = data.fy_label;
+        $('alignmentModalFy').textContent = fyLabel;
+        $('alignmentOverrideToggle').checked = data.override_active;
+        setToggleLabel(data.override_active);
+        const n = data.selection_count;
+        $('alignmentSummary').textContent = n
+            ? `${n} territor${n === 1 ? 'y' : 'ies'} selected (${fyLabel}).`
+            : `No territories selected (${fyLabel}).`;
+    }
+
+    async function toggleOverride() {
+        const on = $('alignmentOverrideToggle').checked;
+        const { data } = await jf('/alignment/api/override', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ active: on }),
+        });
+        setToggleLabel(data.override_active);
+        $('alignmentOverrideToggle').checked = !!data.override_active;
+    }
+
+    function modalAlert(msg, kind) {
+        const el = $('alignmentModalAlert');
+        el.className = 'alert alert-' + (kind || 'info') + ' py-2';
+        el.textContent = msg;
+        el.classList.remove('d-none');
+    }
+    function clearModalAlert() { $('alignmentModalAlert').classList.add('d-none'); }
+
+    function renderTerritories() {
+        const filter = $('alignTerrSearch').value.trim().toLowerCase();
+        const list = $('alignTerrList');
+        if (!territories.length) {
+            list.innerHTML = '<div class="text-muted small p-2">No territories cached. Click "Refresh from MSX".</div>';
+            return;
+        }
+        const shown = territories.filter(t => !filter || t.name.toLowerCase().includes(filter));
+        list.innerHTML = shown.map(t => {
+            const checked = selectedTerr.has(t.msx_territory_id) ? 'checked' : '';
+            return `<div class="form-check">
+                <input class="form-check-input align-terr-cb" type="checkbox"
+                       value="${t.msx_territory_id}" data-name="${t.name}"
+                       id="atrr_${t.msx_territory_id}" ${checked}>
+                <label class="form-check-label" for="atrr_${t.msx_territory_id}">${t.name}</label>
+            </div>`;
+        }).join('');
+        list.querySelectorAll('.align-terr-cb').forEach(cb => cb.addEventListener('change', onToggle));
+    }
+
+    function onToggle(e) {
+        const id = e.target.value;
+        if (e.target.checked) selectedTerr.set(id, e.target.dataset.name);
+        else selectedTerr.delete(id);
+        updateCount();
+    }
+    function updateCount() {
+        $('alignSelectedCount').textContent = selectedTerr.size + ' selected';
+    }
+
+    async function loadTerritories() {
+        const { data } = await jf('/alignment/api/territories');
+        territories = data.territories || [];
+        renderTerritories();
+    }
+
+    async function loadSelections() {
+        const { data } = await jf('/alignment/api/selections?fy_label=' + encodeURIComponent(fyLabel));
+        selectedTerr = new Map();
+        (data.selections || []).forEach(s => selectedTerr.set(s.msx_territory_id, s.territory_name));
+    }
+
+    async function ensureLoaded() {
+        if (loaded) { renderTerritories(); updateCount(); return; }
+        await loadSelections();
+        await loadTerritories();
+        updateCount();
+        loaded = true;
+    }
+
+    async function probe() {
+        const btn = $('alignProbeBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Probing...';
+        clearModalAlert();
+        const { ok, data } = await jf('/alignment/api/probe', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        });
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh from MSX';
+        if (!ok || !data.success) { modalAlert(data.error || 'Probe failed.', 'danger'); return; }
+        modalAlert(`Probed ${data.total} territories (${data.created} new, ${data.updated} updated).`, 'success');
+        await loadTerritories();
+    }
+
+    async function save() {
+        const btn = $('alignSaveBtn');
+        const status = $('alignSaveStatus');
+        const payload = Array.from(selectedTerr.entries()).map(([id, name]) => ({
+            msx_territory_id: id, territory_name: name,
+        }));
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+        status.classList.add('d-none');
+        const { ok, data } = await jf('/alignment/api/selections', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ territories: payload, fy_label: fyLabel }),
+        });
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-save"></i> Save territories';
+        if (!ok || !data.success) {
+            status.className = 'small fw-semibold me-auto text-danger';
+            status.textContent = (data && data.error) || 'Save failed.';
+            status.classList.remove('d-none');
+            return;
+        }
+        const n = payload.length;
+        const removed = data.deactivated ? ` (${data.deactivated} removed)` : '';
+        status.className = 'small fw-semibold me-auto text-success';
+        status.innerHTML = `<i class="bi bi-check-circle-fill"></i> Saved ${n} territor${n === 1 ? 'y' : 'ies'}${removed}.`;
+        status.classList.remove('d-none');
+        loadStatus();
+    }
+
+    async function preview() {
+        const box = $('alignPreviewResult');
+        box.classList.remove('d-none');
+        box.className = 'alert alert-info mt-2 mb-0 py-2';
+        box.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking MSX...';
+        const { ok, data } = await jf('/alignment/api/preview', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fy_label: fyLabel }),
+        });
+        if (!ok || !data.success) {
+            box.className = 'alert alert-danger mt-2 mb-0 py-2';
+            box.textContent = (data && data.error) || 'Preview failed.';
+            return;
+        }
+        box.innerHTML = `<strong>${data.customer_count}</strong> customers would sync across `
+            + `${data.territory_count} territor${data.territory_count === 1 ? 'y' : 'ies'} `
+            + `<span class="text-muted">(${data.kept_account_count} MSX account records, deduped by TPID)</span>.`;
+    }
+
+    // Wire up
+    const toggle = $('alignmentOverrideToggle');
+    if (toggle) {
+        toggle.addEventListener('change', toggleOverride);
+        $('alignmentConfigureBtn').addEventListener('click', ensureLoaded);
+        $('alignTerrSearch').addEventListener('input', renderTerritories);
+        $('alignProbeBtn').addEventListener('click', probe);
+        $('alignSaveBtn').addEventListener('click', save);
+        $('alignPreviewBtn').addEventListener('click', preview);
+        loadStatus();
+    }
+})();
 
 // Fetch Favicons
 function _faviconAction(url, btn, originalHtml) {

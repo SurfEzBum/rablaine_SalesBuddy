@@ -1412,13 +1412,14 @@ def import_stream():
     # aura thread has a valid reference even after the response stream ends.
     _app_for_aura = current_app._get_current_object()
 
-    # Determine account-discovery source before streaming: the user's declared
-    # territory alignment wins when active; otherwise fall back to the
-    # msp_accountteams-based scan_init. An explicit ?source= overrides.
+    # Determine account-discovery source before streaming: the alignment
+    # override (when switched on) makes the sync use the user's declared
+    # territories; otherwise fall back to the msp_accountteams-based scan_init.
+    # An explicit ?source= overrides the toggle.
     from app.services.alignment import (
         current_fy_label,
         discover_accounts_from_alignment,
-        has_active_alignment,
+        is_override_active,
     )
     _source_param = request.args.get('source')
     _fy_label = current_fy_label()
@@ -1427,7 +1428,7 @@ def import_stream():
     elif _source_param == 'alignment':
         _use_alignment = True
     else:
-        _use_alignment = has_active_alignment(_fy_label)
+        _use_alignment = is_override_active()
 
     def generate():
         phase = "initializing"

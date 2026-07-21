@@ -250,6 +250,25 @@ def has_active_alignment(fy_label: Optional[str] = None) -> bool:
         is not None
     )
 
+def is_override_active() -> bool:
+    """Return True if the alignment override is switched on.
+
+    When on, the account sync uses the declared territory alignment instead of
+    the user's msp_accountteams membership.
+    """
+    from app.models import UserPreference
+    pref = UserPreference.query.first()
+    return bool(pref and pref.alignment_override_active)
+
+
+def set_override_active(active: bool) -> bool:
+    """Turn the alignment override on or off. Returns the new state."""
+    from app.models import UserPreference
+    pref = UserPreference.query.first()
+    if pref:
+        pref.alignment_override_active = bool(active)
+        db.session.commit()
+    return is_override_active()
 
 # ---------------------------------------------------------------------------
 # Territory-based account discovery (alternate sync Phase 1)

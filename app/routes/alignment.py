@@ -1,14 +1,14 @@
-"""Custom alignment sync routes.
+"""Alignment override routes.
 
-Serves the interactive alignment panel and its JSON APIs: probe/list the
-territory universe, discover sellers for selected territories, persist the
-user's (territory, seller) selections, and preview the accounts a sync would
-pull under the current alignment. All MSX reads are read-only; saving records
-intent only and does not run a sync.
+JSON APIs behind the admin panel's Alignment Override section and its territory
+modal: probe/list the territory universe, persist the user's territory
+selections, toggle the override on/off, and preview how many accounts/customers
+the alignment resolves to. All MSX reads are read-only; saving records intent
+only and does not run a sync.
 """
 import logging
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, request
 
 from app.services import alignment
 from app.services.msx_auth import get_msx_token
@@ -29,18 +29,27 @@ def _require_msx():
     return None
 
 
-@alignment_bp.route('/alignment')
-def alignment_panel():
-    """Render the interactive alignment configuration panel."""
+@alignment_bp.route('/alignment/api/status')
+def api_status():
+    """Return override state + selection summary for the admin card."""
     fy_label = alignment.current_fy_label()
-    territories = alignment.list_territories()
     selections = alignment.get_alignment_selections(fy_label)
-    return render_template(
-        'alignment_panel.html',
-        fy_label=fy_label,
-        territory_count=len(territories),
-        selection_count=len(selections),
-    )
+    return jsonify({
+        "success": True,
+        "fy_label": fy_label,
+        "override_active": alignment.is_override_active(),
+        "selection_count": len(selections),
+        "territory_cache_count": len(alignment.list_territories()),
+    })
+
+
+@alignment_bp.route('/alignment/api/override', methods=['POST'])
+def api_set_override():
+    """Turn the alignment override on or off."""
+    data = request.get_json(silent=True) or {}
+    active = bool(data.get('active'))
+    new_state = alignment.set_override_active(active)
+    return jsonify({"success": True, "override_active": new_state})
 
 
 @alignment_bp.route('/alignment/api/territories')

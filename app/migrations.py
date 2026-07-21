@@ -1590,10 +1590,18 @@ def _migrate_alignment_tables(db, inspector):
     """Create alignment_territories and alignment_selections tables.
 
     Backs the custom alignment sync feature: a cached territory universe for the
-    picker (alignment_territories) and the user's declared (territory, seller)
-    pairs (alignment_selections). Created by db.create_all() too, but guarded
-    here for safety and to keep the schema explicit. Idempotent.
+    picker (alignment_territories) and the user's declared territory selections
+    (alignment_selections), plus an override flag on user_preferences that makes
+    the account sync use the declared territories instead of msp_accountteams.
+    Created by db.create_all() too, but guarded here for safety and to keep the
+    schema explicit. Idempotent.
     """
+    # Override flag: when on, the account sync uses the declared alignment.
+    _add_column_if_not_exists(
+        db, inspector, 'user_preferences', 'alignment_override_active',
+        'BOOLEAN NOT NULL DEFAULT 0',
+    )
+
     if not _table_exists(inspector, 'alignment_territories'):
         with db.engine.connect() as conn:
             conn.execute(text("""

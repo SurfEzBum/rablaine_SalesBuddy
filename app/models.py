@@ -1399,6 +1399,7 @@ class UserPreference(db.Model):
     last_milestone_sync = db.Column(db.DateTime, nullable=True)  # Last time milestone sync ran (UTC)
     compensated_buckets = db.Column(db.Text, nullable=True)  # JSON array of selected ServiceCompGrouping buckets (fallback for localStorage)
     revenue_import_reminder = db.Column(db.Boolean, default=True, nullable=False, server_default='1')
+    alignment_override_active = db.Column(db.Boolean, default=False, nullable=False, server_default='0')  # When on, account sync uses declared territory alignment instead of msp_accountteams
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
     updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
     

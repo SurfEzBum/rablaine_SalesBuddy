@@ -168,6 +168,23 @@ class TestSelectionPersistence:
             assert alignment.has_active_alignment(FY) is True
 
 
+class TestOverrideToggle:
+    """The alignment override on/off switch (UserPreference flag)."""
+
+    def test_default_off(self, app):
+        with app.app_context():
+            from app.services import alignment
+            assert alignment.is_override_active() is False
+
+    def test_toggle_on_and_off(self, app):
+        with app.app_context():
+            from app.services import alignment
+            assert alignment.set_override_active(True) is True
+            assert alignment.is_override_active() is True
+            assert alignment.set_override_active(False) is False
+            assert alignment.is_override_active() is False
+
+
 class TestAccountDiscovery:
     """discover_accounts_from_alignment - all accounts in selected territories."""
 
