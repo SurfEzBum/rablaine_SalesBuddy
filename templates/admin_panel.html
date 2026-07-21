@@ -1279,12 +1279,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function preview() {
         const box = $('alignPreviewResult');
+        const payload = Array.from(selectedTerr.entries()).map(([id, name]) => ({
+            msx_territory_id: id, territory_name: name,
+        }));
         box.classList.remove('d-none');
         box.className = 'alert alert-info mt-2 mb-0 py-2';
+        if (!payload.length) {
+            box.className = 'alert alert-warning mt-2 mb-0 py-2';
+            box.textContent = 'Select at least one territory to preview.';
+            return;
+        }
         box.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking MSX...';
         const { ok, data } = await jf('/alignment/api/preview', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fy_label: fyLabel }),
+            body: JSON.stringify({ territories: payload, fy_label: fyLabel }),
         });
         if (!ok || !data.success) {
             box.className = 'alert alert-danger mt-2 mb-0 py-2';

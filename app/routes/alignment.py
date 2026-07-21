@@ -98,12 +98,26 @@ def api_save_selections():
 
 @alignment_bp.route('/alignment/api/preview', methods=['POST'])
 def api_preview():
-    """Preview accounts a sync would pull under the saved alignment (read-only)."""
+    """Preview accounts/customers an alignment would pull (read-only).
+
+    If ``territories`` (the in-modal selection) is provided, preview those -
+    so the user can check the count before saving. Otherwise fall back to the
+    saved alignment for the current FY.
+    """
     guard = _require_msx()
     if guard:
         return guard
     data = request.get_json(silent=True) or {}
-    fy_label = data.get('fy_label') or alignment.current_fy_label()
-    result = alignment.discover_accounts_from_alignment(fy_label)
+    territories = data.get('territories')
+    if territories:
+        names = [
+            (t.get('territory_name') if isinstance(t, dict) else t)
+            for t in territories
+        ]
+        names = [n for n in names if n]
+        result = alignment.summarize_accounts_for_territories(names)
+    else:
+        fy_label = data.get('fy_label') or alignment.current_fy_label()
+        result = alignment.discover_accounts_from_alignment(fy_label)
     status = 200 if result.get('success') else 502
     return jsonify(result), status
