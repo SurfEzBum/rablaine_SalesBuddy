@@ -288,14 +288,16 @@ def discover_accounts_from_alignment(
     if not acct_result.get("success"):
         return acct_result
 
-    account_ids = [
-        a["account_id"] for a in acct_result.get("accounts", [])
-        if a.get("account_id")
-    ]
+    accounts = acct_result.get("accounts", [])
+    account_ids = [a["account_id"] for a in accounts if a.get("account_id")]
+    # MSX accounts are a parent/child hierarchy: one customer (TPID / top-level
+    # parent) can span many account records. The sync creates one customer per
+    # unique TPID, so the customer count is what actually lands in Sales Buddy.
+    unique_tpids = {a.get("tpid") for a in accounts if a.get("tpid")}
 
     logger.info(
-        "Alignment discovery (%s): %d territories -> %d accounts",
-        fy_label, len(territory_names), len(account_ids),
+        "Alignment discovery (%s): %d territories -> %d accounts, %d customers (TPIDs)",
+        fy_label, len(territory_names), len(account_ids), len(unique_tpids),
     )
     return {
         "success": True,
@@ -303,5 +305,6 @@ def discover_accounts_from_alignment(
         "fy_label": fy_label,
         "territory_count": len(territory_names),
         "kept_account_count": len(account_ids),
+        "customer_count": len(unique_tpids),
         "source": "alignment",
     }

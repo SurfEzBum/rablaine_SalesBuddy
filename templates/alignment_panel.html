@@ -207,8 +207,10 @@
         ((data && data.error) || 'Preview failed.') + '</span>';
       return;
     }
-    box.innerHTML = `<strong>${data.kept_account_count}</strong> accounts would sync `
-      + `across ${data.territory_count} territor${data.territory_count === 1 ? 'y' : 'ies'}.`;
+    box.innerHTML = `<strong>${data.customer_count}</strong> customers would sync `
+      + `across ${data.territory_count} territor${data.territory_count === 1 ? 'y' : 'ies'} `
+      + `<span class="text-muted">(${data.kept_account_count} MSX account records, `
+      + `deduped by TPID)</span>.`;
   }
 
   // ---- load saved selections then wire up ----

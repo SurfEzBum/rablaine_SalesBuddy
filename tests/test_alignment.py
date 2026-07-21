@@ -188,19 +188,21 @@ class TestAccountDiscovery:
             accounts = {
                 "success": True,
                 "accounts": [
-                    {"account_id": "a1", "territory_id": "t1", "territory_name": "T1"},
-                    {"account_id": "a2", "territory_id": "t1", "territory_name": "T1"},
-                    {"account_id": "a3", "territory_id": "t2", "territory_name": "T2"},
+                    {"account_id": "a1", "territory_id": "t1", "territory_name": "T1", "tpid": 100},
+                    {"account_id": "a2", "territory_id": "t1", "territory_name": "T1", "tpid": 100},
+                    {"account_id": "a3", "territory_id": "t2", "territory_name": "T2", "tpid": 200},
                 ],
             }
             with patch.object(alignment, "get_accounts_for_territories",
                               return_value=accounts) as mock_get:
                 result = alignment.discover_accounts_from_alignment(FY)
 
-            # Whole-territory: all accounts kept, no seller scoping.
+            # Whole-territory: all account records kept, no seller scoping.
             assert set(result["account_ids"]) == {"a1", "a2", "a3"}
             assert result["territory_count"] == 2
             assert result["kept_account_count"] == 3
+            # a1 and a2 share TPID 100, so 2 unique customers, not 3.
+            assert result["customer_count"] == 2
             # Queried by the two selected territory names.
             called_names = sorted(mock_get.call_args[0][0])
             assert called_names == ["T1", "T2"]
