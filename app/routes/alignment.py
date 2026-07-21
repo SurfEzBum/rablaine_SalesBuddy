@@ -39,6 +39,7 @@ def api_status():
         "fy_label": fy_label,
         "override_active": alignment.is_override_active(),
         "selection_count": len(selections),
+        "territories": [s["territory_name"] for s in selections],
         "territory_cache_count": len(alignment.list_territories()),
     })
 

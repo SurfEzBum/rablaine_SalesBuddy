@@ -1124,10 +1124,26 @@ document.addEventListener('DOMContentLoaded', function() {
         $('alignmentModalFy').textContent = fyLabel;
         $('alignmentOverrideToggle').checked = data.override_active;
         setToggleLabel(data.override_active);
-        const n = data.selection_count;
-        $('alignmentSummary').textContent = n
-            ? `${n} territor${n === 1 ? 'y' : 'ies'} selected (${fyLabel}).`
-            : `No territories selected (${fyLabel}).`;
+        applyOverrideState(data.override_active, data.territories || []);
+    }
+
+    function applyOverrideState(on, terrNames) {
+        const box = $('alignmentOverrideBox');
+        const body = $('alignmentOverrideBody');
+        const summary = $('alignmentSummary');
+        if (on) {
+            box.classList.remove('opacity-50');
+            body.classList.remove('d-none');
+            if (terrNames.length) {
+                summary.innerHTML = terrNames.map(n =>
+                    `<span class="badge bg-info text-dark me-1 mb-1">${n}</span>`).join('');
+            } else {
+                summary.innerHTML = '<span class="text-muted">No territories selected yet - configure to pick some.</span>';
+            }
+        } else {
+            box.classList.add('opacity-50');
+            body.classList.add('d-none');
+        }
     }
 
     async function toggleOverride() {
@@ -1138,6 +1154,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         setToggleLabel(data.override_active);
         $('alignmentOverrideToggle').checked = !!data.override_active;
+        await loadStatus();
     }
 
     function modalAlert(msg, kind) {
