@@ -1103,6 +1103,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let territories = [];          // cached universe
     let selectedTerr = new Map();  // msx_territory_id -> name
     let loaded = false;
+    let selCount = 0;              // saved territory count for the current FY
 
     const $ = id => document.getElementById(id);
 
@@ -1117,10 +1118,22 @@ document.addEventListener('DOMContentLoaded', function() {
         $('alignmentOverrideLabel').className = 'form-check-label small ' + (on ? 'text-success fw-semibold' : 'text-muted');
     }
 
+    function showNote(msg) {
+        const note = $('alignmentNote');
+        if (!note) return;
+        note.textContent = msg;
+        note.classList.remove('d-none');
+    }
+    function clearNote() {
+        const note = $('alignmentNote');
+        if (note) note.classList.add('d-none');
+    }
+
     async function loadStatus() {
         const { data } = await jf('/alignment/api/status');
         if (!data.success) return;
         fyLabel = data.fy_label;
+        selCount = data.selection_count;
         $('alignmentModalFy').textContent = fyLabel;
         $('alignmentOverrideToggle').checked = data.override_active;
         setToggleLabel(data.override_active);
@@ -1147,6 +1160,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function toggleOverride() {
+        clearNote();
         const on = $('alignmentOverrideToggle').checked;
         const { data } = await jf('/alignment/api/override', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1155,6 +1169,10 @@ document.addEventListener('DOMContentLoaded', function() {
         setToggleLabel(data.override_active);
         $('alignmentOverrideToggle').checked = !!data.override_active;
         await loadStatus();
+        // Turning on with nothing configured: open the picker to guide setup.
+        if (data.override_active && selCount === 0) {
+            bootstrap.Modal.getOrCreateInstance($('alignmentModal')).show();
+        }
     }
 
     function modalAlert(msg, kind) {
@@ -1287,6 +1305,19 @@ document.addEventListener('DOMContentLoaded', function() {
         $('alignProbeBtn').addEventListener('click', probe);
         $('alignSaveBtn').addEventListener('click', save);
         $('alignPreviewBtn').addEventListener('click', preview);
+        // Invariant: override on requires >= 1 territory. If they close the
+        // picker with nothing saved, flip it back off and say why.
+        $('alignmentModal').addEventListener('hidden.bs.modal', async () => {
+            await loadStatus();
+            if ($('alignmentOverrideToggle').checked && selCount === 0) {
+                await jf('/alignment/api/override', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active: false }),
+                });
+                await loadStatus();
+                showNote('Override turned off - pick at least one territory to enable it.');
+            }
+        });
         loadStatus();
     }
 })();
