@@ -16,6 +16,8 @@ user's; all account/seller data still comes from live MSX queries.
 from __future__ import annotations
 
 import logging
+import math
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 from app.models import AlignmentSelection, AlignmentTerritory, db, utc_now
@@ -33,13 +35,42 @@ logger = logging.getLogger(__name__)
 # length limits. Mirrors _TEAM_BATCH in the import route.
 _TEAM_BATCH = 3
 
+# Parallel workers for MSX team resolution (mirrors the import pipeline).
+_PARALLEL_WORKERS = 3
+
 # Default region prefix for the territory-universe probe.
 _DEFAULT_TERRITORY_PREFIX = "East.SMECC."
 
 
-def _batched(items: List[Any], size: int):
-    for i in range(0, len(items), size):
-        yield items[i:i + size]
+def _split_chunks(items: List[Any], n: int) -> List[List[Any]]:
+    """Split ``items`` into up to ``n`` roughly-equal chunks for parallelism."""
+    if not items:
+        return []
+    size = math.ceil(len(items) / n)
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _resolve_account_sellers(account_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Resolve the Cloud & AI seller for each account via msp_accountteams.
+
+    Runs the team queries across ``_PARALLEL_WORKERS`` threads (mirroring the
+    import pipeline) so large territory sets don't take minutes. Returns
+    ``{account_id: {name, type, user_id}}`` for accounts that have a seller.
+    """
+    account_sellers: Dict[str, Dict[str, Any]] = {}
+    chunks = _split_chunks(account_ids, _PARALLEL_WORKERS)
+    if not chunks:
+        return account_sellers
+    with ThreadPoolExecutor(max_workers=_PARALLEL_WORKERS) as pool:
+        futures = [
+            pool.submit(batch_query_account_teams, chunk, _TEAM_BATCH)
+            for chunk in chunks if chunk
+        ]
+        for f in futures:
+            r = f.result()
+            if r.get("success"):
+                account_sellers.update(r.get("account_sellers", {}))
+    return account_sellers
 
 
 def current_fy_label() -> str:
@@ -195,12 +226,8 @@ def discover_sellers_for_territories(
     }
     account_ids = list(acct_terr.keys())
 
-    # Resolve the Cloud & AI seller per account via msp_accountteams.
-    account_sellers: Dict[str, Dict[str, Any]] = {}
-    for chunk in _batched(account_ids, _TEAM_BATCH):
-        r = batch_query_account_teams(chunk, batch_size=len(chunk))
-        if r.get("success"):
-            account_sellers.update(r.get("account_sellers", {}))
+    # Resolve the Cloud & AI seller per account via msp_accountteams (parallel).
+    account_sellers = _resolve_account_sellers(account_ids)
 
     # Aggregate per territory -> per seller.
     # territory_id -> {"name":..., "account_count":N, "sellers": {uid: {...}}}
@@ -412,12 +439,8 @@ def discover_accounts_from_alignment(
     }
     account_ids = list(acct_terr.keys())
 
-    # Resolve Cloud & AI seller per account.
-    account_sellers: Dict[str, Dict[str, Any]] = {}
-    for chunk in _batched(account_ids, _TEAM_BATCH):
-        r = batch_query_account_teams(chunk, batch_size=len(chunk))
-        if r.get("success"):
-            account_sellers.update(r.get("account_sellers", {}))
+    # Resolve Cloud & AI seller per account (parallel).
+    account_sellers = _resolve_account_sellers(account_ids)
 
     kept: List[str] = []
     for aid, tid in acct_terr.items():

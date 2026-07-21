@@ -45,6 +45,16 @@
         </button>
         <span class="ms-2 small text-muted" id="terrSelectedCount">0 selected</span>
       </div>
+      <div id="sellerLoading" class="alert alert-info d-flex align-items-center gap-2 mt-2 mb-0 d-none" role="status">
+        <span class="spinner-border spinner-border-sm flex-shrink-0"></span>
+        <div class="small">
+          <div><strong>Resolving sellers from MSX...</strong> <span id="sellerElapsed"></span></div>
+          <div class="text-muted" id="sellerLoadingDetail">
+            This looks at every account in your selected territories, so it can
+            take a minute or two for large territories. Hang tight - it's not frozen.
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -164,16 +174,38 @@
   }
 
   // ---- Step B: sellers ----
+  let sellerTimer = null;
+
+  function startSellerLoading(terrCount) {
+    const box = document.getElementById('sellerLoading');
+    box.classList.remove('d-none');
+    const started = Date.now();
+    const elapsedEl = document.getElementById('sellerElapsed');
+    const tick = () => {
+      const secs = Math.round((Date.now() - started) / 1000);
+      elapsedEl.textContent = `(${secs}s elapsed, ${terrCount} territories)`;
+    };
+    tick();
+    sellerTimer = setInterval(tick, 1000);
+  }
+
+  function stopSellerLoading() {
+    if (sellerTimer) { clearInterval(sellerTimer); sellerTimer = null; }
+    document.getElementById('sellerLoading').classList.add('d-none');
+  }
+
   async function loadSellers() {
     clearAlert();
     const names = Array.from(selectedTerr.values());
     const btn = document.getElementById('btnLoadSellers');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Loading...';
+    startSellerLoading(names.length);
     const { ok, data } = await jsonFetch('/alignment/api/sellers', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ territories: names }),
     });
+    stopSellerLoading();
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-people"></i> Load sellers for selected territories';
     if (!ok || !data.success) {
@@ -253,7 +285,8 @@
     clearAlert();
     const box = document.getElementById('previewResult');
     box.classList.remove('d-none');
-    box.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking MSX...';
+    box.innerHTML = '<span class="spinner-border spinner-border-sm"></span> '
+      + 'Checking MSX... this can take a minute for large territories.';
     const { ok, data } = await jsonFetch('/alignment/api/preview', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fy_label: FY }),
