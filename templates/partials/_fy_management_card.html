@@ -21,6 +21,28 @@
                 <div class="text-muted text-center py-2"><i class="bi bi-hourglass-split"></i> Loading FY status...</div>
             </div>
 
+            <!-- Alignment Override -->
+            <div class="border rounded p-3 mb-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0"><i class="bi bi-diagram-3"></i> Alignment Override</h6>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="alignmentOverrideToggle">
+                        <label class="form-check-label small" for="alignmentOverrideToggle" id="alignmentOverrideLabel">Off</label>
+                    </div>
+                </div>
+                <small class="text-muted d-block mt-1">
+                    When on, the sync uses the territories you pick instead of your MSX
+                    account-team assignments.
+                </small>
+                <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+                    <button class="btn btn-outline-primary btn-sm" type="button" id="alignmentConfigureBtn"
+                            data-bs-toggle="modal" data-bs-target="#alignmentModal">
+                        <i class="bi bi-pencil-square"></i> Configure territories
+                    </button>
+                    <span class="small text-muted" id="alignmentSummary">No territories selected.</span>
+                </div>
+            </div>
+
             <!-- Start New FY (shown when NOT in transition) -->
             <div id="fyStartSection" style="display: none;">
                 <h6><i class="bi bi-play-circle"></i> Start New Fiscal Year</h6>
