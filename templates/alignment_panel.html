@@ -59,6 +59,34 @@
     </div>
     <div class="card-footer d-none" id="previewResult"></div>
   </div>
+
+  <!-- Step 3: sync -->
+  <div class="card mb-3">
+    <div class="card-header"><strong>Step 3.</strong> Sync accounts into Sales Buddy</div>
+    <div class="card-body">
+      <p class="small text-muted mb-2">
+        Pulls the customers in your saved territories into Sales Buddy (one
+        customer per TPID). Existing customers are updated; this does not delete
+        anything - accounts outside your alignment are just flagged stale.
+      </p>
+      <button class="btn btn-primary" id="btnSync" type="button">
+        <i class="bi bi-cloud-download"></i> Sync accounts now
+      </button>
+
+      <div class="mt-3 d-none" id="syncProgress">
+        <div class="small mb-1" id="syncStatusText">Starting...</div>
+        <div class="progress" style="height: 20px;">
+          <div class="progress-bar progress-bar-striped progress-bar-animated"
+               id="syncBar" role="progressbar" style="width: 0%;">
+            <span id="syncPercent">0%</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert alert-success mt-3 d-none" id="syncResult"></div>
+      <div class="alert alert-danger mt-3 d-none" id="syncError"></div>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
@@ -213,6 +241,92 @@
       + `deduped by TPID)</span>.`;
   }
 
+  // ---- Step 3: sync ----
+  async function runSync() {
+    const btn = document.getElementById('btnSync');
+    const prog = document.getElementById('syncProgress');
+    const statusText = document.getElementById('syncStatusText');
+    const bar = document.getElementById('syncBar');
+    const pct = document.getElementById('syncPercent');
+    const resultEl = document.getElementById('syncResult');
+    const errorEl = document.getElementById('syncError');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Syncing...';
+    prog.classList.remove('d-none');
+    resultEl.classList.add('d-none');
+    errorEl.classList.add('d-none');
+    statusText.textContent = 'Starting...';
+    bar.style.width = '0%';
+    pct.textContent = '0%';
+
+    function finish() {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-cloud-download"></i> Sync accounts now';
+    }
+
+    try {
+      const response = await fetch('/api/msx/import-stream?source=alignment');
+      if (!response.ok) {
+        let detail = '';
+        try { const b = await response.json(); detail = b.error || b.message || ''; }
+        catch (_) { try { detail = (await response.text()).slice(0, 200); } catch (_) {} }
+        throw new Error(detail || `HTTP ${response.status}`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let data;
+          try { data = JSON.parse(line.slice(6)); } catch (_) { continue; }
+
+          if (data.error) {
+            prog.classList.add('d-none');
+            errorEl.textContent = data.error;
+            errorEl.classList.remove('d-none');
+            reader.cancel();
+            finish();
+            return;
+          }
+          if (data.message) statusText.textContent = data.message;
+          if (data.progress !== undefined) {
+            bar.style.width = `${data.progress}%`;
+            pct.textContent = `${data.progress}%`;
+          }
+          if (data.complete && data.summary) {
+            prog.classList.add('d-none');
+            const s = data.summary;
+            resultEl.innerHTML =
+              `<strong>Sync complete.</strong> `
+              + `Customers: ${s.customers_created || 0} created`
+              + `${s.customers_updated ? ', ' + s.customers_updated + ' updated' : ''}`
+              + `${s.customers_unchanged ? ', ' + s.customers_unchanged + ' unchanged' : ''}`
+              + `${s.customers_skipped ? ', ' + s.customers_skipped + ' skipped' : ''}. `
+              + `Territories: ${s.territories_created || 0} created. `
+              + `${s.duration ? 'Done in ' + s.duration + 's. ' : ''}`
+              + `<a href="/customers" class="alert-link">View customers</a>.`;
+            resultEl.classList.remove('d-none');
+            finish();
+            return;
+          }
+        }
+      }
+      finish();
+    } catch (e) {
+      prog.classList.add('d-none');
+      errorEl.textContent = String(e.message || e);
+      errorEl.classList.remove('d-none');
+      finish();
+    }
+  }
+
   // ---- load saved selections then wire up ----
   async function init() {
     const { data } = await jsonFetch('/alignment/api/selections?fy_label=' + encodeURIComponent(FY));
@@ -226,6 +340,7 @@
     document.getElementById('btnProbe').addEventListener('click', probeTerritories);
     document.getElementById('btnSave').addEventListener('click', saveSelections);
     document.getElementById('btnPreview').addEventListener('click', previewAccounts);
+    document.getElementById('btnSync').addEventListener('click', runSync);
   }
 
   init();
