@@ -43,13 +43,33 @@ def _batched(items: List[Any], size: int):
 
 
 def current_fy_label() -> str:
-    """Return the current fiscal-year label (e.g. 'FY27').
+    """Return the fiscal-year label the alignment should target.
 
-    Delegates to the FY cutover helper so labels stay consistent with the
-    transition machinery.
+    Resolution order:
+    1. During an active FY transition, the FY being moved *into* (transition
+       label, e.g. "FY27") - that's the alignment being configured.
+    2. During FY changeover season (Jul-Aug) when the next FY hasn't been
+       completed yet, the next FY - so the panel targets the year you're
+       aligning for before you formally start the transition.
+    3. Otherwise, the current fiscal year.
     """
-    from app.services.fy_cutover import get_fiscal_year_labels
-    return get_fiscal_year_labels()["current_fy"]
+    from datetime import date as _date
+
+    from app.models import UserPreference
+    from app.services.fy_cutover import get_fiscal_year_labels, get_transition_state
+
+    state = get_transition_state()
+    if state.get("in_transition") and state.get("fy_label"):
+        return state["fy_label"]
+
+    labels = get_fiscal_year_labels()
+    today = _date.today()
+    if today.month in (7, 8):
+        pref = UserPreference.query.first()
+        last_completed = pref.fy_last_completed if pref else None
+        if last_completed != labels["next_fy"]:
+            return labels["next_fy"]
+    return labels["current_fy"]
 
 
 # ---------------------------------------------------------------------------
