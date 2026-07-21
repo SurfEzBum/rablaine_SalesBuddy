@@ -1230,7 +1230,16 @@ document.addEventListener('DOMContentLoaded', function() {
         await loadSelections();
         await loadTerritories();
         updateCount();
-        loaded = true;
+        if (territories.length === 0) {
+            // Nothing cached yet - pull the territory list from MSX
+            // automatically so the user doesn't have to click "Refresh".
+            $('alignTerrList').innerHTML =
+                '<div class="text-muted small p-2">'
+                + '<span class="spinner-border spinner-border-sm"></span> '
+                + 'Loading territories from MSX...</div>';
+            await probe();
+        }
+        if (territories.length > 0) loaded = true;
     }
 
     async function probe() {
@@ -1308,11 +1317,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const toggle = $('alignmentOverrideToggle');
     if (toggle) {
         toggle.addEventListener('change', toggleOverride);
-        $('alignmentConfigureBtn').addEventListener('click', ensureLoaded);
         $('alignTerrSearch').addEventListener('input', renderTerritories);
         $('alignProbeBtn').addEventListener('click', probe);
         $('alignSaveBtn').addEventListener('click', save);
         $('alignPreviewBtn').addEventListener('click', preview);
+        // Load (and auto-probe if empty) whenever the modal opens - covers both
+        // the Configure button and the auto-open when the override is enabled.
+        $('alignmentModal').addEventListener('shown.bs.modal', ensureLoaded);
         // Invariant: override on requires >= 1 territory. If they close the
         // picker with nothing saved, flip it back off and say why.
         $('alignmentModal').addEventListener('hidden.bs.modal', async () => {
