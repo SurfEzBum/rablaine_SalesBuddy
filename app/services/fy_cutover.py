@@ -261,21 +261,17 @@ def preview_purge(synced_tpids: list[int]) -> dict:
     }
 
 
-def finalize_alignments(synced_tpids: list[int]) -> dict:
-    """Purge orphaned customers and their related data.
+def _finalize_alignments_gen(synced_tpids: list[int]):
+    """Core purge logic as a generator that yields progress events.
 
-    Customers whose TPID is NOT in synced_tpids are deleted along with
-    all their cascade-dependent records. Customers without a TPID
-    (manually created) are kept.
+    Yields progress dicts during the purge; the final event carries the
+    summary: ``{"summary": {...}}``. Deletes are staged and committed once at
+    the end (atomic - a failure rolls back the whole purge), so streaming
+    progress does not change the all-or-nothing behavior.
 
-    After customer purge, clean up empty org entities:
-    sellers, territories, and PODs with zero remaining customers.
-
-    Args:
-        synced_tpids: List of TPIDs from the finalized MSX sync.
-
-    Returns:
-        Summary dict with counts of kept/purged records.
+    Both :func:`finalize_alignments` (non-streaming) and
+    :func:`finalize_alignments_stream` drive this single implementation so the
+    destructive logic can never drift between two copies.
     """
     all_customers = Customer.query.all()
     keep_ids = set()
@@ -295,8 +291,15 @@ def finalize_alignments(synced_tpids: list[int]) -> dict:
     purge_tasks = 0
     purge_revenue = 0
 
+    yield {
+        "phase": "purge",
+        "current": 0,
+        "total": purge_count,
+        "message": f"Purging {purge_count} orphaned customers...",
+    }
+
     # Delete orphaned customers and cascade
-    for customer in purge_customers:
+    for idx, customer in enumerate(purge_customers, start=1):
         # Count before deleting
         purge_notes += Note.query.filter_by(customer_id=customer.id).count()
         purge_engagements += Engagement.query.filter_by(customer_id=customer.id).count()
@@ -332,7 +335,17 @@ def finalize_alignments(synced_tpids: list[int]) -> dict:
 
         db.session.delete(customer)
 
+        if idx % 5 == 0 or idx == purge_count:
+            yield {
+                "phase": "purge",
+                "current": idx,
+                "total": purge_count,
+                "message": f"Purged {idx} of {purge_count} customers...",
+            }
+
     # Clean up empty org entities
+    yield {"phase": "cleanup", "message": "Cleaning empty sellers, territories, and PODs..."}
+
     purge_sellers = 0
     for seller in Seller.query.all():
         if len(list(seller.customers)) == 0:
@@ -351,6 +364,7 @@ def finalize_alignments(synced_tpids: list[int]) -> dict:
             db.session.delete(pod)
             purge_pods += 1
 
+    yield {"phase": "commit", "message": "Committing changes..."}
     db.session.commit()
 
     # Exit transition mode
@@ -370,7 +384,39 @@ def finalize_alignments(synced_tpids: list[int]) -> dict:
         "purged_pods": purge_pods,
     }
     logger.info(f"FY finalization complete: {summary}")
+    yield {"summary": summary}
+
+
+def finalize_alignments(synced_tpids: list[int]) -> dict:
+    """Purge orphaned customers and their related data.
+
+    Customers whose TPID is NOT in synced_tpids are deleted along with
+    all their cascade-dependent records. Customers without a TPID
+    (manually created) are kept. Empty sellers/territories/PODs are then
+    removed. Atomic - commits once at the end.
+
+    Args:
+        synced_tpids: List of TPIDs from the finalized MSX sync.
+
+    Returns:
+        Summary dict with counts of kept/purged records.
+    """
+    summary = {}
+    for evt in _finalize_alignments_gen(synced_tpids):
+        if "summary" in evt:
+            summary = evt["summary"]
     return summary
+
+
+def finalize_alignments_stream(synced_tpids: list[int]):
+    """Streaming variant of :func:`finalize_alignments`.
+
+    Returns a generator yielding progress events during the purge; the final
+    event is ``{"summary": {...}}``. Same atomic behavior as the non-streaming
+    version.
+    """
+    return _finalize_alignments_gen(synced_tpids)
+
 
 
 # ---------------------------------------------------------------------------

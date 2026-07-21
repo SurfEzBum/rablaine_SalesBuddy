@@ -3944,14 +3944,48 @@ async function finalizeFY() {
 
         // ── Step 2: Purge Orphans ──
         setStep(2, SPINNER, 'purging...');
-        const purgeResp = await fetch('/api/admin/fy/finalize', {
+        const purgeResp = await fetch('/api/admin/fy/finalize-stream', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'}
         });
-        const purgeData = await purgeResp.json();
-        if (!purgeData.success) throw new Error(purgeData.error || 'Purge failed');
-        purgeSummary = purgeData;
-        setStep(2, CHECK, purgeData.purged_customers + ' purged, ' + purgeData.kept_customers + ' kept');
+        if (!purgeResp.ok) {
+            let detail = '';
+            try { const b = await purgeResp.json(); detail = b.error || ''; } catch (_) {}
+            throw new Error(detail || 'Purge failed to start');
+        }
+        {
+            const reader = purgeResp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let streamDone = false;
+            while (!streamDone) {
+                const { done: rdDone, value } = await reader.read();
+                if (rdDone) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    let data;
+                    try { data = JSON.parse(line.slice(6)); } catch (_) { continue; }
+                    if (data.error) throw new Error(data.error);
+                    if (data.complete && data.summary) {
+                        purgeSummary = data.summary;
+                        streamDone = true;
+                        break;
+                    }
+                    if (data.phase === 'purge' && data.total) {
+                        setStep(2, SPINNER, `purged ${data.current} / ${data.total}`);
+                    } else if (data.phase === 'cleanup') {
+                        setStep(2, SPINNER, 'cleaning org data...');
+                    } else if (data.phase === 'commit') {
+                        setStep(2, SPINNER, 'committing...');
+                    }
+                }
+            }
+        }
+        if (!purgeSummary) throw new Error('Purge did not complete');
+        setStep(2, CHECK, purgeSummary.purged_customers + ' purged, ' + purgeSummary.kept_customers + ' kept');
 
         // ── Step 3: Clean OneDrive Backups ──
         setStep(3, SPINNER, 'cleaning...');

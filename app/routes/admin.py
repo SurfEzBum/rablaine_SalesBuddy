@@ -3,6 +3,7 @@ Admin routes for Sales Buddy.
 Handles admin panel, user management, and domain whitelisting.
 """
 import base64
+import json
 import os
 import shutil
 import signal
@@ -14,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, jsonify, g
+from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, jsonify, g, Response, stream_with_context
 
 from app.models import (
     db, User, POD, Territory, Seller, Customer, Topic, Note, AIQueryLog,
@@ -1687,6 +1688,52 @@ def api_fy_finalize():
         return jsonify({'success': True, **summary})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/fy/finalize-stream', methods=['POST'])
+def api_fy_finalize_stream():
+    """Finalize alignments with SSE progress for the (long, destructive) purge."""
+    from app.services.fy_cutover import finalize_alignments_stream
+
+    tpid_file = Path(current_app.instance_path).parent / 'data' / 'last_sync_tpids.json'
+    if not tpid_file.exists():
+        return jsonify({
+            'success': False,
+            'error': 'No sync data found. Run the Final Sync first.'
+        }), 400
+    try:
+        synced_tpids = json.loads(tpid_file.read_text())
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Could not read sync data: {e}'}), 400
+    if not synced_tpids:
+        return jsonify({
+            'success': False,
+            'error': 'Last sync returned no TPIDs. Run the Final Sync again.'
+        }), 400
+
+    tpids = [int(t) for t in synced_tpids]
+
+    def _sse(d):
+        return "data: " + json.dumps(d) + "\n\n"
+
+    def generate():
+        try:
+            for evt in finalize_alignments_stream(tpids):
+                if 'summary' in evt:
+                    tpid_file.unlink(missing_ok=True)
+                    yield _sse({'complete': True, 'success': True, 'summary': evt['summary']})
+                else:
+                    yield _sse(evt)
+        except Exception as e:
+            current_app.logger.exception("FY finalize-stream failed")
+            db.session.rollback()
+            yield _sse({'error': str(e)})
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
 
 
 @admin_bp.route('/api/admin/fy/exit-transition', methods=['POST'])
