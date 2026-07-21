@@ -2366,3 +2366,59 @@ class DismissedRecurringMeeting(db.Model):
 
     def __repr__(self) -> str:
         return f'<DismissedRecurringMeeting {self.recurring_key}>'
+
+
+class AlignmentTerritory(db.Model):
+    """Cached universe of MSX territories for the alignment panel picker.
+
+    Seeded by probing MSX once (and refreshable) so the territory picker is
+    instant and works even when MSX is slow or blocked. This is reference data
+    only - it does not represent the user's selections (see AlignmentSelection).
+    """
+    __tablename__ = 'alignment_territories'
+
+    id = db.Column(db.Integer, primary_key=True)
+    msx_territory_id = db.Column(db.String(100), nullable=False, unique=True)
+    name = db.Column(db.String(200), nullable=False)
+    atu = db.Column(db.String(200), nullable=True)  # msp_accountteamunitname, e.g. "East.SMECC.SOU"
+    last_probed_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+
+    def __repr__(self) -> str:
+        return f'<AlignmentTerritory {self.name}>'
+
+
+class AlignmentSelection(db.Model):
+    """A user-declared (territory, seller) alignment pair.
+
+    The unit of alignment is (territory x seller): within one territory there
+    can be several Cloud & AI sellers, and the user may support only some of
+    them. "My accounts" = accounts in the selected territory whose Cloud & AI
+    seller matches a selected seller here.
+
+    Sellers are keyed by ``seller_msx_user_id`` (msp_systemuserid) because names
+    collide and change year to year, but the GUID is a stable filter key.
+    """
+    __tablename__ = 'alignment_selections'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'fy_label', 'msx_territory_id', 'seller_msx_user_id',
+            name='uq_alignment_selection',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    fy_label = db.Column(db.String(10), nullable=False)  # e.g. "FY27"
+    msx_territory_id = db.Column(db.String(100), nullable=False)
+    territory_name = db.Column(db.String(200), nullable=False)
+    seller_msx_user_id = db.Column(db.String(100), nullable=False)  # msp_systemuserid GUID
+    seller_name = db.Column(db.String(200), nullable=False)
+    seller_type = db.Column(db.String(20), nullable=True)  # "Growth" / "Acquisition"
+    active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    def __repr__(self) -> str:
+        return (
+            f'<AlignmentSelection {self.fy_label} {self.territory_name} '
+            f'/ {self.seller_name}>'
+        )
