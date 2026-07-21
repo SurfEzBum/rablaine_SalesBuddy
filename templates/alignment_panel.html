@@ -78,6 +78,7 @@
       <span class="small text-muted" id="saveHint">
         Saving records intent only - it does not run a sync.
       </span>
+      <span class="small fw-semibold ms-auto d-none" id="saveStatus"></span>
     </div>
     <div class="card-footer d-none" id="previewResult"></div>
   </div>
@@ -268,16 +269,31 @@
   async function saveSelections() {
     clearAlert();
     const pairs = collectPairs();
+    const btn = document.getElementById('btnSave');
+    const status = document.getElementById('saveStatus');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+    status.classList.add('d-none');
     const { ok, data } = await jsonFetch('/alignment/api/selections', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pairs, fy_label: FY }),
     });
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-save"></i> Save alignment';
     if (!ok || !data.success) {
+      status.className = 'small fw-semibold ms-auto text-danger';
+      status.textContent = (data && data.error) || 'Failed to save.';
+      status.classList.remove('d-none');
       showAlert((data && data.error) || 'Failed to save.', 'danger');
       return;
     }
     savedPairs = new Set(pairs.map(p => p.msx_territory_id + '::' + p.seller_msx_user_id));
     document.getElementById('selCount').textContent = pairs.length;
+    status.className = 'small fw-semibold ms-auto text-success';
+    status.innerHTML = `<i class="bi bi-check-circle-fill"></i> Saved ${pairs.length} `
+      + `seller${pairs.length === 1 ? '' : 's'} `
+      + `(${data.added} added, ${data.reactivated} reactivated, ${data.deactivated} removed).`;
+    status.classList.remove('d-none');
     showAlert(`Saved: ${data.added} added, ${data.reactivated} reactivated, ${data.deactivated} removed.`, 'success');
   }
 
