@@ -1616,15 +1616,37 @@ def _migrate_alignment_tables(db, inspector):
                     fy_label VARCHAR(10) NOT NULL,
                     msx_territory_id VARCHAR(100) NOT NULL,
                     territory_name VARCHAR(200) NOT NULL,
-                    seller_msx_user_id VARCHAR(100) NOT NULL,
-                    seller_name VARCHAR(200) NOT NULL,
-                    seller_type VARCHAR(20),
                     active BOOLEAN NOT NULL DEFAULT 1,
                     created_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                     updated_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                     CONSTRAINT uq_alignment_selection
-                        UNIQUE (fy_label, msx_territory_id, seller_msx_user_id)
+                        UNIQUE (fy_label, msx_territory_id)
                 )
             """))
             conn.commit()
         print("  Created table 'alignment_selections'")
+    else:
+        # Feature evolved from (territory, seller) pairs to territory-only.
+        # The old schema has NOT NULL seller columns that block territory-only
+        # inserts. This table only exists on dev machines running this
+        # unmerged feature and holds easily re-entered alignment intent, so
+        # recreate it with the new schema when the old columns are present.
+        cols = {c['name'] for c in inspector.get_columns('alignment_selections')}
+        if 'seller_msx_user_id' in cols:
+            with db.engine.connect() as conn:
+                conn.execute(text("DROP TABLE alignment_selections"))
+                conn.execute(text("""
+                    CREATE TABLE alignment_selections (
+                        id INTEGER PRIMARY KEY,
+                        fy_label VARCHAR(10) NOT NULL,
+                        msx_territory_id VARCHAR(100) NOT NULL,
+                        territory_name VARCHAR(200) NOT NULL,
+                        active BOOLEAN NOT NULL DEFAULT 1,
+                        created_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                        updated_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                        CONSTRAINT uq_alignment_selection
+                            UNIQUE (fy_label, msx_territory_id)
+                    )
+                """))
+                conn.commit()
+            print("  Rebuilt 'alignment_selections' to territory-only schema")

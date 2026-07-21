@@ -8,20 +8,20 @@
     <div>
       <h1 class="h3 mb-1"><i class="bi bi-diagram-3"></i> Account Alignment</h1>
       <p class="text-muted mb-0">
-        Declare which sellers you support in each territory. Sales Buddy uses
-        this instead of MSX account-team membership to decide which accounts are
-        yours. Fiscal year: <span class="badge bg-secondary">{{ fy_label }}</span>
+        Choose the territories you're aligned to. Sales Buddy uses these instead
+        of MSX account-team membership to decide which accounts are yours.
+        Fiscal year: <span class="badge bg-secondary">{{ fy_label }}</span>
       </p>
     </div>
     <div class="text-end small text-muted">
       <div><span id="terrCount">{{ territory_count }}</span> territories cached</div>
-      <div><span id="selCount">{{ selection_count }}</span> saved selections</div>
+      <div><span id="selCount">{{ selection_count }}</span> selected</div>
     </div>
   </div>
 
   <div id="alignmentAlert" class="alert d-none" role="alert"></div>
 
-  <!-- Step A: territory picker -->
+  <!-- Step 1: territory picker -->
   <div class="card mb-3">
     <div class="card-header d-flex align-items-center justify-content-between">
       <span><strong>Step 1.</strong> Choose your territories</span>
@@ -36,38 +36,15 @@
                placeholder="Filter territories (e.g. SOU, 0206, HLA)">
       </div>
       <div id="terrList" class="border rounded p-2"
-           style="max-height: 260px; overflow-y: auto;">
+           style="max-height: 320px; overflow-y: auto;">
         <div class="text-muted small p-2">Loading territories...</div>
       </div>
-      <div class="mt-2">
-        <button class="btn btn-primary btn-sm" id="btnLoadSellers" type="button" disabled>
-          <i class="bi bi-people"></i> Load sellers for selected territories
-        </button>
-        <span class="ms-2 small text-muted" id="terrSelectedCount">0 selected</span>
-      </div>
-      <div id="sellerLoading" class="alert alert-info d-flex align-items-center gap-2 mt-2 mb-0 d-none" role="status">
-        <span class="spinner-border spinner-border-sm flex-shrink-0"></span>
-        <div class="small">
-          <div><strong>Resolving sellers from MSX...</strong> <span id="sellerElapsed"></span></div>
-          <div class="text-muted" id="sellerLoadingDetail">
-            This looks at every account in your selected territories, so it can
-            take a minute or two for large territories. Hang tight - it's not frozen.
-          </div>
-        </div>
-      </div>
+      <div class="mt-2 small text-muted" id="terrSelectedCount">0 selected</div>
     </div>
   </div>
 
-  <!-- Step B: seller selection -->
-  <div class="card mb-3 d-none" id="sellerCard">
-    <div class="card-header"><strong>Step 2.</strong> Check the sellers you support</div>
-    <div class="card-body">
-      <div id="sellerGroups"></div>
-    </div>
-  </div>
-
-  <!-- Step C: save + preview -->
-  <div class="card mb-3 d-none" id="saveCard">
+  <!-- Step 2: save + preview -->
+  <div class="card mb-3">
     <div class="card-body d-flex align-items-center gap-2 flex-wrap">
       <button class="btn btn-success" id="btnSave" type="button">
         <i class="bi bi-save"></i> Save alignment
@@ -91,10 +68,8 @@
   const app = document.getElementById('alignmentApp');
   const FY = app.dataset.fy;
 
-  let territories = [];       // cached universe [{msx_territory_id, name, atu}]
+  let territories = [];         // cached universe [{msx_territory_id, name, atu}]
   let selectedTerr = new Map(); // msx_territory_id -> name
-  let sellerData = [];        // [{territory_id, territory_name, sellers:[...]}]
-  let savedPairs = new Set(); // "terrId::userId" from saved selections
 
   function showAlert(msg, kind) {
     const el = document.getElementById('alignmentAlert');
@@ -113,16 +88,21 @@
     return { ok: res.ok, status: res.status, data };
   }
 
-  // ---- Step A: territories ----
+  // ---- Step 1: territories ----
+  function updateSelectedCount() {
+    document.getElementById('terrSelectedCount').textContent =
+      selectedTerr.size + ' selected';
+  }
+
   function renderTerritories() {
     const filter = document.getElementById('terrSearch').value.trim().toLowerCase();
     const list = document.getElementById('terrList');
-    const shown = territories.filter(t =>
-      !filter || t.name.toLowerCase().includes(filter));
     if (!territories.length) {
       list.innerHTML = '<div class="text-muted small p-2">No territories cached yet. Click "Refresh list from MSX".</div>';
       return;
     }
+    const shown = territories.filter(t =>
+      !filter || t.name.toLowerCase().includes(filter));
     list.innerHTML = shown.map(t => {
       const checked = selectedTerr.has(t.msx_territory_id) ? 'checked' : '';
       return `<div class="form-check">
@@ -143,9 +123,7 @@
     const id = e.target.value;
     if (e.target.checked) selectedTerr.set(id, e.target.dataset.name);
     else selectedTerr.delete(id);
-    document.getElementById('terrSelectedCount').textContent =
-      selectedTerr.size + ' selected';
-    document.getElementById('btnLoadSellers').disabled = selectedTerr.size === 0;
+    updateSelectedCount();
   }
 
   async function loadTerritories() {
@@ -174,101 +152,17 @@
     await loadTerritories();
   }
 
-  // ---- Step B: sellers ----
-  let sellerTimer = null;
-
-  function startSellerLoading(terrCount) {
-    const box = document.getElementById('sellerLoading');
-    box.classList.remove('d-none');
-    const started = Date.now();
-    const elapsedEl = document.getElementById('sellerElapsed');
-    const tick = () => {
-      const secs = Math.round((Date.now() - started) / 1000);
-      elapsedEl.textContent = `(${secs}s elapsed, ${terrCount} territories)`;
-    };
-    tick();
-    sellerTimer = setInterval(tick, 1000);
+  // ---- Step 2: save + preview ----
+  function collectTerritories() {
+    return Array.from(selectedTerr.entries()).map(([id, name]) => ({
+      msx_territory_id: id,
+      territory_name: name,
+    }));
   }
 
-  function stopSellerLoading() {
-    if (sellerTimer) { clearInterval(sellerTimer); sellerTimer = null; }
-    document.getElementById('sellerLoading').classList.add('d-none');
-  }
-
-  async function loadSellers() {
-    clearAlert();
-    const names = Array.from(selectedTerr.values());
-    const btn = document.getElementById('btnLoadSellers');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Loading...';
-    startSellerLoading(names.length);
-    const { ok, data } = await jsonFetch('/alignment/api/sellers', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ territories: names }),
-    });
-    stopSellerLoading();
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-people"></i> Load sellers for selected territories';
-    if (!ok || !data.success) {
-      showAlert(data.error || 'Failed to load sellers.', 'danger');
-      return;
-    }
-    sellerData = data.territories || [];
-    renderSellers();
-  }
-
-  function renderSellers() {
-    const wrap = document.getElementById('sellerGroups');
-    if (!sellerData.length) {
-      wrap.innerHTML = '<div class="text-muted small">No sellers found for the selected territories.</div>';
-    } else {
-      wrap.innerHTML = sellerData.map(t => {
-        const rows = (t.sellers || []).map(s => {
-          const key = t.territory_id + '::' + s.user_id;
-          const checked = savedPairs.has(key) ? 'checked' : '';
-          const badge = s.type
-            ? `<span class="badge ${s.type === 'Growth' ? 'bg-success' : 'bg-info text-dark'}">${s.type}</span>`
-            : '';
-          return `<div class="form-check">
-            <input class="form-check-input seller-cb" type="checkbox"
-                   data-terr="${t.territory_id}" data-terrname="${t.territory_name}"
-                   data-uid="${s.user_id}" data-name="${s.name || ''}"
-                   data-type="${s.type || ''}" id="s_${t.territory_id}_${s.user_id}" ${checked}>
-            <label class="form-check-label" for="s_${t.territory_id}_${s.user_id}">
-              ${s.name || '(unknown)'} ${badge}
-              <span class="text-muted small">- ${s.account_count} accounts</span>
-            </label>
-          </div>`;
-        }).join('') || '<div class="text-muted small">No Cloud &amp; AI sellers on these accounts.</div>';
-        return `<div class="mb-3">
-          <div class="fw-semibold">${t.territory_name}
-            <span class="text-muted small">(${t.account_count} accounts)</span></div>
-          ${rows}
-        </div>`;
-      }).join('');
-    }
-    document.getElementById('sellerCard').classList.remove('d-none');
-    document.getElementById('saveCard').classList.remove('d-none');
-  }
-
-  function collectPairs() {
-    const pairs = [];
-    document.querySelectorAll('.seller-cb:checked').forEach(cb => {
-      pairs.push({
-        msx_territory_id: cb.dataset.terr,
-        territory_name: cb.dataset.terrname,
-        seller_msx_user_id: cb.dataset.uid,
-        seller_name: cb.dataset.name,
-        seller_type: cb.dataset.type || null,
-      });
-    });
-    return pairs;
-  }
-
-  // ---- Step C: save + preview ----
   async function saveSelections() {
     clearAlert();
-    const pairs = collectPairs();
+    const territoriesPayload = collectTerritories();
     const btn = document.getElementById('btnSave');
     const status = document.getElementById('saveStatus');
     btn.disabled = true;
@@ -276,7 +170,7 @@
     status.classList.add('d-none');
     const { ok, data } = await jsonFetch('/alignment/api/selections', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pairs, fy_label: FY }),
+      body: JSON.stringify({ territories: territoriesPayload, fy_label: FY }),
     });
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-save"></i> Save alignment';
@@ -287,11 +181,11 @@
       showAlert((data && data.error) || 'Failed to save.', 'danger');
       return;
     }
-    savedPairs = new Set(pairs.map(p => p.msx_territory_id + '::' + p.seller_msx_user_id));
-    document.getElementById('selCount').textContent = pairs.length;
+    const n = territoriesPayload.length;
+    document.getElementById('selCount').textContent = n;
     status.className = 'small fw-semibold ms-auto text-success';
-    status.innerHTML = `<i class="bi bi-check-circle-fill"></i> Saved ${pairs.length} `
-      + `seller${pairs.length === 1 ? '' : 's'} `
+    status.innerHTML = `<i class="bi bi-check-circle-fill"></i> Saved ${n} `
+      + `territor${n === 1 ? 'y' : 'ies'} `
       + `(${data.added} added, ${data.reactivated} reactivated, ${data.deactivated} removed).`;
     status.classList.remove('d-none');
     showAlert(`Saved: ${data.added} added, ${data.reactivated} reactivated, ${data.deactivated} removed.`, 'success');
@@ -302,7 +196,7 @@
     const box = document.getElementById('previewResult');
     box.classList.remove('d-none');
     box.innerHTML = '<span class="spinner-border spinner-border-sm"></span> '
-      + 'Checking MSX... this can take a minute for large territories.';
+      + 'Checking MSX...';
     const { ok, data } = await jsonFetch('/alignment/api/preview', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fy_label: FY }),
@@ -313,25 +207,20 @@
       return;
     }
     box.innerHTML = `<strong>${data.kept_account_count}</strong> accounts would sync `
-      + `(${data.territory_account_count} in your territories, scoped to your selected sellers).`;
+      + `across ${data.territory_count} territor${data.territory_count === 1 ? 'y' : 'ies'}.`;
   }
 
   // ---- load saved selections then wire up ----
   async function init() {
     const { data } = await jsonFetch('/alignment/api/selections?fy_label=' + encodeURIComponent(FY));
     (data.selections || []).forEach(s => {
-      savedPairs.add(s.msx_territory_id + '::' + s.seller_msx_user_id);
       selectedTerr.set(s.msx_territory_id, s.territory_name);
     });
     await loadTerritories();
-    if (selectedTerr.size) {
-      document.getElementById('btnLoadSellers').disabled = false;
-      document.getElementById('terrSelectedCount').textContent = selectedTerr.size + ' selected';
-    }
+    updateSelectedCount();
 
     document.getElementById('terrSearch').addEventListener('input', renderTerritories);
     document.getElementById('btnProbe').addEventListener('click', probeTerritories);
-    document.getElementById('btnLoadSellers').addEventListener('click', loadSellers);
     document.getElementById('btnSave').addEventListener('click', saveSelections);
     document.getElementById('btnPreview').addEventListener('click', previewAccounts);
   }

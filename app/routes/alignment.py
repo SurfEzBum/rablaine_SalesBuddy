@@ -65,24 +65,9 @@ def api_probe():
     return jsonify(result), status
 
 
-@alignment_bp.route('/alignment/api/sellers', methods=['POST'])
-def api_sellers():
-    """Discover the Cloud & AI sellers present in the selected territories."""
-    guard = _require_msx()
-    if guard:
-        return guard
-    data = request.get_json(silent=True) or {}
-    territory_names = data.get('territories', [])
-    if not territory_names:
-        return jsonify({"success": False, "error": "territories list required"}), 400
-    result = alignment.discover_sellers_for_territories(territory_names)
-    status = 200 if result.get('success') else 502
-    return jsonify(result), status
-
-
 @alignment_bp.route('/alignment/api/selections', methods=['GET'])
 def api_get_selections():
-    """Return the saved (territory, seller) selections for the current FY."""
+    """Return the saved territory selections for the current FY."""
     fy_label = request.args.get('fy_label') or alignment.current_fy_label()
     return jsonify({
         "success": True,
@@ -93,11 +78,11 @@ def api_get_selections():
 
 @alignment_bp.route('/alignment/api/selections', methods=['POST'])
 def api_save_selections():
-    """Persist the user's (territory, seller) selections (records intent only)."""
+    """Persist the user's territory selections (records intent only)."""
     data = request.get_json(silent=True) or {}
-    pairs = data.get('pairs', [])
+    territories = data.get('territories', [])
     fy_label = data.get('fy_label') or alignment.current_fy_label()
-    result = alignment.save_alignment_selections(pairs, fy_label=fy_label)
+    result = alignment.save_alignment_selections(territories, fy_label=fy_label)
     return jsonify(result)
 
 

@@ -2388,20 +2388,17 @@ class AlignmentTerritory(db.Model):
 
 
 class AlignmentSelection(db.Model):
-    """A user-declared (territory, seller) alignment pair.
+    """A territory the user is aligned to for a fiscal year.
 
-    The unit of alignment is (territory x seller): within one territory there
-    can be several Cloud & AI sellers, and the user may support only some of
-    them. "My accounts" = accounts in the selected territory whose Cloud & AI
-    seller matches a selected seller here.
-
-    Sellers are keyed by ``seller_msx_user_id`` (msp_systemuserid) because names
-    collide and change year to year, but the GUID is a stable filter key.
+    Alignment is territory-based: the org aligns SEs to whole territories
+    regardless of seller. "My accounts" = all accounts in the selected
+    territories. The account sync uses these instead of the user's own
+    ``msp_accountteams`` membership.
     """
     __tablename__ = 'alignment_selections'
     __table_args__ = (
         db.UniqueConstraint(
-            'fy_label', 'msx_territory_id', 'seller_msx_user_id',
+            'fy_label', 'msx_territory_id',
             name='uq_alignment_selection',
         ),
     )
@@ -2410,15 +2407,9 @@ class AlignmentSelection(db.Model):
     fy_label = db.Column(db.String(10), nullable=False)  # e.g. "FY27"
     msx_territory_id = db.Column(db.String(100), nullable=False)
     territory_name = db.Column(db.String(200), nullable=False)
-    seller_msx_user_id = db.Column(db.String(100), nullable=False)  # msp_systemuserid GUID
-    seller_name = db.Column(db.String(200), nullable=False)
-    seller_type = db.Column(db.String(20), nullable=True)  # "Growth" / "Acquisition"
     active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
     updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     def __repr__(self) -> str:
-        return (
-            f'<AlignmentSelection {self.fy_label} {self.territory_name} '
-            f'/ {self.seller_name}>'
-        )
+        return f'<AlignmentSelection {self.fy_label} {self.territory_name}>'
