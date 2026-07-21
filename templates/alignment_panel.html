@@ -184,11 +184,12 @@
     const n = territoriesPayload.length;
     document.getElementById('selCount').textContent = n;
     status.className = 'small fw-semibold ms-auto text-success';
+    const removed = data.deactivated
+      ? ` (${data.deactivated} removed)` : '';
     status.innerHTML = `<i class="bi bi-check-circle-fill"></i> Saved ${n} `
-      + `territor${n === 1 ? 'y' : 'ies'} `
-      + `(${data.added} added, ${data.reactivated} reactivated, ${data.deactivated} removed).`;
+      + `territor${n === 1 ? 'y' : 'ies'}${removed}.`;
     status.classList.remove('d-none');
-    showAlert(`Saved: ${data.added} added, ${data.reactivated} reactivated, ${data.deactivated} removed.`, 'success');
+    showAlert(`Saved ${n} territor${n === 1 ? 'y' : 'ies'}${removed}.`, 'success');
   }
 
   async function previewAccounts() {
