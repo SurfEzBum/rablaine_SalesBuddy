@@ -51,6 +51,10 @@
         <Property Id="DESKTOPSHORTCUT" Value="1" />
         <Property Id="AUTOSTART" Value="1" />
 
+        <!-- Git ref the installer builds from. Defaults to main; override for a
+             branch test build, e.g. msiexec /i SalesBuddy.msi REPOREF=feature/foo -->
+        <Property Id="REPOREF" Value="main" />
+
         <!-- Disable Restart Manager so upgrades never offer to "close
              automatically" (which would hard-terminate the Electron shell and
              orphan the Python supervisor/worker). Instead the classic

@@ -80,10 +80,12 @@ namespace SalesBuddy.CustomActions
             bool startMenu = GetBoolData(data, "STARTMENUSHORTCUT");
             bool desktop = GetBoolData(data, "DESKTOPSHORTCUT");
             bool autoStart = GetBoolData(data, "AUTOSTART");
+            string repoRef = GetRepoRef(data);
 
             session.Log($"Install directory: {installDir}");
             session.Log($"Options: StartMenu={startMenu}, Desktop={desktop}, " +
                         $"AutoStart={autoStart}");
+            session.Log($"Repo ref: {repoRef}");
 
             // An existing checkout means this run is really a migration (Flask ->
             // desktop) rather than a first-time install. The steps converge, but
@@ -201,7 +203,7 @@ namespace SalesBuddy.CustomActions
 
                 // Step 6: Clone/update repository
                 ProcessRunner.UpdateStatus(session, "Setting up Sales Buddy...");
-                CloneOrUpdateRepo(session, installDir);
+                CloneOrUpdateRepo(session, installDir, repoRef);
                 AdvanceProgress(session, WeightClone);
 
                 // If the repo step left an empty or missing database (e.g. a nuke
@@ -909,7 +911,7 @@ Write-Host 'winget installation complete.'
         /// Clone the Sales Buddy repo or update an existing clone.
         /// Disables Git Credential Manager prompts (public repo).
         /// </summary>
-        private static void CloneOrUpdateRepo(Session session, string installDir)
+        private static void CloneOrUpdateRepo(Session session, string installDir, string repoRef)
         {
             // Disable GCM popups
             Environment.SetEnvironmentVariable("GIT_TERMINAL_PROMPT", "0");
@@ -939,7 +941,7 @@ Write-Host 'winget installation complete.'
                         "-c credential.helper= fetch origin",
                         workingDirectory: installDir);
                     ProcessRunner.Run(session, "git",
-                        "reset --hard origin/main",
+                        $"reset --hard origin/{repoRef}",
                         workingDirectory: installDir);
                     ProcessRunner.Run(session, "git",
                         "clean -fd",
@@ -965,7 +967,7 @@ Write-Host 'winget installation complete.'
                     "-c credential.helper= fetch origin",
                     workingDirectory: installDir);
                 ProcessRunner.Run(session, "git",
-                    "checkout -f -B main origin/main",
+                    $"checkout -f -B main origin/{repoRef}",
                     workingDirectory: installDir);
             }
             else if (Directory.Exists(gitDir))
@@ -989,6 +991,7 @@ Write-Host 'winget installation complete.'
                             $"git clone failed with exit code {exitCode}");
                     }
                 }
+                CheckoutRef(session, installDir, repoRef);
                 RestoreDatabase(session, installDir, dbBackupPath);
                 session.Log("Repository ready.");
                 return;
@@ -1009,7 +1012,23 @@ Write-Host 'winget installation complete.'
                 }
             }
 
+            CheckoutRef(session, installDir, repoRef);
             session.Log("Repository ready.");
+        }
+
+        /// <summary>
+        /// Point the working tree at the requested git ref (default "main").
+        /// Fetches first so the ref is present even on a just-cloned repo, then
+        /// hard-checks it out onto the local "main" branch used for builds.
+        /// </summary>
+        private static void CheckoutRef(Session session, string installDir, string repoRef)
+        {
+            ProcessRunner.Run(session, "git",
+                "-c credential.helper= fetch origin",
+                workingDirectory: installDir);
+            ProcessRunner.Run(session, "git",
+                $"checkout -f -B main origin/{repoRef}",
+                workingDirectory: installDir);
         }
 
         /// <summary>
@@ -1835,6 +1854,24 @@ Write-Host 'winget installation complete.'
         {
             return data.ContainsKey(key) && !string.IsNullOrEmpty(data[key])
                 && data[key] != "0";
+        }
+
+        /// <summary>
+        /// Read the git ref the installer should build from (REPOREF property).
+        /// Defaults to "main". Sanitized to ref-safe characters so an override
+        /// can never inject extra arguments into the git commands.
+        /// </summary>
+        private static string GetRepoRef(CustomActionData data)
+        {
+            string reff = data.ContainsKey("REPOREF") ? (data["REPOREF"] ?? "").Trim() : "";
+            if (reff.Length == 0) return "main";
+            foreach (char c in reff)
+            {
+                bool ok = char.IsLetterOrDigit(c) || c == '/' || c == '.'
+                    || c == '_' || c == '-';
+                if (!ok) return "main";
+            }
+            return reff;
         }
 
         /// <summary>
