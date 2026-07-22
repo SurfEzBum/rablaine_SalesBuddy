@@ -12,7 +12,7 @@
 // itself only needs updating when this shell code changes.
 
 const { app, BrowserWindow, Tray, Menu, shell, dialog } = require('electron');
-const { spawn, execFile } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -147,17 +147,43 @@ function startStack() {
 
 function stopStack() {
   if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
-  if (!supervisorProc) return;
-  const pid = supervisorProc.pid;
-  log(`Stopping supervisor tree (pid ${pid})`);
-  if (IS_WIN) {
-    // Kill the supervisor AND its descendants (web + worker); Windows does not
-    // cascade kills to children.
-    try { execFile('taskkill', ['/pid', String(pid), '/T', '/F']); } catch (_) {}
-  } else {
-    try { process.kill(-pid, 'SIGTERM'); } catch (_) {}
-  }
+  const pid = supervisorProc ? supervisorProc.pid : null;
   supervisorProc = null;
+  if (!IS_WIN) {
+    if (pid) { try { process.kill(-pid, 'SIGTERM'); } catch (_) {} }
+    return;
+  }
+  // Windows teardown MUST be synchronous and belt-and-suspenders. Two reasons:
+  //   1. before-quit does not await async work, so a fire-and-forget taskkill
+  //      gets abandoned when Electron exits - leaving the backend alive. Use the
+  //      *Sync* variants so quit actually waits for the kills to finish.
+  //   2. The venv launcher shims (python.exe / waitress-serve.exe) spawn the REAL
+  //      interpreter as a grandchild and then exit, breaking the parent-PID chain.
+  //      So `taskkill /T` from the supervisor pid MISSES those orphans. That is
+  //      exactly why a tray Quit left waitress + workers running on port 5151,
+  //      whose stale WAL then corrupted a later DB restore. So we ALSO sweep any
+  //      backend process whose command line lives under THIS install dir.
+  if (pid) {
+    log(`Stopping supervisor tree (pid ${pid})`);
+    try {
+      execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'],
+        { windowsHide: true, stdio: 'ignore' });
+    } catch (_) { /* already gone */ }
+  }
+  // Scoped sweep: kill any python/waitress backend whose command line references
+  // this install dir, catching shim-orphaned grandchildren taskkill /T can't see.
+  try {
+    const root = REPO_ROOT.replace(/'/g, "''");
+    const ps =
+      "Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR " +
+      "Name='pythonw.exe' OR Name='waitress-serve.exe'\" | Where-Object { " +
+      "$_.CommandLine -like '*" + root + "*' } | ForEach-Object { " +
+      "taskkill /PID $_.ProcessId /T /F 2>$null }";
+    execFileSync('powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', ps],
+      { windowsHide: true, stdio: 'ignore', timeout: 15000 });
+  } catch (_) { /* best effort */ }
+  log('Stack stopped');
 }
 
 function waitForServer(onReady) {

@@ -294,6 +294,15 @@ namespace SalesBuddy.CustomActions
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "SalesBuddy");
 
+            // When this uninstall is the "remove old product" half of a
+            // MajorUpgrade, UPGRADINGPRODUCTCODE is set. In that case the newer
+            // product is about to reinstall over this same dir, so we must NOT
+            // delete it (esp. data/salesbuddy.db) - doing so is what wiped the
+            // user's database on 2026-07-22.
+            bool isUpgrade = data.ContainsKey("UPGRADINGPRODUCTCODE")
+                && !string.IsNullOrEmpty(data["UPGRADINGPRODUCTCODE"]);
+            session.Log($"Uninstall (isUpgrade={isUpgrade}).");
+
             try
             {
                 // Stop the running server
@@ -320,11 +329,20 @@ namespace SalesBuddy.CustomActions
                     session.Log($"Database backed up to {backup}");
                 }
 
-                // Remove app files (force-delete with read-only clearing + retries)
-                ProcessRunner.UpdateStatus(session, "Removing application files...");
-                if (Directory.Exists(installDir))
+                // Remove app files (force-delete with read-only clearing + retries).
+                // Skipped during an upgrade - the new product reinstalls over this
+                // dir and must keep the database + repo.
+                if (isUpgrade)
                 {
-                    ForceDeleteDirectory(session, installDir);
+                    session.Log("Upgrade in progress - preserving install dir + database.");
+                }
+                else
+                {
+                    ProcessRunner.UpdateStatus(session, "Removing application files...");
+                    if (Directory.Exists(installDir))
+                    {
+                        ForceDeleteDirectory(session, installDir);
+                    }
                 }
 
                 ProcessRunner.UpdateStatus(session, "Uninstall complete.");
@@ -1151,7 +1169,7 @@ Write-Host 'winget installation complete.'
         // SQLite file is ~4 KB; a schema-only DB is larger but we only ever
         // compare BEFORE migrations run, so anything this small is "empty".
         private const long EmptyDbThreshold = 64 * 1024; // 64 KB
-        private const int SafeguardKeep = 3;
+        private const int SafeguardKeep = 6;
 
         private static string SafeguardDir()
         {
@@ -1250,12 +1268,15 @@ Write-Host 'winget installation complete.'
         }
 
         /// <summary>
-        /// Find the newest non-empty DB backup across the safeguard dir and the
-        /// legacy temp backup path. Returns null if none qualify.
+        /// Find the newest non-empty DB backup across the safeguard dir, the
+        /// uninstall backups, and the legacy temp backup. Returns null if none
+        /// qualify.
         /// </summary>
         private static string FindNewestGoodBackup(Session session)
         {
             var candidates = new List<string>();
+
+            // 1. Safeguard snapshots (taken at the start of an install).
             try
             {
                 string dir = SafeguardDir();
@@ -1264,26 +1285,67 @@ Write-Host 'winget installation complete.'
             }
             catch (Exception ex) { session.Log($"Safeguard scan skip: {ex.Message}"); }
 
+            // 2. Uninstall backups (%TEMP%\salesbuddy-uninstall-*.db). CRITICAL:
+            //    a MajorUpgrade removes the OLD product FIRST, and that uninstall
+            //    copies the live DB here right before deleting it - so this is
+            //    usually the FRESHEST good copy of the user's data. Omitting this
+            //    source is exactly what let a stale 7/17 safeguard snapshot
+            //    overwrite good FY27 data on 2026-07-22.
+            try
+            {
+                candidates.AddRange(
+                    Directory.GetFiles(Path.GetTempPath(), "salesbuddy-uninstall-*.db"));
+            }
+            catch (Exception ex) { session.Log($"Uninstall-backup scan skip: {ex.Message}"); }
+
+            // 3. Legacy single temp backup.
             string legacy = Path.Combine(Path.GetTempPath(), "salesbuddy_db_backup.db");
             if (File.Exists(legacy)) candidates.Add(legacy);
 
+            // Pick the most RECENT non-empty backup, ranked by the timestamp
+            // embedded in the filename. File mtime is unreliable here: File.Copy
+            // preserves the SOURCE file's mtime, so a copy of an old DB looks old
+            // even when it was written moments ago.
             string best = null;
             DateTime bestTime = DateTime.MinValue;
             foreach (string c in candidates)
             {
                 try
                 {
-                    var fi = new FileInfo(c);
-                    if (fi.Length < EmptyDbThreshold) continue;
-                    if (fi.LastWriteTimeUtc > bestTime)
-                    {
-                        bestTime = fi.LastWriteTimeUtc;
-                        best = c;
-                    }
+                    if (new FileInfo(c).Length < EmptyDbThreshold) continue;
+                    DateTime rec = BackupRecency(c);
+                    if (rec > bestTime) { bestTime = rec; best = c; }
                 }
                 catch { }
             }
+            if (best != null)
+                session.Log($"Best DB backup: {best} (recency {bestTime:yyyy-MM-dd HH:mm:ss}).");
+            else
+                session.Log("No good DB backup found across safeguard/uninstall/legacy sources.");
             return best;
+        }
+
+        /// <summary>
+        /// Recency of a backup file, from a yyyyMMdd-HHmmss stamp in its filename
+        /// (how our snapshots/uninstall backups are named). Falls back to the file
+        /// mtime when no stamp is present (e.g. the legacy backup).
+        /// </summary>
+        private static DateTime BackupRecency(string path)
+        {
+            try
+            {
+                string name = Path.GetFileNameWithoutExtension(path);
+                var m = System.Text.RegularExpressions.Regex.Match(name, @"(\d{8})-(\d{6})");
+                if (m.Success && DateTime.TryParseExact(
+                        m.Groups[1].Value + m.Groups[2].Value, "yyyyMMddHHmmss",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out DateTime ts))
+                {
+                    return ts;
+                }
+            }
+            catch { }
+            try { return new FileInfo(path).LastWriteTime; } catch { return DateTime.MinValue; }
         }
 
         /// <summary>

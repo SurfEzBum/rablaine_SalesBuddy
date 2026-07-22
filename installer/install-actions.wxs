@@ -44,7 +44,7 @@
 
         <CustomAction Id="SetUninstallActionData"
                       Property="UninstallAction"
-                      Value="INSTALLFOLDER=[INSTALLFOLDER]" />
+                      Value="INSTALLFOLDER=[INSTALLFOLDER];UPGRADINGPRODUCTCODE=[UPGRADINGPRODUCTCODE]" />
 
         <CustomAction Id="UninstallAction"
                       BinaryRef="CustomActionsDll"
