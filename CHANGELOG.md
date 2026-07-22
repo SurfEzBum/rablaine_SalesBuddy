@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/21/2026
+## 7/21/2026 - 9194b49
 
 - New **Alignment Override** in Fiscal Year Management. When the new fiscal year starts but MSX hasn't updated your account-team assignments yet, you can pick the territories you're aligned to and have the account sync pull from those instead - so you're not stuck waiting on MSX to catch up. Everything downstream (milestones and the rest) follows your picks. Flip it off once MSX is updated and you're back to normal. Includes a one-click preview of how many customers it would pull before you commit.
 - The fiscal-year "Finalize" now shows live progress while it purges last year's accounts, so that step no longer looks frozen on a large cleanup.
