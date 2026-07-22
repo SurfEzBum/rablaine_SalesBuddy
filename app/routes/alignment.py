@@ -74,7 +74,8 @@ def api_probe():
         return guard
     data = request.get_json(silent=True) or {}
     prefix = (data.get('prefix') or '').strip() or None
-    result = alignment.probe_territories(prefix=prefix)
+    all_regions = bool(data.get('all_regions'))
+    result = alignment.probe_territories(prefix=prefix, all_regions=all_regions)
     status = 200 if result.get('success') else 502
     return jsonify(result), status
 

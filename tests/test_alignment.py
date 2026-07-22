@@ -183,6 +183,36 @@ class TestRegionDerivation:
             assert result["success"] is False
             assert "region" in result["error"].lower()
 
+    def test_probe_all_regions_skips_filter(self, app):
+        with app.app_context():
+            from app.services import alignment
+
+            page = {
+                "success": True,
+                "records": [
+                    {"territoryid": "e1", "name": "East.SMECC.SOU.0206",
+                     "msp_accountteamunitname": "East.SMECC.SOU"},
+                    {"territoryid": "w1", "name": "West.SMECC.MAA.0101",
+                     "msp_accountteamunitname": "West.SMECC.MAA"},
+                ],
+                "next_link": None,
+            }
+            captured = {}
+
+            def fake_query(entity, **kwargs):
+                captured["filter"] = kwargs.get("filter_query")
+                return page
+
+            with patch.object(alignment, "query_entity", side_effect=fake_query):
+                result = alignment.probe_territories(all_regions=True)
+
+            assert result["success"] is True
+            assert result["all_regions"] is True
+            assert result["prefix"] is None
+            # No region filter applied - both regions pulled.
+            assert captured["filter"] is None
+            assert result["total"] == 2
+
 
 class TestSelectionPersistence:
     """save/get territory selections."""

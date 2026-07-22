@@ -119,8 +119,11 @@ def derive_territory_prefix() -> Optional[str]:
     return None
 
 
-def probe_territories(prefix: Optional[str] = None) -> Dict[str, Any]:
-    """Probe MSX for all territories under ``prefix`` and cache them locally.
+def probe_territories(
+    prefix: Optional[str] = None,
+    all_regions: bool = False,
+) -> Dict[str, Any]:
+    """Probe MSX for territories and cache them locally.
 
     Upserts into ``alignment_territories`` so the picker is instant and works
     even when MSX is slow/blocked. Idempotent - safe to re-run to refresh.
@@ -129,27 +132,35 @@ def probe_territories(prefix: Optional[str] = None) -> Dict[str, Any]:
         prefix: Territory name prefix to probe (e.g. "East.SMECC."). When None,
             it is derived from the user's own data via
             :func:`derive_territory_prefix` so this works for any region.
+        all_regions: When True, skip the region filter and pull every territory
+            (for the rare cross-region user). Overrides ``prefix``.
 
     Returns:
-        Dict with success, created, updated, total, prefix (or error).
+        Dict with success, created, updated, total, prefix, all_regions
+        (or error).
     """
-    if not prefix:
-        prefix = derive_territory_prefix()
-    if not prefix:
-        return {
-            "success": False,
-            "error": (
-                "Could not determine your territory region. Run a normal "
-                "account sync first (so Sales Buddy knows your territories), "
-                "then try again."
-            ),
-        }
+    filter_query = None
+    used_prefix = None
+    if not all_regions:
+        if not prefix:
+            prefix = derive_territory_prefix()
+        if not prefix:
+            return {
+                "success": False,
+                "error": (
+                    "Could not determine your territory region. Run a normal "
+                    "account sync first (so Sales Buddy knows your territories), "
+                    "then try again."
+                ),
+            }
+        used_prefix = prefix
+        safe_prefix = prefix.replace("'", "''")
+        filter_query = f"startswith(name, '{safe_prefix}')"
 
-    safe_prefix = prefix.replace("'", "''")
     result = query_entity(
         "territories",
         select=["territoryid", "name", "msp_accountteamunitname"],
-        filter_query=f"startswith(name, '{safe_prefix}')",
+        filter_query=filter_query,
         top=1000,
         order_by="name asc",
     )
@@ -189,15 +200,16 @@ def probe_territories(prefix: Optional[str] = None) -> Dict[str, Any]:
 
     db.session.commit()
     logger.info(
-        "Probed territories under '%s': %d created, %d updated",
-        prefix, created, updated,
+        "Probed territories (%s): %d created, %d updated",
+        "all regions" if all_regions else used_prefix, created, updated,
     )
     return {
         "success": True,
         "created": created,
         "updated": updated,
         "total": len(records),
-        "prefix": prefix,
+        "prefix": used_prefix,
+        "all_regions": all_regions,
     }
 
 

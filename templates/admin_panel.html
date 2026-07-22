@@ -1058,6 +1058,12 @@
                         <i class="bi bi-arrow-repeat"></i> Refresh from MSX
                     </button>
                 </div>
+                <div class="form-check mb-2 d-none" id="alignRegionFilterWrap">
+                    <input class="form-check-input" type="checkbox" id="alignRegionFilter" checked>
+                    <label class="form-check-label small text-muted" for="alignRegionFilter" id="alignRegionFilterLabel">
+                        Filter to my region
+                    </label>
+                </div>
                 <div id="alignTerrList" class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
                     <div class="text-muted small p-2">Loading territories...</div>
                 </div>
@@ -1104,6 +1110,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let selectedTerr = new Map();  // msx_territory_id -> name
     let loaded = false;
     let selCount = 0;              // saved territory count for the current FY
+    let detectedPrefix = null;     // most-common Region.Segment prefix in cache
 
     const $ = id => document.getElementById(id);
 
@@ -1183,15 +1190,52 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     function clearModalAlert() { $('alignmentModalAlert').classList.add('d-none'); }
 
+    function computeDetectedPrefix() {
+        // Most common Region.Segment prefix (e.g. "East.SMECC.") among cached
+        // territories - used to label and drive the region filter.
+        const counts = {};
+        territories.forEach(t => {
+            const parts = (t.name || '').split('.');
+            if (parts.length >= 2 && parts[0] && parts[1]) {
+                const p = parts[0] + '.' + parts[1] + '.';
+                counts[p] = (counts[p] || 0) + 1;
+            }
+        });
+        let best = null, bestN = 0;
+        for (const p in counts) if (counts[p] > bestN) { best = p; bestN = counts[p]; }
+        return best;
+    }
+
+    function updateRegionFilterUI() {
+        const wrap = $('alignRegionFilterWrap');
+        if (detectedPrefix) {
+            $('alignRegionFilterLabel').textContent = 'Filter to ' + detectedPrefix;
+            wrap.classList.remove('d-none');
+        } else {
+            wrap.classList.add('d-none');
+        }
+    }
+
     function renderTerritories() {
         const filter = $('alignTerrSearch').value.trim().toLowerCase();
+        const regionOnly = $('alignRegionFilter').checked && detectedPrefix;
         const list = $('alignTerrList');
         if (!territories.length) {
             list.innerHTML = '<div class="text-muted small p-2">No territories cached. Click "Refresh from MSX".</div>';
             return;
         }
-        const shown = territories.filter(t => !filter || t.name.toLowerCase().includes(filter));
-        list.innerHTML = shown.map(t => {
+        const shown = territories.filter(t => {
+            if (regionOnly && !t.name.startsWith(detectedPrefix)) return false;
+            return !filter || t.name.toLowerCase().includes(filter);
+        });
+        // Cap the DOM so the all-regions view (1000+ territories) stays snappy.
+        const CAP = 300;
+        const capped = shown.length > CAP;
+        const visible = capped ? shown.slice(0, CAP) : shown;
+        const note = capped
+            ? `<div class="small text-muted p-1">Showing first ${CAP} of ${shown.length}. Type in the search box to narrow down.</div>`
+            : '';
+        list.innerHTML = note + visible.map(t => {
             const checked = selectedTerr.has(t.msx_territory_id) ? 'checked' : '';
             return `<div class="form-check">
                 <input class="form-check-input align-terr-cb" type="checkbox"
@@ -1216,6 +1260,8 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadTerritories() {
         const { data } = await jf('/alignment/api/territories');
         territories = data.territories || [];
+        detectedPrefix = computeDetectedPrefix();
+        updateRegionFilterUI();
         renderTerritories();
     }
 
@@ -1244,21 +1290,38 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function probe(opts) {
         const silent = !!(opts && opts.silent);  // suppress success banner on auto-load
+        const allRegions = !!(opts && opts.allRegions);
         const btn = $('alignProbeBtn');
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Probing...';
         clearModalAlert();
         const { ok, data } = await jf('/alignment/api/probe', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ all_regions: allRegions }),
         });
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh from MSX';
         if (!ok || !data.success) { modalAlert(data.error || 'Probe failed.', 'danger'); return; }
         if (!silent) {
-            const region = data.prefix ? ` in ${data.prefix}` : '';
+            const region = data.all_regions ? ' across all regions'
+                : (data.prefix ? ` in ${data.prefix}` : '');
             modalAlert(`Probed ${data.total} territories${region} (${data.created} new, ${data.updated} updated).`, 'success');
         }
         await loadTerritories();
+    }
+
+    async function onRegionFilterChange() {
+        if ($('alignRegionFilter').checked) {
+            // Back to my-region-only: just re-render (cache already has it).
+            renderTerritories();
+            return;
+        }
+        // Broadening to all regions - pull them from MSX (explicit, may take a moment).
+        $('alignTerrList').innerHTML =
+            '<div class="text-muted small p-2">'
+            + '<span class="spinner-border spinner-border-sm"></span> '
+            + 'Loading all regions from MSX...</div>';
+        await probe({ silent: true, allRegions: true });
     }
 
     async function save() {
@@ -1322,7 +1385,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (toggle) {
         toggle.addEventListener('change', toggleOverride);
         $('alignTerrSearch').addEventListener('input', renderTerritories);
-        $('alignProbeBtn').addEventListener('click', () => probe());
+        $('alignProbeBtn').addEventListener('click', () => probe({ allRegions: !$('alignRegionFilter').checked }));
+        $('alignRegionFilter').addEventListener('change', onRegionFilterChange);
         $('alignSaveBtn').addEventListener('click', save);
         $('alignPreviewBtn').addEventListener('click', preview);
         // Load (and auto-probe if empty) whenever the modal opens - covers both
