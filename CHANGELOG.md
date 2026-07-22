@@ -8,6 +8,12 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/21/2026
+
+- New **Alignment Override** in Fiscal Year Management. When the new fiscal year starts but MSX hasn't updated your account-team assignments yet, you can pick the territories you're aligned to and have the account sync pull from those instead - so you're not stuck waiting on MSX to catch up. Everything downstream (milestones and the rest) follows your picks. Flip it off once MSX is updated and you're back to normal. Includes a one-click preview of how many customers it would pull before you commit.
+- The fiscal-year "Finalize" now shows live progress while it purges last year's accounts, so that step no longer looks frozen on a large cleanup.
+- Fixed the Fiscal Year Management card still nagging "It's transition time!" after you'd already completed this year's transition - it now stays quiet until next year.
+
 ## 7/20/2026 - 723291f
 
 - When your Azure sign-in expires, Sales Buddy now catches it the moment an MSX or AI action fails and drops a banner at the top of the page with a one-click "Sign In to Azure" button - so you can re-authenticate right where you are instead of features quietly failing or having to dig into the admin panel. It works just like the "VPN required" banner, but for sign-in.

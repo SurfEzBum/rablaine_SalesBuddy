@@ -141,6 +141,35 @@ class TestFYCutoverService:
             assert acme is not None
             assert acme.name == 'Acme Corp'
 
+    def test_finalize_alignments_stream_yields_progress_and_summary(self, app, sample_data):
+        """Streaming finalize should emit progress events then a final summary."""
+        with app.app_context():
+            from app.models import Customer
+            from app.services.fy_cutover import (
+                enter_transition_mode,
+                finalize_alignments_stream,
+                get_transition_state,
+            )
+
+            enter_transition_mode('FY25')
+
+            events = list(finalize_alignments_stream([1001]))
+
+            # Last event carries the summary; earlier ones are progress.
+            assert 'summary' in events[-1]
+            summary = events[-1]['summary']
+            assert summary['purged_customers'] >= 2
+            assert summary['kept_customers'] >= 1
+
+            progress = [e for e in events[:-1] if e.get('phase') == 'purge']
+            assert progress, "expected at least one purge progress event"
+            # Progress reports current/total counts.
+            assert progress[-1]['current'] == progress[-1]['total']
+
+            # Same side effects as the non-streaming path.
+            assert get_transition_state()['in_transition'] is False
+            assert Customer.query.filter_by(tpid=1001).first() is not None
+
     def test_finalize_keeps_customers_in_synced_list(self, app, sample_data):
         """Customers whose TPID is in synced_tpids should be kept."""
         with app.app_context():

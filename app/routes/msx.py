@@ -1412,6 +1412,24 @@ def import_stream():
     # aura thread has a valid reference even after the response stream ends.
     _app_for_aura = current_app._get_current_object()
 
+    # Determine account-discovery source before streaming: the alignment
+    # override (when switched on) makes the sync use the user's declared
+    # territories; otherwise fall back to the msp_accountteams-based scan_init.
+    # An explicit ?source= overrides the toggle.
+    from app.services.alignment import (
+        current_fy_label,
+        discover_accounts_from_alignment,
+        is_override_active,
+    )
+    _source_param = request.args.get('source')
+    _fy_label = current_fy_label()
+    if _source_param == 'accountteams':
+        _use_alignment = False
+    elif _source_param == 'alignment':
+        _use_alignment = True
+    else:
+        _use_alignment = is_override_active()
+
     def generate():
         phase = "initializing"
         try:
@@ -1420,27 +1438,42 @@ def import_stream():
             yield _sse({"message": "Starting parallel MSX import...", "progress": 0})
 
             # ----------------------------------------------------------
-            # Phase 1: scan_init (single-threaded)
+            # Phase 1: discover the accounts to import
+            #   - alignment mode: the user's declared territories
+            #   - default mode: msp_accountteams (scan_init)
             # ----------------------------------------------------------
-            phase = "fetching account assignments"
-            yield _sse({"message": "Fetching your account assignments from MSX...", "progress": 1})
+            if _use_alignment:
+                phase = "reading your territory alignment"
+                yield _sse({
+                    "message": f"Using your saved territory alignment ({_fy_label})...",
+                    "progress": 1,
+                })
+                init_result = discover_accounts_from_alignment(_fy_label)
+                user_info = {}
+                role = "Territory alignment"
+            else:
+                phase = "fetching account assignments"
+                yield _sse({"message": "Fetching your account assignments from MSX...", "progress": 1})
 
-            # Wire up retry callback so SSE stream can report timeouts/retries
-            from app.services.msx_api import msx_retry_state
-            retry_messages = []  # Collect retry events from the callback
-            def _on_retry(attempt, max_retries, wait_secs, error_type):
-                retry_messages.append(
-                    f"Fetching assignments - timeout, retrying ({attempt}/{max_retries})..."
-                )
-            msx_retry_state.callback = _on_retry
-            try:
-                init_result = scan_init()
-            finally:
-                msx_retry_state.callback = None
+                # Wire up retry callback so SSE stream can report timeouts/retries
+                from app.services.msx_api import msx_retry_state
+                retry_messages = []  # Collect retry events from the callback
+                def _on_retry(attempt, max_retries, wait_secs, error_type):
+                    retry_messages.append(
+                        f"Fetching assignments - timeout, retrying ({attempt}/{max_retries})..."
+                    )
+                msx_retry_state.callback = _on_retry
+                try:
+                    init_result = scan_init()
+                finally:
+                    msx_retry_state.callback = None
 
-            # Flush any retry messages as SSE events
-            for msg in retry_messages:
-                yield _sse({"message": msg, "progress": 1})
+                # Flush any retry messages as SSE events
+                for msg in retry_messages:
+                    yield _sse({"message": msg, "progress": 1})
+                user_info = init_result.get("user", {})
+                role = init_result.get("role", "Unknown")
+
             if not init_result.get("success"):
                 error_msg = init_result.get("error", "Failed to initialize scan")
                 if init_result.get("vpn_blocked") or is_vpn_blocked():
@@ -1452,15 +1485,16 @@ def import_stream():
                 return
 
             account_ids = init_result.get("account_ids", [])
-            user_info = init_result.get("user", {})
-            role = init_result.get("role", "Unknown")
             yield _sse({
                 "message": f"Found {len(account_ids)} accounts to import...",
                 "user": user_info.get("name"), "role": role, "progress": 1,
             })
 
             if not account_ids:
-                yield _sse({"error": "No accounts found for this user."})
+                if _use_alignment:
+                    yield _sse({"error": "No territories selected. Save your alignment first."})
+                else:
+                    yield _sse({"error": "No accounts found for this user."})
                 return
 
             # ----------------------------------------------------------

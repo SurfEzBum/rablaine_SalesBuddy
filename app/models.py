@@ -1399,6 +1399,7 @@ class UserPreference(db.Model):
     last_milestone_sync = db.Column(db.DateTime, nullable=True)  # Last time milestone sync ran (UTC)
     compensated_buckets = db.Column(db.Text, nullable=True)  # JSON array of selected ServiceCompGrouping buckets (fallback for localStorage)
     revenue_import_reminder = db.Column(db.Boolean, default=True, nullable=False, server_default='1')
+    alignment_override_active = db.Column(db.Boolean, default=False, nullable=False, server_default='0')  # When on, account sync uses declared territory alignment instead of msp_accountteams
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
     updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
     
@@ -2366,3 +2367,50 @@ class DismissedRecurringMeeting(db.Model):
 
     def __repr__(self) -> str:
         return f'<DismissedRecurringMeeting {self.recurring_key}>'
+
+
+class AlignmentTerritory(db.Model):
+    """Cached universe of MSX territories for the alignment panel picker.
+
+    Seeded by probing MSX once (and refreshable) so the territory picker is
+    instant and works even when MSX is slow or blocked. This is reference data
+    only - it does not represent the user's selections (see AlignmentSelection).
+    """
+    __tablename__ = 'alignment_territories'
+
+    id = db.Column(db.Integer, primary_key=True)
+    msx_territory_id = db.Column(db.String(100), nullable=False, unique=True)
+    name = db.Column(db.String(200), nullable=False)
+    atu = db.Column(db.String(200), nullable=True)  # msp_accountteamunitname, e.g. "East.SMECC.SOU"
+    last_probed_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+
+    def __repr__(self) -> str:
+        return f'<AlignmentTerritory {self.name}>'
+
+
+class AlignmentSelection(db.Model):
+    """A territory the user is aligned to for a fiscal year.
+
+    Alignment is territory-based: the org aligns SEs to whole territories
+    regardless of seller. "My accounts" = all accounts in the selected
+    territories. The account sync uses these instead of the user's own
+    ``msp_accountteams`` membership.
+    """
+    __tablename__ = 'alignment_selections'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'fy_label', 'msx_territory_id',
+            name='uq_alignment_selection',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    fy_label = db.Column(db.String(10), nullable=False)  # e.g. "FY27"
+    msx_territory_id = db.Column(db.String(100), nullable=False)
+    territory_name = db.Column(db.String(200), nullable=False)
+    active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    def __repr__(self) -> str:
+        return f'<AlignmentSelection {self.fy_label} {self.territory_name}>'

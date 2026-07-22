@@ -4290,6 +4290,59 @@ def get_accounts_for_territories(territory_names: List[str]) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def get_accounts_for_territory_ids(territory_ids: List[str]) -> Dict[str, Any]:
+    """Get all accounts for a list of territory GUIDs (no name lookup).
+
+    More robust than :func:`get_accounts_for_territories`: it skips the
+    name -> id resolution entirely (callers usually already have the ids), so
+    it can't misreport a stale/renamed territory name or a transient query
+    failure as "no territories found". A real MSX error (auth/VPN/timeout)
+    propagates instead of being swallowed.
+
+    Args:
+        territory_ids: List of territory GUIDs.
+
+    Returns:
+        Dict with success and an ``accounts`` list (name, tpid, territory_id),
+        or the underlying MSX error.
+    """
+    try:
+        accounts = []
+        for territory_id in territory_ids:
+            if not territory_id:
+                continue
+            accounts_result = query_entity(
+                "accounts",
+                select=["accountid", "name", "msp_mstopparentid",
+                        "_ownerid_value", "_territoryid_value"],
+                filter_query=f"_territoryid_value eq {territory_id}",
+                top=200,
+            )
+            if not accounts_result.get("success"):
+                # Propagate the real failure instead of masking it.
+                return accounts_result
+            for acct in accounts_result.get("records", []):
+                accounts.append({
+                    "account_id": acct.get("accountid"),
+                    "name": acct.get("name"),
+                    "tpid": acct.get("msp_mstopparentid"),
+                    "seller_id": acct.get("_ownerid_value"),
+                    "seller_name": acct.get(
+                        "_ownerid_value@OData.Community.Display.V1.FormattedValue"),
+                    "territory_id": territory_id,
+                })
+
+        accounts.sort(key=lambda x: (x.get("name") or "").lower())
+        return {
+            "success": True,
+            "account_count": len(accounts),
+            "accounts": accounts,
+        }
+    except Exception as e:
+        logger.exception("Error getting accounts for territory ids")
+        return {"success": False, "error": str(e)}
+
+
 def find_my_territories(atu_filter: Optional[str] = None) -> Dict[str, Any]:
     """
     Find territories where the current user is assigned as a Data SE, Infra SE, or Apps SE.

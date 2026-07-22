@@ -208,6 +208,8 @@ def create_app():
     app.register_blueprint(backup_bp)
     app.register_blueprint(reports_bp)
     app.register_blueprint(metrics_bp)
+    from app.routes.alignment import alignment_bp
+    app.register_blueprint(alignment_bp)
     
     # Start MSX token refresh job (background thread)
     # This keeps the az login token fresh for CRM API calls
