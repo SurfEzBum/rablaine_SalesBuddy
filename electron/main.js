@@ -306,6 +306,37 @@ async function checkForUpdates(interactive) {
 // Window + tray
 // ---------------------------------------------------------------------------
 
+// The whole app is same-origin HTTP navigation served from the local backend,
+// so navigations must stay INSIDE the window; only genuinely off-site links
+// (MSX, aka.ms, etc. - all target=_blank) go to the real browser. The old check
+// was a string-prefix allowlist for exactly "localhost:PORT" / "127.0.0.1:PORT".
+// That breaks on machines where the window's origin isn't one of those exact
+// spellings - e.g. it loaded via [::1] (IPv6 localhost), the machine hostname,
+// or the LAN IP because waitress binds 0.0.0.0. There, EVERY relative link
+// resolves to that origin, fails the allowlist, and gets shoved to the browser
+// (the "every GET opens a new browser window" bug). Fix: treat a URL as internal
+// if it shares the host of the page we're currently on (covers all relative
+// links regardless of the window's actual origin) or is any loopback host.
+function safeCurrentUrl() {
+  try { return mainWindow.webContents.getURL() || ''; } catch (_) { return ''; }
+}
+
+function isInternalUrl(target) {
+  let u;
+  try { u = new URL(target); } catch (_) { return true; } // relative/unparsable
+  const scheme = u.protocol;
+  if (scheme === 'data:' || scheme === 'blob:' || scheme === 'about:') return true;
+  if (scheme !== 'http:' && scheme !== 'https:') return false; // mailto:, tel:, ...
+  // Same host as the page we're currently on -> in-app navigation.
+  try {
+    const cur = new URL(safeCurrentUrl());
+    if (cur.host && u.host === cur.host) return true;
+  } catch (_) { /* no current page yet */ }
+  // Any loopback host (any spelling, any port) is this machine's own backend.
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -334,18 +365,15 @@ function createWindow() {
 
   // Keep in-app navigation on the local server; send anything else (external
   // links, target=_blank, http(s) to other hosts) to the user's real browser.
-  const isLocal = (url) => url.startsWith(BASE_URL) ||
-    url.startsWith(`http://localhost:${PORT}`) ||
-    url.startsWith(`http://127.0.0.1:${PORT}`) ||
-    url.startsWith('data:');
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (isLocal(url)) return { action: 'allow' };
+    if (isInternalUrl(url)) return { action: 'allow' };
     shell.openExternal(url);
     return { action: 'deny' };
   });
   mainWindow.webContents.on('will-navigate', (e, url) => {
-    if (!isLocal(url)) {
+    if (!isInternalUrl(url)) {
       e.preventDefault();
+      log(`nav -> external browser: ${url} (from ${safeCurrentUrl()})`);
       shell.openExternal(url);
     }
   });
