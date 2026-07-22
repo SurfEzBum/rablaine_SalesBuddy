@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from app.models import AlignmentSelection, AlignmentTerritory, db, utc_now
 from app.services.msx_api import (
     get_accounts_for_territories,
+    get_accounts_for_territory_ids,
     query_entity,
     query_next_page,
 )
@@ -377,17 +378,53 @@ def set_override_active(active: bool) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def summarize_accounts_for_territory_ids(
+    territory_ids: List[str],
+) -> Dict[str, Any]:
+    """Return account/customer counts for the given territory GUIDs (read-only).
+
+    Preferred over the name-based variant: querying by territory id skips the
+    fragile name -> id lookup, so a stale/renamed cached name or a transient
+    MSX error can't masquerade as "no territories found". Always returns the
+    count fields (zeros when empty).
+    """
+    ids = [i for i in (territory_ids or []) if i]
+    if not ids:
+        return {
+            "success": True,
+            "account_ids": [],
+            "territory_count": 0,
+            "kept_account_count": 0,
+            "customer_count": 0,
+        }
+
+    acct_result = get_accounts_for_territory_ids(ids)
+    if not acct_result.get("success"):
+        return acct_result
+
+    accounts = acct_result.get("accounts", [])
+    account_ids = [a["account_id"] for a in accounts if a.get("account_id")]
+    # MSX accounts are a parent/child hierarchy: one customer (TPID / top-level
+    # parent) can span many account records. The sync creates one customer per
+    # unique TPID, so the customer count is what actually lands in Sales Buddy.
+    unique_tpids = {a.get("tpid") for a in accounts if a.get("tpid")}
+
+    return {
+        "success": True,
+        "account_ids": account_ids,
+        "territory_count": len(set(ids)),
+        "kept_account_count": len(account_ids),
+        "customer_count": len(unique_tpids),
+    }
+
+
 def summarize_accounts_for_territories(
     territory_names: List[str],
 ) -> Dict[str, Any]:
-    """Return account/customer counts for the given territory names (read-only).
+    """Name-based account/customer summary (legacy).
 
-    Used to preview an alignment before it's saved. "My accounts" = all accounts
-    in the territories; the sync creates one customer per unique TPID, so the
-    customer count is what actually lands in Sales Buddy.
-
-    Always returns the count fields (zeros when empty) so callers never see
-    undefined values.
+    Prefer :func:`summarize_accounts_for_territory_ids` where ids are available
+    - the name lookup is fragile. Kept for callers that only have names.
     """
     names = sorted({n for n in (territory_names or []) if n})
     if not names:
@@ -405,9 +442,6 @@ def summarize_accounts_for_territories(
 
     accounts = acct_result.get("accounts", [])
     account_ids = [a["account_id"] for a in accounts if a.get("account_id")]
-    # MSX accounts are a parent/child hierarchy: one customer (TPID / top-level
-    # parent) can span many account records. The sync creates one customer per
-    # unique TPID, so the customer count is what actually lands in Sales Buddy.
     unique_tpids = {a.get("tpid") for a in accounts if a.get("tpid")}
 
     return {
@@ -438,20 +472,20 @@ def discover_accounts_from_alignment(
         .filter_by(fy_label=fy_label, active=True)
         .all()
     )
-    territory_names = sorted({s.territory_name for s in selections if s.territory_name})
+    territory_ids = sorted({s.msx_territory_id for s in selections if s.msx_territory_id})
 
-    result = summarize_accounts_for_territories(territory_names)
+    result = summarize_accounts_for_territory_ids(territory_ids)
     if not result.get("success"):
         return result
 
     result["fy_label"] = fy_label
     result["source"] = "alignment"
-    if not territory_names:
+    if not territory_ids:
         result["message"] = f"No active alignment for {fy_label}"
 
     logger.info(
         "Alignment discovery (%s): %d territories -> %d accounts, %d customers",
-        fy_label, len(territory_names),
+        fy_label, len(territory_ids),
         result.get("kept_account_count", 0), result.get("customer_count", 0),
     )
     return result

@@ -124,12 +124,20 @@ def api_preview():
     data = request.get_json(silent=True) or {}
     territories = data.get('territories')
     if territories:
-        names = [
-            (t.get('territory_name') if isinstance(t, dict) else t)
-            for t in territories
+        # Prefer territory ids (robust - no name lookup); fall back to names.
+        ids = [
+            t.get('msx_territory_id')
+            for t in territories if isinstance(t, dict) and t.get('msx_territory_id')
         ]
-        names = [n for n in names if n]
-        result = alignment.summarize_accounts_for_territories(names)
+        if ids:
+            result = alignment.summarize_accounts_for_territory_ids(ids)
+        else:
+            names = [
+                (t.get('territory_name') if isinstance(t, dict) else t)
+                for t in territories
+            ]
+            names = [n for n in names if n]
+            result = alignment.summarize_accounts_for_territories(names)
     else:
         fy_label = data.get('fy_label') or alignment.current_fy_label()
         result = alignment.discover_accounts_from_alignment(fy_label)

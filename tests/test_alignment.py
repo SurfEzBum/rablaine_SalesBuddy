@@ -354,12 +354,12 @@ class TestAccountDiscovery:
             accounts = {
                 "success": True,
                 "accounts": [
-                    {"account_id": "a1", "territory_id": "t1", "territory_name": "T1", "tpid": 100},
-                    {"account_id": "a2", "territory_id": "t1", "territory_name": "T1", "tpid": 100},
-                    {"account_id": "a3", "territory_id": "t2", "territory_name": "T2", "tpid": 200},
+                    {"account_id": "a1", "territory_id": "t1", "tpid": 100},
+                    {"account_id": "a2", "territory_id": "t1", "tpid": 100},
+                    {"account_id": "a3", "territory_id": "t2", "tpid": 200},
                 ],
             }
-            with patch.object(alignment, "get_accounts_for_territories",
+            with patch.object(alignment, "get_accounts_for_territory_ids",
                               return_value=accounts) as mock_get:
                 result = alignment.discover_accounts_from_alignment(FY)
 
@@ -369,9 +369,9 @@ class TestAccountDiscovery:
             assert result["kept_account_count"] == 3
             # a1 and a2 share TPID 100, so 2 unique customers, not 3.
             assert result["customer_count"] == 2
-            # Queried by the two selected territory names.
-            called_names = sorted(mock_get.call_args[0][0])
-            assert called_names == ["T1", "T2"]
+            # Queried by territory ids, not names (robust path).
+            called_ids = sorted(mock_get.call_args[0][0])
+            assert called_ids == ["t1", "t2"]
 
     def test_discovery_propagates_msx_error(self, app):
         with app.app_context():
@@ -379,25 +379,25 @@ class TestAccountDiscovery:
 
             alignment.save_alignment_selections([_terr("t1", "T1")], fy_label=FY)
             err = {"success": False, "error": "boom"}
-            with patch.object(alignment, "get_accounts_for_territories",
+            with patch.object(alignment, "get_accounts_for_territory_ids",
                               return_value=err):
                 result = alignment.discover_accounts_from_alignment(FY)
             assert result["success"] is False
 
 
 class TestPreviewUnsaved:
-    """summarize_accounts_for_territories - preview before saving."""
+    """summarize helpers - preview before saving."""
 
-    def test_empty_returns_zeros_not_undefined(self, app):
+    def test_empty_ids_returns_zeros_not_undefined(self, app):
         with app.app_context():
             from app.services import alignment
-            result = alignment.summarize_accounts_for_territories([])
+            result = alignment.summarize_accounts_for_territory_ids([])
             assert result["success"] is True
             assert result["customer_count"] == 0
             assert result["territory_count"] == 0
             assert result["kept_account_count"] == 0
 
-    def test_previews_arbitrary_names_without_saving(self, app):
+    def test_previews_by_ids_without_saving(self, app):
         with app.app_context():
             from app.models import AlignmentSelection
             from app.services import alignment
@@ -405,20 +405,30 @@ class TestPreviewUnsaved:
             accounts = {
                 "success": True,
                 "accounts": [
-                    {"account_id": "a1", "territory_id": "t1", "territory_name": "T1", "tpid": 100},
-                    {"account_id": "a2", "territory_id": "t1", "territory_name": "T1", "tpid": 100},
-                    {"account_id": "a3", "territory_id": "t2", "territory_name": "T2", "tpid": 200},
+                    {"account_id": "a1", "territory_id": "t1", "tpid": 100},
+                    {"account_id": "a2", "territory_id": "t1", "tpid": 100},
+                    {"account_id": "a3", "territory_id": "t2", "tpid": 200},
                 ],
             }
-            with patch.object(alignment, "get_accounts_for_territories",
+            with patch.object(alignment, "get_accounts_for_territory_ids",
                               return_value=accounts):
-                result = alignment.summarize_accounts_for_territories(["T2", "T1"])
+                result = alignment.summarize_accounts_for_territory_ids(["t2", "t1"])
 
             assert result["customer_count"] == 2   # TPIDs 100, 200
             assert result["kept_account_count"] == 3
             assert result["territory_count"] == 2
             # Nothing was persisted by a preview.
             assert AlignmentSelection.query.filter_by(fy_label=FY).count() == 0
+
+    def test_summarize_ids_propagates_msx_error(self, app):
+        with app.app_context():
+            from app.services import alignment
+            err = {"success": False, "error": "auth failed"}
+            with patch.object(alignment, "get_accounts_for_territory_ids",
+                              return_value=err):
+                result = alignment.summarize_accounts_for_territory_ids(["t1"])
+            assert result["success"] is False
+            assert result["error"] == "auth failed"
 
     def test_no_alignment_discovery_has_count_fields(self, app):
         with app.app_context():
