@@ -1389,7 +1389,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 showNote('Override turned off - pick at least one territory to enable it.');
             }
         });
-        loadStatus();
+        // Initial load. Self-heal a stale invalid state: override on with no
+        // territories (e.g. enabled, then the page was refreshed before any
+        // territory was saved). The enable-then-configure flow is unaffected -
+        // that goes through toggleOverride, not this one-time load path.
+        (async () => {
+            await loadStatus();
+            if ($('alignmentOverrideToggle').checked && selCount === 0) {
+                await jf('/alignment/api/override', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active: false }),
+                });
+                await loadStatus();
+                showNote('Override needs at least one territory - it was turned off.');
+            }
+        })();
     }
 })();
 
