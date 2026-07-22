@@ -57,6 +57,43 @@ if (-not (Test-Path $exe)) {
 }
 Write-Host "`nBuilt: $exe" -ForegroundColor Green
 
+# --- Stamp exe resources (icon + product name/version) ---
+# electron-builder runs with signAndEditExecutable=false so it never downloads
+# winCodeSign (its archive contains macOS symlinks that fail to extract on a
+# stock Windows box without Developer Mode - the same failure this MSI build
+# would hit on every user machine). The cost of skipping that step is an
+# unbranded exe: Sales Buddy.exe keeps Electron's default icon and "Electron"
+# product name, so Windows shows "Electron" + a generic icon in the taskbar
+# jump list and drops our icon when the app is pinned. We stamp the resources
+# ourselves with the standalone rcedit tool (bundles its own exe, no winCodeSign)
+# BEFORE signing, so the signature covers the final, branded binary.
+$rcedit = Join-Path $scriptDir 'node_modules\rcedit\bin\rcedit-x64.exe'
+$icon = Join-Path $repoRoot 'static\icon.ico'
+if ((Test-Path $rcedit) -and (Test-Path $icon)) {
+    $ver = (Get-Content (Join-Path $scriptDir 'package.json') -Raw | ConvertFrom-Json).version
+    $fileVer = if ($ver -match '^\d+\.\d+\.\d+$') { "$ver.0" } else { $ver }
+    Write-Host "`nStamping exe resources (icon + product info)..." -ForegroundColor Yellow
+    & $rcedit "$exe" `
+        --set-icon "$icon" `
+        --set-version-string "ProductName" "Sales Buddy" `
+        --set-version-string "FileDescription" "Sales Buddy" `
+        --set-version-string "CompanyName" "Sales Buddy" `
+        --set-version-string "InternalName" "Sales Buddy" `
+        --set-version-string "OriginalFilename" "Sales Buddy.exe" `
+        --set-version-string "LegalCopyright" "Sales Buddy" `
+        --set-file-version "$fileVer" `
+        --set-product-version "$fileVer"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "WARNING: rcedit failed - exe keeps Electron's default icon/name." -ForegroundColor Red
+    } else {
+        Write-Host "  Stamped icon + product info (Sales Buddy $fileVer)." -ForegroundColor Green
+    }
+} else {
+    Write-Host "`nWARNING: skipping resource stamp - exe keeps Electron branding." -ForegroundColor Red
+    if (-not (Test-Path $rcedit)) { Write-Host "  Missing: rcedit (run npm install)." -ForegroundColor DarkYellow }
+    if (-not (Test-Path $icon)) { Write-Host "  Missing: $icon" -ForegroundColor DarkYellow }
+}
+
 # --- Sign (Azure Trusted Signing, mirrors installer/build.ps1) ---
 if ($SkipSign) {
     Write-Host "`nSkipping signing (-SkipSign). Output is unsigned." -ForegroundColor Yellow
