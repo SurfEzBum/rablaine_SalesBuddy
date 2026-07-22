@@ -257,6 +257,7 @@ def get_alignment_selections(fy_label: Optional[str] = None) -> List[Dict[str, A
 def save_alignment_selections(
     territories: List[Dict[str, Any]],
     fy_label: Optional[str] = None,
+    set_override: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Replace the active territory selections for a fiscal year.
 
@@ -265,10 +266,18 @@ def save_alignment_selections(
     Non-destructive to other fiscal years. Saving records intent only - it
     does not run a sync.
 
+    Saving is also the commit point for the override toggle: pass
+    ``set_override`` to set the override flag atomically with the selections.
+    The invariant "override on requires >= 1 territory" is enforced here, so
+    the persisted state is always coherent - an account sync (even one
+    triggered via API) can never see override-on with zero territories.
+
     Args:
         territories: List of dicts, each with msx_territory_id and
             territory_name.
         fy_label: Fiscal year label (defaults to current).
+        set_override: When not None, set the override flag - but only to True
+            if >= 1 territory ends up active; otherwise forced off.
 
     Returns:
         Dict with success and counts.
@@ -312,6 +321,15 @@ def save_alignment_selections(
             ))
             added += 1
 
+    override_active = None
+    if set_override is not None:
+        from app.models import UserPreference
+        pref = UserPreference.query.first()
+        if pref:
+            # Invariant: on requires >= 1 active territory.
+            override_active = bool(set_override) and len(incoming) > 0
+            pref.alignment_override_active = override_active
+
     db.session.commit()
     return {
         "success": True,
@@ -320,6 +338,7 @@ def save_alignment_selections(
         "reactivated": reactivated,
         "deactivated": deactivated,
         "active_total": len(incoming),
+        "override_active": override_active,
     }
 
 

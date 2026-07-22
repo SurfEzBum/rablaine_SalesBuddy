@@ -295,6 +295,45 @@ class TestOverrideToggle:
             assert alignment.is_override_active() is False
 
 
+class TestSaveCommitsOverride:
+    """Saving territories is the commit point for the override toggle."""
+
+    def test_save_with_override_on_and_territories(self, app):
+        with app.app_context():
+            from app.services import alignment
+            res = alignment.save_alignment_selections(
+                [_terr("t1", "T1")], fy_label=FY, set_override=True)
+            assert res["override_active"] is True
+            assert alignment.is_override_active() is True
+
+    def test_save_with_override_on_but_no_territories_forced_off(self, app):
+        with app.app_context():
+            from app.services import alignment
+            # Invariant: can't turn on with zero territories, even if asked.
+            res = alignment.save_alignment_selections(
+                [], fy_label=FY, set_override=True)
+            assert res["override_active"] is False
+            assert alignment.is_override_active() is False
+
+    def test_save_with_override_off_keeps_territories(self, app):
+        with app.app_context():
+            from app.services import alignment
+            res = alignment.save_alignment_selections(
+                [_terr("t1", "T1")], fy_label=FY, set_override=False)
+            assert res["override_active"] is False
+            assert alignment.is_override_active() is False
+            # Territories are still saved (preserved for later re-enable).
+            assert len(alignment.get_alignment_selections(FY)) == 1
+
+    def test_save_without_set_override_leaves_flag_untouched(self, app):
+        with app.app_context():
+            from app.services import alignment
+            alignment.set_override_active(True)
+            alignment.save_alignment_selections([_terr("t1", "T1")], fy_label=FY)
+            # No set_override passed -> flag unchanged.
+            assert alignment.is_override_active() is True
+
+
 class TestAccountDiscovery:
     """discover_accounts_from_alignment - all accounts in selected territories."""
 

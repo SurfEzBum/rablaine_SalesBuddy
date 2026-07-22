@@ -94,11 +94,19 @@ def api_get_selections():
 
 @alignment_bp.route('/alignment/api/selections', methods=['POST'])
 def api_save_selections():
-    """Persist the user's territory selections (records intent only)."""
+    """Persist territory selections; optionally commit the override toggle.
+
+    Saving is the commit point for turning the override on - pass
+    ``set_override`` to flip it atomically with the selections (enforcing the
+    "on requires >= 1 territory" invariant server-side).
+    """
     data = request.get_json(silent=True) or {}
     territories = data.get('territories', [])
     fy_label = data.get('fy_label') or alignment.current_fy_label()
-    result = alignment.save_alignment_selections(territories, fy_label=fy_label)
+    set_override = data.get('set_override', None)
+    result = alignment.save_alignment_selections(
+        territories, fy_label=fy_label, set_override=set_override,
+    )
     return jsonify(result)
 
 

@@ -1111,6 +1111,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let loaded = false;
     let selCount = 0;              // saved territory count for the current FY
     let detectedPrefix = null;     // most-common Region.Segment prefix in cache
+    let savedTerritories = [];     // persisted territory names (backend truth)
+    let pendingEnable = false;     // toggled on optimistically, not yet saved
 
     const $ = id => document.getElementById(id);
 
@@ -1141,12 +1143,13 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!data.success) return;
         fyLabel = data.fy_label;
         selCount = data.selection_count;
+        savedTerritories = data.territories || [];
         detectedPrefix = data.detected_region || null;  // from the user's own territories
         updateRegionFilterUI();
         $('alignmentModalFy').textContent = fyLabel;
         $('alignmentOverrideToggle').checked = data.override_active;
         setToggleLabel(data.override_active);
-        applyOverrideState(data.override_active, data.territories || []);
+        applyOverrideState(data.override_active, savedTerritories);
     }
 
     function applyOverrideState(on, terrNames) {
@@ -1171,16 +1174,26 @@ document.addEventListener('DOMContentLoaded', function() {
     async function toggleOverride() {
         clearNote();
         const on = $('alignmentOverrideToggle').checked;
-        const { data } = await jf('/alignment/api/override', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ active: on }),
-        });
-        setToggleLabel(data.override_active);
-        $('alignmentOverrideToggle').checked = !!data.override_active;
-        await loadStatus();
-        // Turning on with nothing configured: open the picker to guide setup.
-        if (data.override_active && selCount === 0) {
+        if (on) {
+            // Optimistic on: DON'T persist yet. The override only really turns
+            // on when territories are saved, so navigating away or reloading
+            // without saving leaves the backend state untouched (off).
+            pendingEnable = true;
+            setToggleLabel(true);
+            applyOverrideState(true, savedTerritories);
             bootstrap.Modal.getOrCreateInstance($('alignmentModal')).show();
+        } else {
+            // Turning off is a real state change (keeps saved territories), or
+            // it cancels an un-saved optimistic enable (nothing to persist).
+            const wasPending = pendingEnable;
+            pendingEnable = false;
+            if (!wasPending) {
+                await jf('/alignment/api/override', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active: false }),
+                });
+            }
+            await loadStatus();
         }
     }
 
@@ -1317,9 +1330,14 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
         status.classList.add('d-none');
+        // Saving is the commit point for the override: send the current
+        // (optimistic) toggle state so "on" only becomes real here.
         const { ok, data } = await jf('/alignment/api/selections', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ territories: payload, fy_label: fyLabel }),
+            body: JSON.stringify({
+                territories: payload, fy_label: fyLabel,
+                set_override: $('alignmentOverrideToggle').checked,
+            }),
         });
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-save"></i> Save territories';
@@ -1329,6 +1347,7 @@ document.addEventListener('DOMContentLoaded', function() {
             status.classList.remove('d-none');
             return;
         }
+        pendingEnable = false;  // committed - the toggle state is now persisted
         const n = payload.length;
         const removed = data.deactivated ? ` (${data.deactivated} removed)` : '';
         status.className = 'small fw-semibold me-auto text-success';
@@ -1376,34 +1395,17 @@ document.addEventListener('DOMContentLoaded', function() {
         // Load (and auto-probe if empty) whenever the modal opens - covers both
         // the Configure button and the auto-open when the override is enabled.
         $('alignmentModal').addEventListener('shown.bs.modal', ensureLoaded);
-        // Invariant: override on requires >= 1 territory. If they close the
-        // picker with nothing saved, flip it back off and say why.
+        // If the picker is closed while the enable was still optimistic (never
+        // saved), revert the UI. The backend was never changed - it's a pure
+        // client-side revert, no API call, no invalid state to heal.
         $('alignmentModal').addEventListener('hidden.bs.modal', async () => {
-            await loadStatus();
-            if ($('alignmentOverrideToggle').checked && selCount === 0) {
-                await jf('/alignment/api/override', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ active: false }),
-                });
-                await loadStatus();
-                showNote('Override turned off - pick at least one territory to enable it.');
+            if (pendingEnable) {
+                pendingEnable = false;
+                await loadStatus();  // reflects the real (off) backend state
+                showNote('Override stays off until you save at least one territory.');
             }
         });
-        // Initial load. Self-heal a stale invalid state: override on with no
-        // territories (e.g. enabled, then the page was refreshed before any
-        // territory was saved). The enable-then-configure flow is unaffected -
-        // that goes through toggleOverride, not this one-time load path.
-        (async () => {
-            await loadStatus();
-            if ($('alignmentOverrideToggle').checked && selCount === 0) {
-                await jf('/alignment/api/override', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ active: false }),
-                });
-                await loadStatus();
-                showNote('Override needs at least one territory - it was turned off.');
-            }
-        })();
+        loadStatus();
     }
 })();
 
