@@ -40,6 +40,7 @@ def api_status():
         "override_active": alignment.is_override_active(),
         "selection_count": len(selections),
         "territories": [s["territory_name"] for s in selections],
+        "detected_region": alignment.derive_territory_prefix(local_only=True),
         "territory_cache_count": len(alignment.list_territories()),
     })
 

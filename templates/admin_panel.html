@@ -1141,6 +1141,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!data.success) return;
         fyLabel = data.fy_label;
         selCount = data.selection_count;
+        detectedPrefix = data.detected_region || null;  // from the user's own territories
+        updateRegionFilterUI();
         $('alignmentModalFy').textContent = fyLabel;
         $('alignmentOverrideToggle').checked = data.override_active;
         setToggleLabel(data.override_active);
@@ -1189,22 +1191,6 @@ document.addEventListener('DOMContentLoaded', function() {
         el.classList.remove('d-none');
     }
     function clearModalAlert() { $('alignmentModalAlert').classList.add('d-none'); }
-
-    function computeDetectedPrefix() {
-        // Most common Region.Segment prefix (e.g. "East.SMECC.") among cached
-        // territories - used to label and drive the region filter.
-        const counts = {};
-        territories.forEach(t => {
-            const parts = (t.name || '').split('.');
-            if (parts.length >= 2 && parts[0] && parts[1]) {
-                const p = parts[0] + '.' + parts[1] + '.';
-                counts[p] = (counts[p] || 0) + 1;
-            }
-        });
-        let best = null, bestN = 0;
-        for (const p in counts) if (counts[p] > bestN) { best = p; bestN = counts[p]; }
-        return best;
-    }
 
     function updateRegionFilterUI() {
         const wrap = $('alignRegionFilterWrap');
@@ -1260,8 +1246,6 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadTerritories() {
         const { data } = await jf('/alignment/api/territories');
         territories = data.territories || [];
-        detectedPrefix = computeDetectedPrefix();
-        updateRegionFilterUI();
         renderTerritories();
     }
 

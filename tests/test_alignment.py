@@ -146,6 +146,23 @@ class TestRegionDerivation:
 
             assert alignment.derive_territory_prefix() == "West.SMECC."
 
+    def test_region_from_user_book_not_territory_cache(self, app):
+        """Detected region comes from the user's Territory book, not the
+        cached territory universe (which may hold every region)."""
+        with app.app_context():
+            from app.models import AlignmentTerritory, Territory, db
+            from app.services import alignment
+
+            # User's actual book: East.
+            db.session.add(Territory(name="East.SMECC.SOU.0206.A"))
+            # Cached universe polluted with a different region that dominates.
+            for i in range(50):
+                db.session.add(AlignmentTerritory(
+                    msx_territory_id=f"c{i}", name=f"Canada.SMB.X.{i}"))
+            db.session.commit()
+
+            assert alignment.derive_territory_prefix(local_only=True) == "East.SMECC."
+
     def test_probe_auto_derives_prefix(self, app):
         with app.app_context():
             from app.models import Territory, db

@@ -76,17 +76,18 @@ def _region_prefix(name: str) -> Optional[str]:
     return None
 
 
-def derive_territory_prefix() -> Optional[str]:
+def derive_territory_prefix(local_only: bool = False) -> Optional[str]:
     """Determine the territory-name prefix that scopes the picker to the user's
     region (e.g. ``East.SMECC.``) - no hardcoded region.
 
     Resolution order:
     1. The most common ``Region.Segment`` prefix among the user's existing
-       local territories. Fast, no MSX call, and correct for anyone who has
-       synced before (which is the norm for the FY-changeover use case).
+       local territories (the ``Territory`` table - their actual book, not the
+       cached territory *universe*). Fast, no MSX call, correct for anyone who
+       has synced before.
     2. Fall back to the user's MSX account-team territories
        (``find_my_territories``); the region there is stable even if the
-       specific territory numbers are stale.
+       specific territory numbers are stale. Skipped when ``local_only``.
 
     Returns None if neither source yields a prefix.
     """
@@ -101,6 +102,9 @@ def derive_territory_prefix() -> Optional[str]:
             counter[p] += 1
     if counter:
         return counter.most_common(1)[0][0]
+
+    if local_only:
+        return None
 
     # Fallback: derive from the user's MSX account-team territories.
     try:
