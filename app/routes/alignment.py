@@ -64,12 +64,16 @@ def api_territories():
 
 @alignment_bp.route('/alignment/api/probe', methods=['POST'])
 def api_probe():
-    """Probe MSX for the territory universe and refresh the local cache."""
+    """Probe MSX for the territory universe and refresh the local cache.
+
+    The region prefix is derived from the user's own data by default; an
+    explicit ``prefix`` in the body overrides it.
+    """
     guard = _require_msx()
     if guard:
         return guard
     data = request.get_json(silent=True) or {}
-    prefix = (data.get('prefix') or '').strip() or 'East.SMECC.'
+    prefix = (data.get('prefix') or '').strip() or None
     result = alignment.probe_territories(prefix=prefix)
     status = 200 if result.get('success') else 502
     return jsonify(result), status

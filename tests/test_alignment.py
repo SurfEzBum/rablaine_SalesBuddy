@@ -74,7 +74,7 @@ class TestProbeTerritories:
                 "next_link": None,
             }
             with patch.object(alignment, "query_entity", return_value=page):
-                result = alignment.probe_territories()
+                result = alignment.probe_territories(prefix="East.SMECC.")
 
             assert result["success"] is True
             assert result["created"] == 2
@@ -89,7 +89,7 @@ class TestProbeTerritories:
                 "next_link": None,
             }
             with patch.object(alignment, "query_entity", return_value=page2):
-                result2 = alignment.probe_territories()
+                result2 = alignment.probe_territories(prefix="East.SMECC.")
 
             assert result2["updated"] == 1
             assert AlignmentTerritory.query.count() == 2
@@ -115,10 +115,73 @@ class TestProbeTerritories:
             }
             with patch.object(alignment, "query_entity", return_value=first), \
                  patch.object(alignment, "query_next_page", return_value=second):
-                result = alignment.probe_territories()
+                result = alignment.probe_territories(prefix="East.SMECC.")
 
             assert result["total"] == 2
             assert AlignmentTerritory.query.count() == 2
+
+
+class TestRegionDerivation:
+    """derive_territory_prefix - no hardcoded region."""
+
+    def test_region_prefix_extraction(self, app):
+        with app.app_context():
+            from app.services import alignment
+            assert alignment._region_prefix("East.SMECC.SOU.0206.A") == "East.SMECC."
+            assert alignment._region_prefix("West.SMECC.MAA.0101") == "West.SMECC."
+            assert alignment._region_prefix("Central.ENT.FOO.1") == "Central.ENT."
+            assert alignment._region_prefix("single") is None
+            assert alignment._region_prefix("") is None
+
+    def test_derives_from_local_territories(self, app):
+        with app.app_context():
+            from app.models import Territory, db
+            from app.services import alignment
+
+            # A West-region user: prefix must derive to West, not a hardcoded East.
+            db.session.add(Territory(name="West.SMECC.MAA.0101"))
+            db.session.add(Territory(name="West.SMECC.MAA.0102"))
+            db.session.add(Territory(name="West.SMECC.SOU.0203"))
+            db.session.commit()
+
+            assert alignment.derive_territory_prefix() == "West.SMECC."
+
+    def test_probe_auto_derives_prefix(self, app):
+        with app.app_context():
+            from app.models import Territory, db
+            from app.services import alignment
+
+            db.session.add(Territory(name="West.SMECC.MAA.0101"))
+            db.session.commit()
+
+            page = {
+                "success": True,
+                "records": [{"territoryid": "w1", "name": "West.SMECC.MAA.0101",
+                             "msp_accountteamunitname": "West.SMECC.MAA"}],
+                "next_link": None,
+            }
+            captured = {}
+
+            def fake_query(entity, **kwargs):
+                captured["filter"] = kwargs.get("filter_query")
+                return page
+
+            with patch.object(alignment, "query_entity", side_effect=fake_query):
+                result = alignment.probe_territories()  # no explicit prefix
+
+            assert result["success"] is True
+            assert result["prefix"] == "West.SMECC."
+            assert "West.SMECC." in captured["filter"]
+
+    def test_probe_errors_when_region_undeterminable(self, app):
+        with app.app_context():
+            from app.services import alignment
+            # No local territories; MSX fallback returns nothing.
+            with patch("app.services.msx_api.find_my_territories",
+                       return_value={"success": True, "territories": []}):
+                result = alignment.probe_territories()
+            assert result["success"] is False
+            assert "region" in result["error"].lower()
 
 
 class TestSelectionPersistence:

@@ -1255,7 +1255,8 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh from MSX';
         if (!ok || !data.success) { modalAlert(data.error || 'Probe failed.', 'danger'); return; }
         if (!silent) {
-            modalAlert(`Probed ${data.total} territories (${data.created} new, ${data.updated} updated).`, 'success');
+            const region = data.prefix ? ` in ${data.prefix}` : '';
+            modalAlert(`Probed ${data.total} territories${region} (${data.created} new, ${data.updated} updated).`, 'success');
         }
         await loadTerritories();
     }

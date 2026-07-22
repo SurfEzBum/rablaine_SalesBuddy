@@ -28,9 +28,6 @@ from app.services.msx_api import (
 
 logger = logging.getLogger(__name__)
 
-# Default region prefix for the territory-universe probe.
-_DEFAULT_TERRITORY_PREFIX = "East.SMECC."
-
 
 def current_fy_label() -> str:
     """Return the fiscal-year label the alignment should target.
@@ -67,18 +64,87 @@ def current_fy_label() -> str:
 # ---------------------------------------------------------------------------
 
 
-def probe_territories(prefix: str = _DEFAULT_TERRITORY_PREFIX) -> Dict[str, Any]:
+def _region_prefix(name: str) -> Optional[str]:
+    """Return the ``Region.Segment.`` prefix of a territory name.
+
+    e.g. ``East.SMECC.SOU.0206.A`` -> ``East.SMECC.``. Returns None if the
+    name doesn't have at least two non-empty leading segments.
+    """
+    parts = (name or "").split(".")
+    if len(parts) >= 2 and parts[0].strip() and parts[1].strip():
+        return f"{parts[0]}.{parts[1]}."
+    return None
+
+
+def derive_territory_prefix() -> Optional[str]:
+    """Determine the territory-name prefix that scopes the picker to the user's
+    region (e.g. ``East.SMECC.``) - no hardcoded region.
+
+    Resolution order:
+    1. The most common ``Region.Segment`` prefix among the user's existing
+       local territories. Fast, no MSX call, and correct for anyone who has
+       synced before (which is the norm for the FY-changeover use case).
+    2. Fall back to the user's MSX account-team territories
+       (``find_my_territories``); the region there is stable even if the
+       specific territory numbers are stale.
+
+    Returns None if neither source yields a prefix.
+    """
+    from collections import Counter
+
+    from app.models import Territory
+
+    counter: Counter = Counter()
+    for t in Territory.query.all():
+        p = _region_prefix(t.name)
+        if p:
+            counter[p] += 1
+    if counter:
+        return counter.most_common(1)[0][0]
+
+    # Fallback: derive from the user's MSX account-team territories.
+    try:
+        from app.services.msx_api import find_my_territories
+        result = find_my_territories()
+        if result.get("success"):
+            for terr in result.get("territories", []):
+                p = _region_prefix(terr.get("name", ""))
+                if p:
+                    counter[p] += 1
+        if counter:
+            return counter.most_common(1)[0][0]
+    except Exception:
+        logger.exception("Failed to derive territory prefix from MSX")
+
+    return None
+
+
+def probe_territories(prefix: Optional[str] = None) -> Dict[str, Any]:
     """Probe MSX for all territories under ``prefix`` and cache them locally.
 
     Upserts into ``alignment_territories`` so the picker is instant and works
     even when MSX is slow/blocked. Idempotent - safe to re-run to refresh.
 
     Args:
-        prefix: Territory name prefix to probe (e.g. "East.SMECC.").
+        prefix: Territory name prefix to probe (e.g. "East.SMECC."). When None,
+            it is derived from the user's own data via
+            :func:`derive_territory_prefix` so this works for any region.
 
     Returns:
-        Dict with success, created, updated, total counts (or error).
+        Dict with success, created, updated, total, prefix (or error).
     """
+    if not prefix:
+        prefix = derive_territory_prefix()
+    if not prefix:
+        return {
+            "success": False,
+            "error": (
+                "Could not determine your territory region. Run a normal "
+                "account sync first (so Sales Buddy knows your territories), "
+                "then try again."
+            ),
+        }
+
     safe_prefix = prefix.replace("'", "''")
     result = query_entity(
         "territories",
@@ -131,6 +197,7 @@ def probe_territories(prefix: str = _DEFAULT_TERRITORY_PREFIX) -> Dict[str, Any]
         "created": created,
         "updated": updated,
         "total": len(records),
+        "prefix": prefix,
     }
 
 
