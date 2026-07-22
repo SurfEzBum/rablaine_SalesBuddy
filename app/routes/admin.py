@@ -70,15 +70,16 @@ def admin_panel():
         'stale_customers': Customer.query.filter(Customer.stale_since.isnot(None)).count(),
     }
     
-    # FY season: promote the FY card Jul 1 - Aug 31, unless already transitioned
+    # FY season: promote the FY card Jul 1 - Aug 31, unless this year's
+    # transition is already done. Key off fy_last_completed (set + persisted by
+    # finalize) - not fy_transition_started, which finalize clears to None.
     now = datetime.now(timezone.utc)
     fy_season = (7 <= now.month <= 8)
     pref = UserPreference.query.first()
-    # If they've already completed this year's transition, don't promote
-    if pref and pref.fy_transition_started:
-        started = pref.fy_transition_started
-        # If transition was started in the current FY window, season is over for them
-        if started.year == now.year and started.month >= 7:
+    if fy_season and pref:
+        from app.services.fy_cutover import get_fiscal_year_labels
+        next_fy = get_fiscal_year_labels()["next_fy"]
+        if pref.fy_last_completed == next_fy:
             fy_season = False
 
     return render_template('admin_panel.html', stats=stats, fy_season=fy_season,
