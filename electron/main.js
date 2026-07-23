@@ -53,6 +53,7 @@ let mainWindow = null;
 let tray = null;
 let isQuitting = false;
 let isUpdating = false;
+let isBooting = true;
 let restartTimer = null;
 
 // ---------------------------------------------------------------------------
@@ -188,19 +189,22 @@ function stopStack() {
 
 function waitForServer(onReady) {
   const deadline = Date.now() + 60000; // up to 60s for first boot
+  let fired = false;
+  const finish = () => { if (fired) return; fired = true; onReady(); };
   const attempt = () => {
     const req = http.get(HEALTH_URL, (res) => {
       res.resume();
-      if (res.statusCode === 200) return onReady();
+      if (res.statusCode === 200) return finish();
       retry();
     });
     req.on('error', retry);
     req.setTimeout(3000, () => req.destroy());
   };
   const retry = () => {
+    if (fired) return;
     if (Date.now() > deadline) {
       log('Timed out waiting for the web server to come up');
-      return onReady(); // load anyway; the window will show its own error
+      return finish(); // load anyway; the window will show its own error
     }
     setTimeout(attempt, 500);
   };
@@ -364,6 +368,16 @@ function isInternalUrl(target) {
 }
 
 function createWindow() {
+  // Exactly ONE window, ever. A second launch (single-instance -> second-instance
+  // -> showWindow) or a double server-ready callback must focus the existing
+  // window, never spawn an orphaned duplicate (observed 2026-07-23: a "Not
+  // Running" window plus the real one during a slow dirty-install boot).
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -561,7 +575,12 @@ function showAbout() {
 }
 
 function showWindow() {
-  if (!mainWindow) return createWindow();
+  // During boot the window is intentionally deferred until /health answers, so a
+  // tray click or a second-instance in that window must NOT create an early
+  // "Not Running" window - the boot path creates the single window once the
+  // server is up.
+  if (isBooting) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return createWindow();
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
@@ -600,6 +619,7 @@ if (!app.requestSingleInstanceLock()) {
     buildAppMenu();
     startStack();
     waitForServer(() => {
+      isBooting = false;
       createWindow();
       createTray();
       startUpdateRequestWatcher();
