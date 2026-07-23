@@ -224,6 +224,15 @@ def ensure_meeting_aura(
         # Purging is housekeeping; never let it abort an aura run.
         logger.exception("ensure_meeting_aura: purge_expired failed")
 
+    # Scrub blacklisted internal/segment meetings (e.g. "SME&C" kickoffs)
+    # that may have been cached before the blacklist existed, and that a
+    # customer name like "SME" would otherwise keep re-matching.
+    try:
+        from app.services.meeting_prefetch import purge_blacklisted
+        purge_blacklisted()
+    except Exception:  # noqa: BLE001
+        logger.exception("ensure_meeting_aura: purge_blacklisted failed")
+
     weekdays = _aura_window_dates(start=start, days_ahead=days_ahead)
     aura_strs = [d.strftime('%Y-%m-%d') for d in weekdays]
 

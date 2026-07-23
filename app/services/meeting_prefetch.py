@@ -69,6 +69,29 @@ _JSON_ARRAY_RE = re.compile(r'\[\s*\{[\s\S]*\}\s*\]')
 _X500_RE = re.compile(r'^/O=', re.IGNORECASE)
 
 
+# Meeting subjects matching any of these patterns are internal / segment
+# noise that must never be synced as customer meetings, even when their
+# title happens to contain a customer's name as a substring. The canonical
+# case is Microsoft's "SME&C" (Small, Medium & Corporate) segment, which
+# floods calendars with kickoffs and collides with a customer literally
+# named "SME". Blacklisted meetings are dropped wholesale: no ghost, no
+# picker entry, no customer resolution.
+_SUBJECT_BLACKLIST = [
+    re.compile(r'\bSME\s*&\s*C\b', re.IGNORECASE),
+]
+
+
+def _is_blacklisted_subject(subject: Optional[str]) -> bool:
+    """True if a meeting subject matches the hard sync blacklist.
+
+    See :data:`_SUBJECT_BLACKLIST`. Blacklisted meetings are skipped during
+    upsert and scrubbed from both caches by :func:`purge_blacklisted`.
+    """
+    if not subject:
+        return False
+    return any(pat.search(subject) for pat in _SUBJECT_BLACKLIST)
+
+
 # ---------------------------------------------------------------------------
 # WorkIQ JSON pull
 # ---------------------------------------------------------------------------
@@ -214,6 +237,7 @@ _GENERIC_FIRST_TOKENS = frozenset({
     'core', 'alpha', 'beta', 'home', 'federal', 'state', 'city',
     'metro', 'regional', 'local', 'new', 'old', 'big', 'best',
     'true', 'pure', 'smart', 'simple', 'open', 'free', 'direct',
+    'corporate', 'enterprise', 'commercial', 'industrial', 'financial',
     # Consumer-brand first tokens that show up in generic meeting titles.
     'apple', 'delta', 'uber', 'oracle', 'amazon', 'google', 'meta',
     'microsoft', 'msft', 'azure', 'aws', 'gcp',
@@ -236,6 +260,11 @@ _GENERIC_FIRST_TOKENS = frozenset({
     'engineering', 'ops', 'operations', 'design', 'research',
     'calendar', 'event', 'room', 'space', 'board', 'table', 'desk',
     'side', 'front', 'back', 'top', 'bottom', 'main', 'sub',
+    # Generic business/real-estate nouns that appear in company names but
+    # collide with everyday meeting titles (e.g. "Corporate Office
+    # Properties" vs "FY27 Role Breakout | Corporate DSE").
+    'properties', 'property', 'offices', 'holdings',
+    'ventures', 'capital', 'partners', 'associates', 'industries',
 })
 
 # Tokenize on any non-word run (so "QS/1", "AT&T", "Coca-Cola" all split
@@ -518,6 +547,10 @@ def _upsert_meeting(
         logger.debug("Prefetch: skipping meeting with no subject or start_time")
         return None
 
+    if _is_blacklisted_subject(subject):
+        logger.debug("Prefetch: skipping blacklisted subject %r", subject)
+        return None
+
     workiq_id = _synthetic_id(subject, start_time, organizer)
     raw_attendees = raw.get('attendees') or []
     if not isinstance(raw_attendees, list):
@@ -624,6 +657,48 @@ def purge_expired() -> int:
             count, cutoff_date.isoformat(), GHOST_RETENTION_BUSINESS_DAYS,
         )
     return count
+
+
+def purge_blacklisted() -> int:
+    """Remove already-cached meetings whose subject is now blacklisted.
+
+    Covers rows stored before a blacklist pattern existed. Deletes matching
+    ``PrefetchedMeeting`` ghosts (attendees cascade) and strips matching
+    entries out of every ``DailyMeetingCache`` JSON blob so neither the
+    home-calendar ghost dots nor the meeting picker keep showing them.
+
+    Returns the number of ghost rows deleted.
+    """
+    from app.models import DailyMeetingCache
+
+    ghosts = PrefetchedMeeting.query.all()
+    removed = [m for m in ghosts if _is_blacklisted_subject(m.subject)]
+    for m in removed:
+        db.session.delete(m)
+
+    caches_changed = 0
+    for cache in DailyMeetingCache.query.all():
+        try:
+            meetings = json.loads(cache.meetings_json) if cache.meetings_json else []
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(meetings, list):
+            continue
+        kept = [
+            mt for mt in meetings
+            if not (isinstance(mt, dict) and _is_blacklisted_subject(mt.get('title')))
+        ]
+        if len(kept) != len(meetings):
+            cache.meetings_json = json.dumps(kept)
+            caches_changed += 1
+
+    if removed or caches_changed:
+        db.session.commit()
+        logger.info(
+            "Prefetch: purged %d blacklisted ghosts and scrubbed %d cache day(s)",
+            len(removed), caches_changed,
+        )
+    return len(removed)
 
 
 def prefetch_for_date(date_str: str) -> Tuple[int, Optional[str]]:

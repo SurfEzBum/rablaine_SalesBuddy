@@ -114,6 +114,118 @@ class TestExtractJsonArray:
 
 
 # ---------------------------------------------------------------------------
+# Subject blacklist (SME&C internal-segment noise vs. "SME" customer)
+# ---------------------------------------------------------------------------
+
+BLACKLIST_RESPONSE = """
+```json
+[
+  {
+    "subject": "SME&C Americas FY27 kickoff",
+    "start_time": "2026-07-21T09:00:00-05:00",
+    "end_time": "2026-07-21T10:00:00-05:00",
+    "organizer_email": "someone@microsoft.com",
+    "is_recurring": false,
+    "attendees": [
+      {"name": "Alex Blaine", "email": "Alex.Blaine@microsoft.com"}
+    ]
+  },
+  {
+    "subject": "Redsail - Fabric Cadence",
+    "start_time": "2026-07-21T13:00:00-05:00",
+    "end_time": "2026-07-21T13:30:00-05:00",
+    "organizer_email": "someone@microsoft.com",
+    "is_recurring": false,
+    "attendees": [
+      {"name": "Tammy", "email": "tammy@redsailtechnologies.com"}
+    ]
+  }
+]
+```
+"""
+
+
+class TestSubjectBlacklist:
+    @pytest.mark.parametrize("subject", [
+        "SME&C Americas FY27 kickoff",
+        "FY27 SME&C Corporate Kick Off (Option 1)",
+        "Save the date: SME&C Co-Sell Connections (Internal)",
+        "sme&c social",
+        "SME & C leadership sync",
+    ])
+    def test_blacklisted_subjects_match(self, subject):
+        assert meeting_prefetch._is_blacklisted_subject(subject) is True
+
+    @pytest.mark.parametrize("subject", [
+        "SME weekly sync",
+        "SME quarterly review",
+        "Redsail - Fabric Cadence",
+        "",
+        None,
+    ])
+    def test_non_blacklisted_subjects_pass(self, subject):
+        assert meeting_prefetch._is_blacklisted_subject(subject) is False
+
+    def test_upsert_skips_blacklisted_meeting(self, app, redsail_customer):
+        """A SME&C meeting must not be stored even though a customer named
+        'SME' would otherwise match its subject."""
+        with app.app_context():
+            db.session.add(Customer(name="SME", tpid=920002))
+            db.session.commit()
+
+            with patch('app.services.workiq_service.query_workiq',
+                       return_value=BLACKLIST_RESPONSE):
+                stored, err = meeting_prefetch.prefetch_for_date('2026-07-21')
+
+            assert err is None
+            subjects = {m.subject for m in PrefetchedMeeting.query.all()}
+            assert "SME&C Americas FY27 kickoff" not in subjects
+            assert "Redsail - Fabric Cadence" in subjects
+
+    def test_purge_blacklisted_removes_existing_rows(self, app, clean_prefetch_tables):
+        """Rows cached before the blacklist existed get scrubbed from both
+        the ghost table and the picker cache."""
+        from app.models import DailyMeetingCache
+        import json as _json
+
+        with app.app_context():
+            db.session.add(PrefetchedMeeting(
+                workiq_id="bl-1",
+                subject="SME&C Americas Social",
+                start_time=datetime(2026, 7, 21, 14, 0),
+                meeting_date=date(2026, 7, 21),
+                expires_at=datetime(2026, 7, 28, 23, 59, 59),
+            ))
+            db.session.add(PrefetchedMeeting(
+                workiq_id="keep-1",
+                subject="Redsail - Fabric Cadence",
+                start_time=datetime(2026, 7, 21, 13, 0),
+                meeting_date=date(2026, 7, 21),
+                expires_at=datetime(2026, 7, 28, 23, 59, 59),
+            ))
+            cache = DailyMeetingCache(
+                meeting_date=date(2026, 7, 21),
+                meetings_json=_json.dumps([
+                    {"id": "bl-1", "title": "SME&C Americas Social"},
+                    {"id": "keep-1", "title": "Redsail - Fabric Cadence"},
+                ]),
+            )
+            db.session.add(cache)
+            db.session.commit()
+
+            removed = meeting_prefetch.purge_blacklisted()
+
+            assert removed == 1
+            subjects = {m.subject for m in PrefetchedMeeting.query.all()}
+            assert subjects == {"Redsail - Fabric Cadence"}
+
+            refreshed = DailyMeetingCache.query.filter_by(
+                meeting_date=date(2026, 7, 21)).first()
+            titles = {m['title'] for m in _json.loads(refreshed.meetings_json)}
+            assert titles == {"Redsail - Fabric Cadence"}
+
+
+# ---------------------------------------------------------------------------
 # Datetime + organizer normalization
 # ---------------------------------------------------------------------------
 
@@ -592,6 +704,42 @@ class TestSubjectMatching:
             db.session.delete(c)
             db.session.commit()
 
+    def test_first_token_skips_generic_business_noun(
+        self, app, clean_prefetch_tables
+    ):
+        """'Corporate Office Properties Inc' must NOT first-token-match a
+        meeting like 'FY27 Role Breakout | Corporate DSE - Option 1'.
+        Every token in this customer's name (corporate/office/properties)
+        is generic, so it should rely on domain + full-name matching only.
+        Regression seen in production on 2026-07-23."""
+        with app.app_context():
+            c = Customer(name='CORPORATE OFFICE PROPERTIES INC',
+                         tpid=940011, website='https://copt.com')
+            db.session.add(c)
+            db.session.commit()
+
+            matchers = meeting_prefetch._build_subject_matchers()
+            customer_id, _ = meeting_prefetch._resolve_customer(
+                attendees=[],
+                domain_map={},
+                subject='FY27 Role Breakout | Corporate DSE - Option 1',
+                subject_matchers=matchers,
+            )
+            assert customer_id is None
+
+            # Domain matching still resolves it.
+            domain_map = meeting_prefetch._build_domain_map()
+            by_domain, _ = meeting_prefetch._resolve_customer(
+                attendees=[{'email': 'leasing@copt.com', 'name': 'x'}],
+                domain_map=domain_map,
+                subject='FY27 Role Breakout | Corporate DSE - Option 1',
+                subject_matchers=matchers,
+            )
+            assert by_domain == c.id
+
+            db.session.delete(c)
+            db.session.commit()
+
     def test_first_distinctive_token_helper(self):
         """Direct unit tests for the helper."""
         f = meeting_prefetch._first_distinctive_token
@@ -604,6 +752,8 @@ class TestSubjectMatching:
         assert f('AT Kearney') is None  # 'AT' too short
         assert f('IBM') == 'IBM'
         assert f('Inc LLC Corp') is None  # all stopwords
+        assert f('Corporate Office Properties') is None  # all generic
+        assert f('Properties Plus') is None  # generic first token
 
 
 # ---------------------------------------------------------------------------
