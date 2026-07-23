@@ -428,6 +428,31 @@ namespace SalesBuddy.CustomActions
             }
             session["SALESBUDDYRUNNING"] = running ? "1" : "";
             session.Log($"CheckAppRunning: SALESBUDDYRUNNING='{session["SALESBUDDYRUNNING"]}'");
+
+            // If the shell itself isn't running, sweep any stray backend (waitress
+            // / worker) this install leaked. A pre-1.1.9 tray Quit killed the shell
+            // but left the backend alive, holding the DB open and port 5151. Kill
+            // them HERE - an immediate CA in the UI phase, BEFORE RemoveExistingProducts
+            // runs the old uninstall's DB backup + delete - so a leftover worker
+            // can't produce an inconsistent DB backup or lock files into a corrupt
+            // install. Skipped when the shell is running (the gate blocks that, and a
+            // live supervisor would just respawn the backend). Never throws.
+            if (!running)
+            {
+                try
+                {
+                    string installDir = session["INSTALLFOLDER"];
+                    if (string.IsNullOrEmpty(installDir))
+                        installDir = Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                            "SalesBuddy");
+                    StopBackendProcesses(session, installDir);
+                }
+                catch (Exception ex)
+                {
+                    session.Log($"CheckAppRunning: backend sweep error (non-fatal): {ex.Message}");
+                }
+            }
             return ActionResult.Success;
         }
 
@@ -1601,6 +1626,30 @@ Write-Host 'winget installation complete.'
         {
             try { return Process.GetProcessesByName(name); }
             catch { return new Process[0]; }
+        }
+
+        /// <summary>
+        /// Kill stray backend processes (waitress / python worker) launched from
+        /// THIS install's venv, scoped by path so it never touches other Pythons.
+        /// Used by CheckAppRunning to clear orphans a buggy pre-1.1.9 tray Quit
+        /// left behind, before the upgrade's uninstall backs up and deletes the DB.
+        /// </summary>
+        private static void StopBackendProcesses(Session session, string installDir)
+        {
+            string installLower = installDir.TrimEnd('\\').ToLowerInvariant();
+            foreach (var name in new[] { "python", "pythonw", "waitress-serve" })
+            {
+                foreach (var p in SafeGetProcesses(name))
+                {
+                    string path = "";
+                    try { path = (p.MainModule?.FileName ?? "").ToLowerInvariant(); }
+                    catch { /* cross-bitness / access denied - skip */ }
+                    if (path.Length > 0 && path.StartsWith(installLower))
+                    {
+                        TryKill(session, p);
+                    }
+                }
+            }
         }
 
         private static void TryKill(Session session, Process p)
