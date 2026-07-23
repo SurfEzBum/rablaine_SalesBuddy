@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/23/2026
+## 7/23/2026 - b8351d9
 
 - Meeting sync now ignores internal "SME&C" segment meetings (kickoffs, co-sell connections, etc.) so they stop flooding your calendar and no longer get mis-matched to a customer named "SME". Existing ones are cleaned up automatically.
 - Fixed customer name matching so generic words like "Corporate", "Properties", "Office", "Capital" and similar no longer single-handedly match a meeting to a customer (e.g. "Corporate Office Properties" was grabbing "FY27 Role Breakout | Corporate DSE"). Those customers still match on their email domain and full name.
