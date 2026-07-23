@@ -111,7 +111,16 @@ if (Test-Path $serverScript) {
 # (scoped to the install path so we never touch another install or unrelated python).
 Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe' OR Name='waitress-serve.exe' OR Name='Sales Buddy.exe'" |
     Where-Object { $_.CommandLine -and $_.CommandLine -match [regex]::Escape($repoRoot) } |
-    ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>$null | Out-Null }
+    ForEach-Object {
+        # Route through cmd so taskkill's stderr (e.g. "process not found" when a
+        # PID exits between the enumeration and the kill) is swallowed at the cmd
+        # level. A bare `taskkill ... 2>$null` still surfaces as a terminating
+        # NativeCommandError under Windows PowerShell 5.1 + ErrorActionPreference=
+        # Stop ($PSNativeCommandUseErrorActionPreference is a 7.3+ no-op here),
+        # which aborted the whole migration right before the shortcut step -
+        # leaving no shortcuts and an "Electron"-named taskbar button (2026-07-23).
+        & cmd.exe /c "taskkill /PID $($_.ProcessId) /T /F >nul 2>&1"
+    }
 
 # --- 4. Stage the signed shell into <install>\electron-dist\ ---
 # Killing the shell above does NOT release its file handles instantly. Staging
@@ -209,6 +218,94 @@ $startMenu = Join-Path ([Environment]::GetFolderPath('ApplicationData')) `
     'Microsoft\Windows\Start Menu\Programs\Sales Buddy'
 $shell = New-Object -ComObject WScript.Shell
 
+# Windows only merges a running app's taskbar button with a shortcut when the
+# shortcut's System.AppUserModel.ID matches the AUMID the app sets at runtime
+# (electron/main.js: app.setAppUserModelId('com.salesbuddy.desktop')). Our
+# shortcuts previously had only the implicit AUMID (their target exe path), which
+# never matches, so pinning the running app spawned a stray "Electron" pin that
+# kept Electron's name + icon. WScript.Shell can't set that property, so we set it
+# through the shell IPropertyStore API (PKEY_AppUserModel_ID).
+$appUserModelId = 'com.salesbuddy.desktop'
+if (-not ('SalesBuddy.ShortcutProps' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace SalesBuddy {
+    public static class ShortcutProps {
+        public static void SetAppUserModelId(string shortcutPath, string appId) {
+            IShellLinkW link = (IShellLinkW)new CShellLink();
+            IPersistFile file = (IPersistFile)link;
+            file.Load(shortcutPath, 2); // STGM_READWRITE
+            IPropertyStore store = (IPropertyStore)link;
+            PROPERTYKEY key = new PROPERTYKEY();
+            key.fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+            key.pid = 5;
+            PROPVARIANT pv = new PROPVARIANT();
+            pv.vt = 31; // VT_LPWSTR
+            pv.data = Marshal.StringToCoTaskMemUni(appId);
+            store.SetValue(ref key, ref pv);
+            store.Commit();
+            Marshal.FreeCoTaskMem(pv.data);
+            file.Save(shortcutPath, true);
+            Marshal.ReleaseComObject(store);
+            Marshal.ReleaseComObject(file);
+            Marshal.ReleaseComObject(link);
+        }
+    }
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+    internal class CShellLink { }
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown),
+     Guid("000214F9-0000-0000-C000-000000000046")]
+    internal interface IShellLinkW {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder f, int cch, IntPtr pfd, uint fl);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder n, int cch);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string n);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder d, int cch);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string d);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder a, int cch);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string a);
+        void GetHotkey(out short w);
+        void SetHotkey(short w);
+        void GetShowCmd(out int c);
+        void SetShowCmd(int c);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder p, int cch, out int i);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string p, int i);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string r, uint dw);
+        void Resolve(IntPtr hwnd, uint fl);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string f);
+    }
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown),
+     Guid("0000010b-0000-0000-C000-000000000046")]
+    internal interface IPersistFile {
+        void GetClassID(out Guid c);
+        [PreserveSig] int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string f, int m);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string f, [MarshalAs(UnmanagedType.Bool)] bool r);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string f);
+        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string f);
+    }
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown),
+     Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99")]
+    internal interface IPropertyStore {
+        void GetCount(out uint c);
+        void GetAt(uint i, out PROPERTYKEY k);
+        void GetValue(ref PROPERTYKEY k, out PROPVARIANT pv);
+        void SetValue(ref PROPERTYKEY k, ref PROPVARIANT pv);
+        void Commit();
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+    [StructLayout(LayoutKind.Explicit)]
+    internal struct PROPVARIANT {
+        [FieldOffset(0)] public ushort vt;
+        [FieldOffset(8)] public IntPtr data;
+    }
+}
+'@
+}
+
 function New-AppShortcut {
     param($LnkPath, $Target, $IconPath, $Description)
     $sc = $shell.CreateShortcut($LnkPath)
@@ -217,6 +314,9 @@ function New-AppShortcut {
     if (Test-Path $IconPath) { $sc.IconLocation = "$IconPath,0" }
     $sc.Description = $Description
     $sc.Save()
+    # Stamp the AUMID so Windows ties the pinned/taskbar button to this shortcut.
+    try { [SalesBuddy.ShortcutProps]::SetAppUserModelId($LnkPath, $appUserModelId) }
+    catch { Write-Host "  (couldn't set AppUserModelID on $LnkPath): $($_.Exception.Message)" -ForegroundColor DarkYellow }
 }
 
 # Remove the old "web" shortcuts (explorer.exe -> http://localhost).
@@ -239,10 +339,19 @@ if (-not $NoStartMenu) {
 $venvPy = Join-Path $repoRoot 'venv\Scripts\python.exe'
 $reqFile = Join-Path $repoRoot 'requirements.txt'
 if ((Test-Path $venvPy) -and (Test-Path $reqFile)) {
-    & $venvPy -c "import flask" 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    # Probe inside try/catch: under Windows PowerShell 5.1 a native command that
+    # writes to stderr (python's traceback for the missing module) throws a
+    # NativeCommandError with $ErrorActionPreference='Stop' - and
+    # $PSNativeCommandUseErrorActionPreference (set at top) is a PS 7.3+ no-op
+    # here. Without the guard, the self-heal that's meant to FIX the broken venv
+    # instead crashes the migration (observed 2026-07-23). Never let it throw.
+    $flaskOk = $false
+    try { & $venvPy -c "import flask" 2>&1 | Out-Null; $flaskOk = ($LASTEXITCODE -eq 0) }
+    catch { $flaskOk = $false }
+    if (-not $flaskOk) {
         Write-Host "Backend dependencies missing - installing (one-time)..." -ForegroundColor Yellow
-        & $venvPy -m pip install -q -r $reqFile
+        try { & $venvPy -m pip install -q -r $reqFile 2>&1 | Write-Host }
+        catch { Write-Host "  pip install error: $($_.Exception.Message)" -ForegroundColor Red }
     }
 }
 

@@ -80,10 +80,12 @@ namespace SalesBuddy.CustomActions
             bool startMenu = GetBoolData(data, "STARTMENUSHORTCUT");
             bool desktop = GetBoolData(data, "DESKTOPSHORTCUT");
             bool autoStart = GetBoolData(data, "AUTOSTART");
+            string repoRef = GetRepoRef(data);
 
             session.Log($"Install directory: {installDir}");
             session.Log($"Options: StartMenu={startMenu}, Desktop={desktop}, " +
                         $"AutoStart={autoStart}");
+            session.Log($"Repo ref: {repoRef}");
 
             // An existing checkout means this run is really a migration (Flask ->
             // desktop) rather than a first-time install. The steps converge, but
@@ -201,7 +203,7 @@ namespace SalesBuddy.CustomActions
 
                 // Step 6: Clone/update repository
                 ProcessRunner.UpdateStatus(session, "Setting up Sales Buddy...");
-                CloneOrUpdateRepo(session, installDir);
+                CloneOrUpdateRepo(session, installDir, repoRef);
                 AdvanceProgress(session, WeightClone);
 
                 // If the repo step left an empty or missing database (e.g. a nuke
@@ -292,6 +294,15 @@ namespace SalesBuddy.CustomActions
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "SalesBuddy");
 
+            // When this uninstall is the "remove old product" half of a
+            // MajorUpgrade, UPGRADINGPRODUCTCODE is set. In that case the newer
+            // product is about to reinstall over this same dir, so we must NOT
+            // delete it (esp. data/salesbuddy.db) - doing so is what wiped the
+            // user's database on 2026-07-22.
+            bool isUpgrade = data.ContainsKey("UPGRADINGPRODUCTCODE")
+                && !string.IsNullOrEmpty(data["UPGRADINGPRODUCTCODE"]);
+            session.Log($"Uninstall (isUpgrade={isUpgrade}).");
+
             try
             {
                 // Stop the running server
@@ -318,11 +329,20 @@ namespace SalesBuddy.CustomActions
                     session.Log($"Database backed up to {backup}");
                 }
 
-                // Remove app files (force-delete with read-only clearing + retries)
-                ProcessRunner.UpdateStatus(session, "Removing application files...");
-                if (Directory.Exists(installDir))
+                // Remove app files (force-delete with read-only clearing + retries).
+                // Skipped during an upgrade - the new product reinstalls over this
+                // dir and must keep the database + repo.
+                if (isUpgrade)
                 {
-                    ForceDeleteDirectory(session, installDir);
+                    session.Log("Upgrade in progress - preserving install dir + database.");
+                }
+                else
+                {
+                    ProcessRunner.UpdateStatus(session, "Removing application files...");
+                    if (Directory.Exists(installDir))
+                    {
+                        ForceDeleteDirectory(session, installDir);
+                    }
                 }
 
                 ProcessRunner.UpdateStatus(session, "Uninstall complete.");
@@ -408,6 +428,31 @@ namespace SalesBuddy.CustomActions
             }
             session["SALESBUDDYRUNNING"] = running ? "1" : "";
             session.Log($"CheckAppRunning: SALESBUDDYRUNNING='{session["SALESBUDDYRUNNING"]}'");
+
+            // If the shell itself isn't running, sweep any stray backend (waitress
+            // / worker) this install leaked. A pre-1.1.9 tray Quit killed the shell
+            // but left the backend alive, holding the DB open and port 5151. Kill
+            // them HERE - an immediate CA in the UI phase, BEFORE RemoveExistingProducts
+            // runs the old uninstall's DB backup + delete - so a leftover worker
+            // can't produce an inconsistent DB backup or lock files into a corrupt
+            // install. Skipped when the shell is running (the gate blocks that, and a
+            // live supervisor would just respawn the backend). Never throws.
+            if (!running)
+            {
+                try
+                {
+                    string installDir = session["INSTALLFOLDER"];
+                    if (string.IsNullOrEmpty(installDir))
+                        installDir = Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                            "SalesBuddy");
+                    StopBackendProcesses(session, installDir);
+                }
+                catch (Exception ex)
+                {
+                    session.Log($"CheckAppRunning: backend sweep error (non-fatal): {ex.Message}");
+                }
+            }
             return ActionResult.Success;
         }
 
@@ -909,7 +954,7 @@ Write-Host 'winget installation complete.'
         /// Clone the Sales Buddy repo or update an existing clone.
         /// Disables Git Credential Manager prompts (public repo).
         /// </summary>
-        private static void CloneOrUpdateRepo(Session session, string installDir)
+        private static void CloneOrUpdateRepo(Session session, string installDir, string repoRef)
         {
             // Disable GCM popups
             Environment.SetEnvironmentVariable("GIT_TERMINAL_PROMPT", "0");
@@ -939,7 +984,7 @@ Write-Host 'winget installation complete.'
                         "-c credential.helper= fetch origin",
                         workingDirectory: installDir);
                     ProcessRunner.Run(session, "git",
-                        "reset --hard origin/main",
+                        $"reset --hard origin/{repoRef}",
                         workingDirectory: installDir);
                     ProcessRunner.Run(session, "git",
                         "clean -fd",
@@ -965,7 +1010,7 @@ Write-Host 'winget installation complete.'
                     "-c credential.helper= fetch origin",
                     workingDirectory: installDir);
                 ProcessRunner.Run(session, "git",
-                    "checkout -f -B main origin/main",
+                    $"checkout -f -B main origin/{repoRef}",
                     workingDirectory: installDir);
             }
             else if (Directory.Exists(gitDir))
@@ -989,6 +1034,7 @@ Write-Host 'winget installation complete.'
                             $"git clone failed with exit code {exitCode}");
                     }
                 }
+                CheckoutRef(session, installDir, repoRef);
                 RestoreDatabase(session, installDir, dbBackupPath);
                 session.Log("Repository ready.");
                 return;
@@ -1009,7 +1055,23 @@ Write-Host 'winget installation complete.'
                 }
             }
 
+            CheckoutRef(session, installDir, repoRef);
             session.Log("Repository ready.");
+        }
+
+        /// <summary>
+        /// Point the working tree at the requested git ref (default "main").
+        /// Fetches first so the ref is present even on a just-cloned repo, then
+        /// hard-checks it out onto the local "main" branch used for builds.
+        /// </summary>
+        private static void CheckoutRef(Session session, string installDir, string repoRef)
+        {
+            ProcessRunner.Run(session, "git",
+                "-c credential.helper= fetch origin",
+                workingDirectory: installDir);
+            ProcessRunner.Run(session, "git",
+                $"checkout -f -B main origin/{repoRef}",
+                workingDirectory: installDir);
         }
 
         /// <summary>
@@ -1132,7 +1194,7 @@ Write-Host 'winget installation complete.'
         // SQLite file is ~4 KB; a schema-only DB is larger but we only ever
         // compare BEFORE migrations run, so anything this small is "empty".
         private const long EmptyDbThreshold = 64 * 1024; // 64 KB
-        private const int SafeguardKeep = 3;
+        private const int SafeguardKeep = 6;
 
         private static string SafeguardDir()
         {
@@ -1231,12 +1293,15 @@ Write-Host 'winget installation complete.'
         }
 
         /// <summary>
-        /// Find the newest non-empty DB backup across the safeguard dir and the
-        /// legacy temp backup path. Returns null if none qualify.
+        /// Find the newest non-empty DB backup across the safeguard dir, the
+        /// uninstall backups, and the legacy temp backup. Returns null if none
+        /// qualify.
         /// </summary>
         private static string FindNewestGoodBackup(Session session)
         {
             var candidates = new List<string>();
+
+            // 1. Safeguard snapshots (taken at the start of an install).
             try
             {
                 string dir = SafeguardDir();
@@ -1245,26 +1310,67 @@ Write-Host 'winget installation complete.'
             }
             catch (Exception ex) { session.Log($"Safeguard scan skip: {ex.Message}"); }
 
+            // 2. Uninstall backups (%TEMP%\salesbuddy-uninstall-*.db). CRITICAL:
+            //    a MajorUpgrade removes the OLD product FIRST, and that uninstall
+            //    copies the live DB here right before deleting it - so this is
+            //    usually the FRESHEST good copy of the user's data. Omitting this
+            //    source is exactly what let a stale 7/17 safeguard snapshot
+            //    overwrite good FY27 data on 2026-07-22.
+            try
+            {
+                candidates.AddRange(
+                    Directory.GetFiles(Path.GetTempPath(), "salesbuddy-uninstall-*.db"));
+            }
+            catch (Exception ex) { session.Log($"Uninstall-backup scan skip: {ex.Message}"); }
+
+            // 3. Legacy single temp backup.
             string legacy = Path.Combine(Path.GetTempPath(), "salesbuddy_db_backup.db");
             if (File.Exists(legacy)) candidates.Add(legacy);
 
+            // Pick the most RECENT non-empty backup, ranked by the timestamp
+            // embedded in the filename. File mtime is unreliable here: File.Copy
+            // preserves the SOURCE file's mtime, so a copy of an old DB looks old
+            // even when it was written moments ago.
             string best = null;
             DateTime bestTime = DateTime.MinValue;
             foreach (string c in candidates)
             {
                 try
                 {
-                    var fi = new FileInfo(c);
-                    if (fi.Length < EmptyDbThreshold) continue;
-                    if (fi.LastWriteTimeUtc > bestTime)
-                    {
-                        bestTime = fi.LastWriteTimeUtc;
-                        best = c;
-                    }
+                    if (new FileInfo(c).Length < EmptyDbThreshold) continue;
+                    DateTime rec = BackupRecency(c);
+                    if (rec > bestTime) { bestTime = rec; best = c; }
                 }
                 catch { }
             }
+            if (best != null)
+                session.Log($"Best DB backup: {best} (recency {bestTime:yyyy-MM-dd HH:mm:ss}).");
+            else
+                session.Log("No good DB backup found across safeguard/uninstall/legacy sources.");
             return best;
+        }
+
+        /// <summary>
+        /// Recency of a backup file, from a yyyyMMdd-HHmmss stamp in its filename
+        /// (how our snapshots/uninstall backups are named). Falls back to the file
+        /// mtime when no stamp is present (e.g. the legacy backup).
+        /// </summary>
+        private static DateTime BackupRecency(string path)
+        {
+            try
+            {
+                string name = Path.GetFileNameWithoutExtension(path);
+                var m = System.Text.RegularExpressions.Regex.Match(name, @"(\d{8})-(\d{6})");
+                if (m.Success && DateTime.TryParseExact(
+                        m.Groups[1].Value + m.Groups[2].Value, "yyyyMMddHHmmss",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out DateTime ts))
+                {
+                    return ts;
+                }
+            }
+            catch { }
+            try { return new FileInfo(path).LastWriteTime; } catch { return DateTime.MinValue; }
         }
 
         /// <summary>
@@ -1316,10 +1422,47 @@ Write-Host 'winget installation complete.'
                 ProcessRunner.Run(session, pipExe,
                     $"install -r \"{reqFile}\"");
                 session.Log("Dependencies installed.");
+
+                // Verify the venv is actually usable. A partial/interrupted pip
+                // leaves a dependency-less venv ("No module named flask") that
+                // crash-loops the backend and, under the electron shell, shows a
+                // dead localhost in the browser (observed 2026-07-23). Probe +
+                // one retry so a transient pip hiccup can't ship a broken venv.
+                if (!VenvImportsFlask(session, venvPython))
+                {
+                    session.Log("Backend deps missing after install - retrying pip once.");
+                    ProcessRunner.UpdateStatus(session,
+                        "Repairing Python dependencies...");
+                    ProcessRunner.Run(session, venvPython, $"-m pip install -r \"{reqFile}\"");
+                    session.Log(VenvImportsFlask(session, venvPython)
+                        ? "Backend deps present after retry."
+                        : "WARNING: backend deps STILL missing after retry.");
+                }
+                else
+                {
+                    session.Log("Verified: backend deps import OK.");
+                }
             }
             else
             {
                 session.Log($"WARNING: requirements.txt not found at {reqFile}");
+            }
+        }
+
+        /// <summary>
+        /// Probe whether the installed venv can import flask (i.e. deps are
+        /// actually present). Never throws.
+        /// </summary>
+        private static bool VenvImportsFlask(Session session, string venvPython)
+        {
+            try
+            {
+                return ProcessRunner.Run(session, venvPython, "-c \"import flask\"") == 0;
+            }
+            catch (Exception ex)
+            {
+                session.Log($"venv flask probe error: {ex.Message}");
+                return false;
             }
         }
 
@@ -1456,14 +1599,29 @@ Write-Host 'winget installation complete.'
                 return false;
             }
 
-            string args = $"-ExecutionPolicy Bypass -NoProfile -File \"{script}\" -SkipPull -Rebuild -NoLaunch";
-            if (!desktop) args += " -NoDesktop";
-            if (!startMenu) args += " -NoStartMenu";
-            if (!autoStart) args += " -NoAutoStart";
+            string baseArgs = $"-ExecutionPolicy Bypass -NoProfile -File \"{script}\" -SkipPull -NoLaunch";
+            string opts = "";
+            if (!desktop) opts += " -NoDesktop";
+            if (!startMenu) opts += " -NoStartMenu";
+            if (!autoStart) opts += " -NoAutoStart";
 
-            ProcessRunner.Run(session, "powershell.exe", args, workingDirectory: installDir);
+            // First pass: full rebuild of the shell from source.
+            ProcessRunner.Run(session, "powershell.exe", baseArgs + " -Rebuild" + opts,
+                workingDirectory: installDir);
 
             string exe = Path.Combine(installDir, "electron-dist", "Sales Buddy.exe");
+            if (!File.Exists(exe))
+            {
+                // The build usually succeeds but STAGING can lose a transient race
+                // (AV scanning the fresh exe / a lingering file lock) and never
+                // populate electron-dist -> web fallback (observed 2026-07-23:
+                // win-unpacked built fine, electron-dist empty). Retry WITHOUT
+                // -Rebuild so we reuse the already-built shell and just re-stage.
+                session.Log("Electron exe missing after first pass - retrying stage (no rebuild).");
+                ProcessRunner.Run(session, "powershell.exe", baseArgs + opts,
+                    workingDirectory: installDir);
+            }
+
             bool ok = File.Exists(exe);
             session.Log($"Electron setup {(ok ? "succeeded" : "did NOT produce the exe")}: {exe}");
             return ok;
@@ -1520,6 +1678,30 @@ Write-Host 'winget installation complete.'
         {
             try { return Process.GetProcessesByName(name); }
             catch { return new Process[0]; }
+        }
+
+        /// <summary>
+        /// Kill stray backend processes (waitress / python worker) launched from
+        /// THIS install's venv, scoped by path so it never touches other Pythons.
+        /// Used by CheckAppRunning to clear orphans a buggy pre-1.1.9 tray Quit
+        /// left behind, before the upgrade's uninstall backs up and deletes the DB.
+        /// </summary>
+        private static void StopBackendProcesses(Session session, string installDir)
+        {
+            string installLower = installDir.TrimEnd('\\').ToLowerInvariant();
+            foreach (var name in new[] { "python", "pythonw", "waitress-serve" })
+            {
+                foreach (var p in SafeGetProcesses(name))
+                {
+                    string path = "";
+                    try { path = (p.MainModule?.FileName ?? "").ToLowerInvariant(); }
+                    catch { /* cross-bitness / access denied - skip */ }
+                    if (path.Length > 0 && path.StartsWith(installLower))
+                    {
+                        TryKill(session, p);
+                    }
+                }
+            }
         }
 
         private static void TryKill(Session session, Process p)
@@ -1835,6 +2017,24 @@ Write-Host 'winget installation complete.'
         {
             return data.ContainsKey(key) && !string.IsNullOrEmpty(data[key])
                 && data[key] != "0";
+        }
+
+        /// <summary>
+        /// Read the git ref the installer should build from (REPOREF property).
+        /// Defaults to "main". Sanitized to ref-safe characters so an override
+        /// can never inject extra arguments into the git commands.
+        /// </summary>
+        private static string GetRepoRef(CustomActionData data)
+        {
+            string reff = data.ContainsKey("REPOREF") ? (data["REPOREF"] ?? "").Trim() : "";
+            if (reff.Length == 0) return "main";
+            foreach (char c in reff)
+            {
+                bool ok = char.IsLetterOrDigit(c) || c == '/' || c == '.'
+                    || c == '_' || c == '-';
+                if (!ok) return "main";
+            }
+            return reff;
         }
 
         /// <summary>

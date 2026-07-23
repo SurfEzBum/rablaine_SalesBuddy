@@ -8,6 +8,13 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/23/2026
+
+- The desktop app now shows the proper Sales Buddy icon and name in the Windows taskbar - including when you pin it - instead of a generic "Electron" icon.
+- Clicking around the desktop app (menus, dashboard links, opening an engagement) *should* now stay inside the app window instead of popping open your browser.
+- Quitting from the system tray now shuts everything down cleanly, with no leftover background processes.
+- Updating the desktop app is safer and more reliable: your database is protected across updates, and the install recovers cleanly even under a messy shutdown.
+
 ## 7/21/2026 - 9194b49
 
 - New **Alignment Override** in Fiscal Year Management. When the new fiscal year starts but MSX hasn't updated your account-team assignments yet, you can pick the territories you're aligned to and have the account sync pull from those instead - so you're not stuck waiting on MSX to catch up. Everything downstream (milestones and the rest) follows your picks. Flip it off once MSX is updated and you're back to normal. Includes a one-click preview of how many customers it would pull before you commit.

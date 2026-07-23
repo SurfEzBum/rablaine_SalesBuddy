@@ -29,7 +29,7 @@
 
         <CustomAction Id="SetInstallActionData"
                       Property="InstallAction"
-                      Value="INSTALLFOLDER=[INSTALLFOLDER];STARTMENUSHORTCUT=[STARTMENUSHORTCUT];DESKTOPSHORTCUT=[DESKTOPSHORTCUT];AUTOSTART=[AUTOSTART]" />
+                      Value="INSTALLFOLDER=[INSTALLFOLDER];STARTMENUSHORTCUT=[STARTMENUSHORTCUT];DESKTOPSHORTCUT=[DESKTOPSHORTCUT];AUTOSTART=[AUTOSTART];REPOREF=[REPOREF]" />
 
         <CustomAction Id="InstallAction"
                       BinaryRef="CustomActionsDll"
@@ -44,7 +44,7 @@
 
         <CustomAction Id="SetUninstallActionData"
                       Property="UninstallAction"
-                      Value="INSTALLFOLDER=[INSTALLFOLDER]" />
+                      Value="INSTALLFOLDER=[INSTALLFOLDER];UPGRADINGPRODUCTCODE=[UPGRADINGPRODUCTCODE]" />
 
         <CustomAction Id="UninstallAction"
                       BinaryRef="CustomActionsDll"
