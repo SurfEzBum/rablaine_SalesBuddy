@@ -1422,10 +1422,47 @@ Write-Host 'winget installation complete.'
                 ProcessRunner.Run(session, pipExe,
                     $"install -r \"{reqFile}\"");
                 session.Log("Dependencies installed.");
+
+                // Verify the venv is actually usable. A partial/interrupted pip
+                // leaves a dependency-less venv ("No module named flask") that
+                // crash-loops the backend and, under the electron shell, shows a
+                // dead localhost in the browser (observed 2026-07-23). Probe +
+                // one retry so a transient pip hiccup can't ship a broken venv.
+                if (!VenvImportsFlask(session, venvPython))
+                {
+                    session.Log("Backend deps missing after install - retrying pip once.");
+                    ProcessRunner.UpdateStatus(session,
+                        "Repairing Python dependencies...");
+                    ProcessRunner.Run(session, venvPython, $"-m pip install -r \"{reqFile}\"");
+                    session.Log(VenvImportsFlask(session, venvPython)
+                        ? "Backend deps present after retry."
+                        : "WARNING: backend deps STILL missing after retry.");
+                }
+                else
+                {
+                    session.Log("Verified: backend deps import OK.");
+                }
             }
             else
             {
                 session.Log($"WARNING: requirements.txt not found at {reqFile}");
+            }
+        }
+
+        /// <summary>
+        /// Probe whether the installed venv can import flask (i.e. deps are
+        /// actually present). Never throws.
+        /// </summary>
+        private static bool VenvImportsFlask(Session session, string venvPython)
+        {
+            try
+            {
+                return ProcessRunner.Run(session, venvPython, "-c \"import flask\"") == 0;
+            }
+            catch (Exception ex)
+            {
+                session.Log($"venv flask probe error: {ex.Message}");
+                return false;
             }
         }
 
@@ -1562,14 +1599,29 @@ Write-Host 'winget installation complete.'
                 return false;
             }
 
-            string args = $"-ExecutionPolicy Bypass -NoProfile -File \"{script}\" -SkipPull -Rebuild -NoLaunch";
-            if (!desktop) args += " -NoDesktop";
-            if (!startMenu) args += " -NoStartMenu";
-            if (!autoStart) args += " -NoAutoStart";
+            string baseArgs = $"-ExecutionPolicy Bypass -NoProfile -File \"{script}\" -SkipPull -NoLaunch";
+            string opts = "";
+            if (!desktop) opts += " -NoDesktop";
+            if (!startMenu) opts += " -NoStartMenu";
+            if (!autoStart) opts += " -NoAutoStart";
 
-            ProcessRunner.Run(session, "powershell.exe", args, workingDirectory: installDir);
+            // First pass: full rebuild of the shell from source.
+            ProcessRunner.Run(session, "powershell.exe", baseArgs + " -Rebuild" + opts,
+                workingDirectory: installDir);
 
             string exe = Path.Combine(installDir, "electron-dist", "Sales Buddy.exe");
+            if (!File.Exists(exe))
+            {
+                // The build usually succeeds but STAGING can lose a transient race
+                // (AV scanning the fresh exe / a lingering file lock) and never
+                // populate electron-dist -> web fallback (observed 2026-07-23:
+                // win-unpacked built fine, electron-dist empty). Retry WITHOUT
+                // -Rebuild so we reuse the already-built shell and just re-stage.
+                session.Log("Electron exe missing after first pass - retrying stage (no rebuild).");
+                ProcessRunner.Run(session, "powershell.exe", baseArgs + opts,
+                    workingDirectory: installDir);
+            }
+
             bool ok = File.Exists(exe);
             session.Log($"Electron setup {(ok ? "succeeded" : "did NOT produce the exe")}: {exe}");
             return ok;

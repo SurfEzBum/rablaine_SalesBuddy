@@ -330,10 +330,19 @@ if (-not $NoStartMenu) {
 $venvPy = Join-Path $repoRoot 'venv\Scripts\python.exe'
 $reqFile = Join-Path $repoRoot 'requirements.txt'
 if ((Test-Path $venvPy) -and (Test-Path $reqFile)) {
-    & $venvPy -c "import flask" 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    # Probe inside try/catch: under Windows PowerShell 5.1 a native command that
+    # writes to stderr (python's traceback for the missing module) throws a
+    # NativeCommandError with $ErrorActionPreference='Stop' - and
+    # $PSNativeCommandUseErrorActionPreference (set at top) is a PS 7.3+ no-op
+    # here. Without the guard, the self-heal that's meant to FIX the broken venv
+    # instead crashes the migration (observed 2026-07-23). Never let it throw.
+    $flaskOk = $false
+    try { & $venvPy -c "import flask" 2>&1 | Out-Null; $flaskOk = ($LASTEXITCODE -eq 0) }
+    catch { $flaskOk = $false }
+    if (-not $flaskOk) {
         Write-Host "Backend dependencies missing - installing (one-time)..." -ForegroundColor Yellow
-        & $venvPy -m pip install -q -r $reqFile
+        try { & $venvPy -m pip install -q -r $reqFile 2>&1 | Write-Host }
+        catch { Write-Host "  pip install error: $($_.Exception.Message)" -ForegroundColor Red }
     }
 }
 
