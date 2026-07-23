@@ -111,7 +111,16 @@ if (Test-Path $serverScript) {
 # (scoped to the install path so we never touch another install or unrelated python).
 Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe' OR Name='waitress-serve.exe' OR Name='Sales Buddy.exe'" |
     Where-Object { $_.CommandLine -and $_.CommandLine -match [regex]::Escape($repoRoot) } |
-    ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>$null | Out-Null }
+    ForEach-Object {
+        # Route through cmd so taskkill's stderr (e.g. "process not found" when a
+        # PID exits between the enumeration and the kill) is swallowed at the cmd
+        # level. A bare `taskkill ... 2>$null` still surfaces as a terminating
+        # NativeCommandError under Windows PowerShell 5.1 + ErrorActionPreference=
+        # Stop ($PSNativeCommandUseErrorActionPreference is a 7.3+ no-op here),
+        # which aborted the whole migration right before the shortcut step -
+        # leaving no shortcuts and an "Electron"-named taskbar button (2026-07-23).
+        & cmd.exe /c "taskkill /PID $($_.ProcessId) /T /F >nul 2>&1"
+    }
 
 # --- 4. Stage the signed shell into <install>\electron-dist\ ---
 # Killing the shell above does NOT release its file handles instantly. Staging
