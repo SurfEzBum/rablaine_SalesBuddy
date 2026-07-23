@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/23/2026
+## 7/23/2026 - c3b3ca7
 
 - The desktop app now shows the proper Sales Buddy icon and name in the Windows taskbar - including when you pin it - instead of a generic "Electron" icon.
 - Clicking around the desktop app (menus, dashboard links, opening an engagement) *should* now stay inside the app window instead of popping open your browser.
