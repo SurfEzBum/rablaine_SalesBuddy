@@ -10,7 +10,7 @@ Format: `## M/D/YYYY - <merge-short-sha>`. See
 
 ## 7/24/2026
 
-- Updating the desktop app no longer makes you quit it first. The installer now closes Sales Buddy for you (asking the running app to shut down cleanly, and closing it directly if needed) and continues - instead of stopping with "quit from the tray and run setup again." Your data is protected the same as before.
+- Updating the desktop app no longer makes you quit it first. If Sales Buddy is open, the installer now asks for a quick OK to close it, then shuts it down for you and continues - instead of stopping with "quit from the tray and run setup again." Your data is protected the same as before.
 
 ## 7/24/2026 - 7808a21
 

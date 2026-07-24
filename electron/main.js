@@ -292,6 +292,12 @@ async function runUpdate(trigger) {
 // Poll for the web-app sentinel. Works whether the user clicked Update in the
 // Electron window or in a real browser tab pointed at the same local server.
 function startUpdateRequestWatcher() {
+  // A prior shell that was force-killed or crashed (e.g. the installer closing us
+  // via the fallback path) can leave a stale shutdown.request behind. Clear it
+  // once at startup so THIS freshly-launched shell doesn't read a request meant
+  // for a previous instance and immediately quit. We only honor sentinels that
+  // appear AFTER we start watching.
+  try { fs.unlinkSync(SHUTDOWN_REQUEST_FILE); } catch (_) { /* not present */ }
   setInterval(() => {
     try {
       // Installer asking us to close so it can restage the shell. Quit the same

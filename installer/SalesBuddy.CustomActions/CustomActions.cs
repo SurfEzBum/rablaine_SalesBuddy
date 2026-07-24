@@ -429,7 +429,15 @@ namespace SalesBuddy.CustomActions
             // it STILL won't die do we leave SALESBUDDYRUNNING set for the gate.
             if (running)
             {
-                session.Log("CheckAppRunning: shell running - closing it so the install can proceed.");
+                // Interactive installs: ask before closing the user's app. Silent /
+                // automated installs (no full UI) just close it - no one's there to
+                // answer a prompt.
+                if ((session["UILevel"] ?? "") == "5" && PromptCloseApp(session) == MessageResult.Cancel)
+                {
+                    session.Log("CheckAppRunning: user cancelled at the close prompt - aborting install.");
+                    return ActionResult.UserExit;
+                }
+                session.Log("CheckAppRunning: closing the running shell so the install can proceed.");
                 try { CloseRunningApp(session, installDir); }
                 catch (Exception ex) { session.Log($"CheckAppRunning: close error (non-fatal): {ex.Message}"); }
                 running = IsShellRunning(session);
@@ -1654,6 +1662,27 @@ Write-Host 'winget installation complete.'
         }
 
         /// <summary>
+        /// Ask the user (interactive installs only) for permission to close the
+        /// running app before we do it. OK -> proceed to close; Cancel -> caller
+        /// aborts the install. Shown through the MSI UI so it rides on the install
+        /// dialog rather than a detached window.
+        /// </summary>
+        private static MessageResult PromptCloseApp(Session session)
+        {
+            using (Record rec = new Record(0))
+            {
+                rec.FormatString =
+                    "Sales Buddy is currently open and needs to close to finish updating.\n\n" +
+                    "Click OK to close it now and continue, or Cancel to stop and close it yourself.";
+                return session.Message(
+                    InstallMessage.User
+                        | (InstallMessage)MessageButtons.OKCancel
+                        | (InstallMessage)MessageIcon.Warning,
+                    rec);
+            }
+        }
+
+        /// <summary>
         /// Close a running Sales Buddy shell so the install can proceed without the
         /// user manually quitting from the tray. Two stages: (1) drop the
         /// shutdown.request sentinel the shell watches and give it a few seconds to
@@ -1694,9 +1723,22 @@ Write-Host 'winget installation complete.'
             else
             {
                 session.Log("CloseRunningApp: shell exited on its own.");
-                // Tidy the sentinel if the shell didn't, and sweep any leftover backend.
-                try { File.Delete(Path.Combine(installDir, "data", "shutdown.request")); } catch { }
                 try { StopBackendProcesses(session, installDir); } catch { }
+            }
+
+            // ALWAYS remove the sentinel now that the app is down - whether it quit
+            // on its own or we force-killed it. A leftover request would be read by
+            // the freshly-installed shell we launch later, making it quit ~10s after
+            // boot (observed 2026-07-24). The shell also clears a stale sentinel on
+            // boot as belt-and-suspenders.
+            try
+            {
+                string sentinel = Path.Combine(installDir, "data", "shutdown.request");
+                if (File.Exists(sentinel)) File.Delete(sentinel);
+            }
+            catch (Exception ex)
+            {
+                session.Log($"CloseRunningApp: sentinel cleanup failed: {ex.Message}");
             }
         }
 
