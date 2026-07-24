@@ -11,7 +11,8 @@
     <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3">
         {% for pod in pods %}
         <div class="col">
-            <div class="card" style="cursor: pointer;" onclick="window.location='{{ url_for('pods.pod_view', id=pod.id) }}'">
+            <div class="card row-link">
+                <a href="{{ url_for('pods.pod_view', id=pod.id) }}" class="stretched-link" aria-label="View {{ pod.name }}"></a>
                 <div class="card-body pb-2">
                     {% set pod_sellers = [] %}
                     {% for t in pod.territories %}

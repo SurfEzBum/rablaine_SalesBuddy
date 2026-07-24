@@ -13,20 +13,18 @@
 {% if territories %}
     <div class="list-group">
         {% for territory in territories %}
-            <div class="list-group-item" style="cursor: pointer;" onclick="window.location='{{ url_for('territories.territory_view', id=territory.id) }}'">
+            <div class="list-group-item row-link">
+                <a href="{{ url_for('territories.territory_view', id=territory.id) }}" class="stretched-link" aria-label="View {{ territory.name }}"></a>
                 <div class="d-flex w-100 justify-content-between align-items-start">
                     <div class="flex-grow-1">
                         <h5 class="mb-1">{{ territory.name }}</h5>
-                        <p class="mb-1" onclick="event.stopPropagation();">
+                        <p class="mb-1">
                             {% if territory.pod %}
-                                <span class="badge bg-info text-dark" style="cursor: pointer;" onclick="event.preventDefault(); event.stopPropagation(); window.location='{{ url_for('pods.pod_view', id=territory.pod.id) }}';">                                    <i class="bi bi-diagram-2"></i> {{ territory.pod.name }}
-                                </span>
+                                <a href="{{ url_for('pods.pod_view', id=territory.pod.id) }}" class="badge bg-info text-dark text-decoration-none"><i class="bi bi-diagram-2"></i> {{ territory.pod.name }}</a>
                             {% endif %}
                             {% if territory.sellers %}
                                 {% for seller in territory.sellers|sort(attribute='name') %}
-                                    <span class="badge bg-secondary" style="cursor: pointer;" onclick="event.preventDefault(); event.stopPropagation(); window.location='{{ url_for('sellers.seller_view', id=seller.id) }}';">
-                                        <i class="bi bi-person"></i> {{ seller.name }}
-                                    </span>
+                                    <a href="{{ url_for('sellers.seller_view', id=seller.id) }}" class="badge bg-secondary text-decoration-none"><i class="bi bi-person"></i> {{ seller.name }}</a>
                                 {% endfor %}
                             {% else %}
                                 <span class="badge bg-secondary text-muted">No sellers</span>
@@ -35,7 +33,7 @@
                         </p>
                     </div>
                     <div class="d-flex align-items-center gap-2">
-                        <a href="{{ url_for('customers.customer_create', territory_id=territory.id) }}" class="btn btn-sm btn-success text-white" onclick="event.stopPropagation();">
+                        <a href="{{ url_for('customers.customer_create', territory_id=territory.id) }}" class="btn btn-sm btn-success text-white">
                             <i class="bi bi-plus-circle"></i> New Customer
                         </a>
                     </div>

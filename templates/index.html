@@ -492,6 +492,8 @@
         line-height: 1;
         color: var(--bs-secondary);
         text-decoration: none;
+        background: transparent;
+        border: 0;
         padding: 1px 3px;
     }
     .cal-ghost:hover .cal-ghost-dismiss { opacity: 0.8; }
@@ -1616,14 +1618,20 @@
         ghostContainer.style.overflowY = 'auto';
 
         ghostEntries.forEach(g => {
-            const ghost = document.createElement('div');
             const matched = !!g.customer_id;
+            const ghost = document.createElement(matched ? 'a' : 'div');
             const ghostColorIndex = matched ? customerColorMap[g.customer_id] : null;
             ghost.className = 'd-block text-truncate mb-1 px-1 rounded cal-ghost'
-                + (matched ? '' : ' cal-ghost-unmatched')
+                + (matched ? ' text-decoration-none text-reset' : ' cal-ghost-unmatched')
                 + (ghostColorIndex ? ` cal-ghost-customer-${ghostColorIndex}` : '');
             ghost.setAttribute('data-ghost-id', g.id);
             if (matched) {
+                // Real anchor so Ctrl/middle/right-click "open in new window" works
+                // (same URL openGhostMeeting builds). Unmatched ghosts have no
+                // deterministic URL, so they stay a div that opens the picker.
+                ghost.href = `/note/new?customer_id=${g.customer_id}`
+                    + `&date=${encodeURIComponent(dateStr)}`
+                    + `&from_meeting=${g.id}`;
                 ghost.setAttribute('data-customer-id', g.customer_id);
             }
 
@@ -1667,6 +1675,10 @@
             ghost.addEventListener('click', function(e) {
                 if (e.target.closest('.cal-ghost-dismiss')) return;
                 if (e.target.closest('.cal-ghost-recur')) return;
+                // Matched ghosts are real anchors - let the browser handle the
+                // click (including Ctrl/middle/right for a new window).
+                if (matched) return;
+                // Unmatched: no URL yet, open the customer picker modal.
                 openGhostMeeting(g, dateStr);
             });
 
@@ -1683,8 +1695,8 @@
                 });
             }
 
-            const dismiss = document.createElement('a');
-            dismiss.href = '#';
+            const dismiss = document.createElement('button');
+            dismiss.type = 'button';
             dismiss.className = 'cal-ghost-dismiss';
             dismiss.innerHTML = '<i class="bi bi-x"></i>';
             dismiss.title = 'Hide this meeting';
