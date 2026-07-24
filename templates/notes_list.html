@@ -37,14 +37,11 @@
         .clickable-note .call-body-text {
             color: var(--bs-body-color);
         }
-        .clickable-note a {
-            position: relative;
-            z-index: 2;
-        }
     </style>
     <div class="list-group">
         {% for call in notes %}
-            <div class="list-group-item clickable-note" onclick="window.location.href='{{ url_for('notes.note_view', id=call.id) }}';">
+            <div class="list-group-item clickable-note row-link">
+                <a href="{{ url_for('notes.note_view', id=call.id) }}" class="stretched-link" aria-label="View note"></a>
                 <div class="d-flex w-100 justify-content-between align-items-start mb-2">
                     <h5 class="mb-0">
                         {% if call.customer %}

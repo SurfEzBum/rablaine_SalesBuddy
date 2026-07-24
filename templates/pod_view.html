@@ -20,7 +20,8 @@
                 {% if territories %}
                     <ul class="list-group list-group-flush">
                         {% for territory in territories %}
-                            <li class="list-group-item d-flex justify-content-between align-items-center" style="cursor: pointer;" onclick="window.location='{{ url_for('territories.territory_view', id=territory.id) }}'">
+                            <li class="list-group-item d-flex justify-content-between align-items-center row-link">
+                                <a href="{{ url_for('territories.territory_view', id=territory.id) }}" class="stretched-link" aria-label="View {{ territory.name }}"></a>
                                 <span>{{ territory.name }}</span>
                                 <span class="badge bg-primary rounded-pill">{{ territory.customers|length }} customers</span>
                             </li>
@@ -40,7 +41,8 @@
                 {% if sellers %}
                     <ul class="list-group list-group-flush">
                         {% for seller in sellers %}
-                            <li class="list-group-item" style="cursor: pointer;" onclick="window.location='{{ url_for('sellers.seller_view', id=seller.id) }}'">
+                            <li class="list-group-item row-link">
+                                <a href="{{ url_for('sellers.seller_view', id=seller.id) }}" class="stretched-link" aria-label="View {{ seller.name }}"></a>
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div>
                                         <span>{{ seller.name }}</span>
@@ -74,7 +76,8 @@
                 {% if solution_engineers %}
                     <ul class="list-group list-group-flush">
                         {% for se in solution_engineers %}
-                            <li class="list-group-item" style="cursor: pointer;" onclick="window.location='{{ url_for('solution_engineers.solution_engineer_view', id=se.id) }}'">
+                            <li class="list-group-item row-link">
+                                <a href="{{ url_for('solution_engineers.solution_engineer_view', id=se.id) }}" class="stretched-link" aria-label="View {{ se.name }}"></a>
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div>
                                         <strong>{{ se.name }}</strong>

@@ -15,10 +15,6 @@
     html[data-bs-theme="dark"] .clickable-call:hover {
         background-color: rgba(255, 255, 255, 0.15);
     }
-    .clickable-call a {
-        position: relative;
-        z-index: 2;
-    }
     .engagement-card {
         transition: border-color 0.15s ease-in-out;
     }
@@ -461,15 +457,16 @@
                     {% set all_same_seller = notes|selectattr('seller.id', 'equalto', customer.seller.id)|list|length == notes|length if customer.seller else false %}
                     <div class="list-group">
                         {% for call in notes %}
-                            <div class="list-group-item clickable-call" onclick="window.location.href='{{ url_for('notes.note_view', id=call.id) }}';">
+                            <div class="list-group-item clickable-call row-link">
+                                <a href="{{ url_for('notes.note_view', id=call.id) }}" class="stretched-link" aria-label="View note"></a>
                                 <div class="d-flex w-100 justify-content-between mb-2">
                                     <div>
                                         <h6 class="mb-0 d-inline">{{ call.call_date.strftime('%b %d, %Y') }}{% if call.call_date.hour != 0 or call.call_date.minute != 0 %} {{ call.call_date.strftime('%I:%M %p') }}{% endif %}</h6>
                                         {% if call.engagements %}
                                             {% for eng in call.engagements %}
-                                                <span class="badge bg-primary bg-opacity-25 text-primary ms-1" style="font-size: 0.7rem;" onclick="event.stopPropagation(); window.location.href='{{ url_for('engagements.engagement_view', id=eng.id) }}';">
+                                                <a href="{{ url_for('engagements.engagement_view', id=eng.id) }}" class="badge bg-primary bg-opacity-25 text-primary ms-1 text-decoration-none" style="font-size: 0.7rem;">
                                                     <i class="bi bi-diagram-3"></i> {{ eng.title[:25] }}{% if eng.title|length > 25 %}...{% endif %}
-                                                </span>
+                                                </a>
                                             {% endfor %}
                                         {% endif %}
                                     </div>

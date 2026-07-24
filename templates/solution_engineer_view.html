@@ -64,7 +64,8 @@
                     {% if all_territories %}
                         <ul class="list-group list-group-flush">
                             {% for territory in all_territories|sort(attribute='name') %}
-                                <li class="list-group-item d-flex justify-content-between align-items-center" style="cursor: pointer;" onclick="window.location='{{ url_for('territories.territory_view', id=territory.id) }}'">
+                                <li class="list-group-item d-flex justify-content-between align-items-center row-link">
+                                    <a href="{{ url_for('territories.territory_view', id=territory.id) }}" class="stretched-link" aria-label="View {{ territory.name }}"></a>
                                     <span>{{ territory.name }}</span>
                                     <span class="badge bg-primary rounded-pill">{{ territory.customers|length }} customers</span>
                                 </li>

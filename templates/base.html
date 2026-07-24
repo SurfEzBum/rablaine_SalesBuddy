@@ -1039,6 +1039,22 @@
         .brainrot-feed video:last-child {
             margin-bottom: 0;
         }
+
+        /* Clickable rows/cards: an invisible .stretched-link anchor overlay makes
+           the whole row navigable while keeping nested links/buttons clickable.
+           Using a real anchor (instead of onclick=window.location) means
+           middle-click / Ctrl+click / right-click "Open in New Window" work in
+           both the browser and the Electron shell. Nested interactive elements
+           need to sit above the stretched-link overlay. */
+        .row-link {
+            position: relative;
+            cursor: pointer;
+        }
+        .row-link a:not(.stretched-link),
+        .row-link button {
+            position: relative;
+            z-index: 2;
+        }
     </style>
     {% if not first_run_modal_dismissed %}
     <style>
