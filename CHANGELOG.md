@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/24/2026
+## 7/24/2026 - 7808a21
 
 - The desktop app now supports multiple windows. Open a fresh window from **File > New Window** (Ctrl+N) or the tray, and open any internal link in its own window with middle-click, Ctrl+click, or right-click "Open Link in New Window" - so you can keep a customer, your notes, and the calendar open side by side. Closing the last window tucks it back to the tray as before.
 - Rows, tags, and calendar meetings are now real links: middle-click, Ctrl+click, or right-click to open a customer, note, territory, seller, POD, or a matched calendar meeting in its own window. Left-click still behaves exactly as before.
