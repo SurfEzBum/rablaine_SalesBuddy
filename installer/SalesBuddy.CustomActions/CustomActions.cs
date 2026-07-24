@@ -403,49 +403,54 @@ namespace SalesBuddy.CustomActions
         /// <summary>
         /// Immediate custom action - runs in the UI phase as the interactive user,
         /// early (before LaunchConditions), so it reliably sees the user's GUI
-        /// processes (unlike the deferred InstallAction). Sets SALESBUDDYRUNNING="1"
-        /// when the desktop app is running. A running app holds file locks that make
-        /// the install corrupt itself (half-staged shell + dependency-less venv), so
-        /// a LaunchCondition uses this to refuse the install until the user quits the
-        /// app from the system tray. Never throws - on any error it reports "not
-        /// running" so a detection hiccup can't wedge the installer.
+        /// processes (unlike the deferred InstallAction). A running app holds file
+        /// locks that make the install corrupt itself (half-staged shell +
+        /// dependency-less venv), so instead of blocking, we CLOSE it for the user
+        /// (a graceful shutdown request, then a force-kill fallback) so they don't
+        /// have to Quit from the tray first. SALESBUDDYRUNNING is only set if the app
+        /// somehow can't be closed, leaving the LaunchCondition to block as a last
+        /// resort. Never throws - on any error it reports "not running" so a
+        /// detection hiccup can't wedge the installer.
         /// </summary>
         [CustomAction]
         public static ActionResult CheckAppRunning(Session session)
         {
-            bool running = false;
-            try
+            string installDir = session["INSTALLFOLDER"];
+            if (string.IsNullOrEmpty(installDir))
+                installDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "SalesBuddy");
+
+            bool running = IsShellRunning(session);
+
+            // Close the app for the user rather than blocking the install and making
+            // them manually Quit from the tray: graceful shutdown request first, then
+            // a force-kill fallback that works for any prior shell version. Only if
+            // it STILL won't die do we leave SALESBUDDYRUNNING set for the gate.
+            if (running)
             {
-                foreach (var p in Process.GetProcessesByName("Sales Buddy"))
-                {
-                    running = true;
-                    p.Dispose();
-                }
+                session.Log("CheckAppRunning: shell running - closing it so the install can proceed.");
+                try { CloseRunningApp(session, installDir); }
+                catch (Exception ex) { session.Log($"CheckAppRunning: close error (non-fatal): {ex.Message}"); }
+                running = IsShellRunning(session);
             }
-            catch (Exception ex)
-            {
-                session.Log($"CheckAppRunning: detection error (treating as not running): {ex.Message}");
-            }
+
             session["SALESBUDDYRUNNING"] = running ? "1" : "";
             session.Log($"CheckAppRunning: SALESBUDDYRUNNING='{session["SALESBUDDYRUNNING"]}'");
 
-            // If the shell itself isn't running, sweep any stray backend (waitress
-            // / worker) this install leaked. A pre-1.1.9 tray Quit killed the shell
-            // but left the backend alive, holding the DB open and port 5151. Kill
-            // them HERE - an immediate CA in the UI phase, BEFORE RemoveExistingProducts
-            // runs the old uninstall's DB backup + delete - so a leftover worker
-            // can't produce an inconsistent DB backup or lock files into a corrupt
-            // install. Skipped when the shell is running (the gate blocks that, and a
-            // live supervisor would just respawn the backend). Never throws.
+            // With the shell down (never up, or we just closed it), sweep any stray
+            // backend (waitress / worker) this install leaked. A pre-1.1.9 tray Quit
+            // killed the shell but left the backend alive, holding the DB open and
+            // port 5151. Kill them HERE - an immediate CA in the UI phase, BEFORE
+            // RemoveExistingProducts runs the old uninstall's DB backup + delete - so
+            // a leftover worker can't produce an inconsistent DB backup or lock files
+            // into a corrupt install. Skipped only if the app somehow survived the
+            // close above (a live supervisor would just respawn the backend). Never
+            // throws.
             if (!running)
             {
                 try
                 {
-                    string installDir = session["INSTALLFOLDER"];
-                    if (string.IsNullOrEmpty(installDir))
-                        installDir = Path.Combine(
-                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                            "SalesBuddy");
                     StopBackendProcesses(session, installDir);
                 }
                 catch (Exception ex)
@@ -1625,6 +1630,74 @@ Write-Host 'winget installation complete.'
             bool ok = File.Exists(exe);
             session.Log($"Electron setup {(ok ? "succeeded" : "did NOT produce the exe")}: {exe}");
             return ok;
+        }
+
+        /// <summary>
+        /// True if the Electron shell (unique product process name "Sales Buddy")
+        /// is running. Never throws - a detection hiccup reports "not running".
+        /// </summary>
+        private static bool IsShellRunning(Session session)
+        {
+            try
+            {
+                foreach (var p in Process.GetProcessesByName("Sales Buddy"))
+                {
+                    p.Dispose();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                session.Log($"IsShellRunning: detection error (treating as not running): {ex.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Close a running Sales Buddy shell so the install can proceed without the
+        /// user manually quitting from the tray. Two stages: (1) drop the
+        /// shutdown.request sentinel the shell watches and give it a few seconds to
+        /// quit itself cleanly (removes the tray icon, releases the single-instance
+        /// lock, tears down its own backend); (2) if it's still up, force-kill the
+        /// shell + this install's backend via StopRunningApp, which works for ANY
+        /// prior shell version. The installer's DB snapshot/restore covers any WAL a
+        /// non-clean shutdown might leave.
+        /// </summary>
+        private static void CloseRunningApp(Session session, string installDir)
+        {
+            // 1. Graceful: drop the sentinel a sentinel-aware shell (1.1.15+) watches.
+            try
+            {
+                string dataDir = Path.Combine(installDir, "data");
+                Directory.CreateDirectory(dataDir);
+                string sentinel = Path.Combine(dataDir, "shutdown.request");
+                File.WriteAllText(sentinel, DateTime.UtcNow.ToString("o"));
+                session.Log($"CloseRunningApp: dropped shutdown sentinel at {sentinel}");
+            }
+            catch (Exception ex)
+            {
+                session.Log($"CloseRunningApp: could not drop sentinel (will force-close): {ex.Message}");
+            }
+
+            // 2. Give a sentinel-aware shell up to ~8s to exit on its own.
+            for (int i = 0; i < 16 && IsShellRunning(session); i++)
+            {
+                Thread.Sleep(500);
+            }
+
+            if (IsShellRunning(session))
+            {
+                // 3. Fallback: force-close shell + backend for THIS install (any version).
+                session.Log("CloseRunningApp: shell still up after grace period - force-closing.");
+                StopRunningApp(session, installDir);
+            }
+            else
+            {
+                session.Log("CloseRunningApp: shell exited on its own.");
+                // Tidy the sentinel if the shell didn't, and sweep any leftover backend.
+                try { File.Delete(Path.Combine(installDir, "data", "shutdown.request")); } catch { }
+                try { StopBackendProcesses(session, installDir); } catch { }
+            }
         }
 
         /// <summary>
