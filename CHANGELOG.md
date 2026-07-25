@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/24/2026
+## 7/24/2026 - 0b055e3
 
 - Updating the desktop app no longer makes you quit it first. If Sales Buddy is open, the installer now asks for a quick OK to close it, then shuts it down for you and continues - instead of stopping with "quit from the tray and run setup again." Your data is protected the same as before.
 
