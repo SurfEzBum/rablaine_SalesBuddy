@@ -282,6 +282,17 @@ def main() -> None:
     from app.services.azure_profile import ensure_azure_profile
     ensure_azure_profile()
 
+    # One-time move of the DB to its external location, done ONCE here in the
+    # single supervisor process BEFORE forking web + worker (so they never race
+    # to migrate). Children carry SALESBUDDY_SUPERVISED and skip their own copy.
+    # Also publish the resolved DB path for the PowerShell scripts + installer.
+    try:
+        from app.db_paths import migrate_db_to_new_location, write_data_path_file
+        migrate_db_to_new_location(logger)
+        write_data_path_file()
+    except Exception:
+        logger.exception("DB path bootstrap failed (continuing on legacy location)")
+
     port = _default_port()
     # Mark children as supervised so the web process defers the heavy schedulers
     # to the worker instead of running them inline.

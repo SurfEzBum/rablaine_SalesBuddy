@@ -268,7 +268,7 @@ pytest --cov=app tests/  # with coverage
 
 **Production Environment:**
 - Sales Buddy Flask app runs locally via `flask run` or `start.bat`
-- SQLite database at `%LOCALAPPDATA%\salesbuddy\data\salesbuddy.db`
+- SQLite database at `%LOCALAPPDATA%\SalesBuddy-data\salesbuddy.db` - deliberately OUTSIDE the install dir (a sibling of it) so no install/upgrade/uninstall can delete user data. Resolved via `app/db_paths.py` (`resolve_db_path()`); the app publishes the path to `<install>\data-path.txt` for the scripts + installer. The DB is migrated from the old in-install location automatically + safely on first boot.
 - `update.bat` backs up the database before deploying/running migrations
 - Real user data - handle with care
 

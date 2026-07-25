@@ -111,12 +111,8 @@ _INSTANCE_ID_FILENAME = '.salesbuddy_instance_id'
 
 def _get_data_dir() -> Path:
     """Return the data directory (same parent as the database)."""
-    db_url = os.environ.get('DATABASE_URL') or 'sqlite:///data/salesbuddy.db'
-    # Extract path from sqlite:///path
-    if db_url.startswith('sqlite:///'):
-        db_path = Path(db_url.replace('sqlite:///', ''))
-        return db_path.parent
-    return Path('data')
+    from app.db_paths import resolve_data_dir
+    return resolve_data_dir()
 
 
 def get_instance_id() -> str:

@@ -97,13 +97,8 @@ def exit_transition_mode() -> None:
 
 def _get_data_dir() -> Path:
     """Return the directory where salesbuddy.db lives."""
-    db_url = str(db.engine.url)
-    # sqlite:///data/salesbuddy.db -> data/salesbuddy.db
-    if ":///" in db_url:
-        db_path = db_url.split(":///", 1)[1]
-    else:
-        db_path = "data/salesbuddy.db"
-    return Path(db_path).parent
+    from app.db_paths import resolve_data_dir
+    return resolve_data_dir()
 
 
 def _get_onedrive_backup_root() -> Optional[str]:

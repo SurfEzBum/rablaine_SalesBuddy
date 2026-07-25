@@ -34,17 +34,34 @@ def create_app():
     # Configuration
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
     
-    # SQLite database path
-    db_url = os.environ.get('DATABASE_URL') or 'sqlite:///data/salesbuddy.db'
-    if db_url.startswith('sqlite:///') and not db_url.startswith('sqlite:////'):
-        # Convert relative path to absolute path
-        db_path = db_url.replace('sqlite:///', '')
-        if not os.path.isabs(db_path):
-            db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), db_path)
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(db_path), exist_ok=True)
-            db_url = 'sqlite:///' + db_path
-    
+    # SQLite database path. Resolved through app.db_paths so the Flask app, the
+    # background scripts, and the C# installer all agree on ONE location. In
+    # production the DB lives OUTSIDE the install dir (a sibling of it) so no
+    # install / upgrade / uninstall can ever delete user data.
+    from app.db_paths import (
+        resolve_db_url, resolve_db_path, migrate_db_to_new_location,
+        write_data_path_file,
+    )
+
+    # One-time move of an existing DB to the external location. Under the
+    # supervisor this already ran ONCE in the parent process (before web+worker
+    # forked), and children carry SALESBUDDY_SUPERVISED - so they skip it here to
+    # avoid two processes migrating at once. Only an UNSUPERVISED launch (bare
+    # `flask run` / direct waitress) migrates here. Never under tests.
+    _supervised = os.environ.get('SALESBUDDY_SUPERVISED', '').strip().lower() in ('1', 'true', 'yes')
+    if not os.environ.get('TESTING') and not _supervised:
+        try:
+            migrate_db_to_new_location()
+        except Exception:
+            pass
+        write_data_path_file()
+
+    db_url = resolve_db_url()
+    try:
+        resolve_db_path().parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
     app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     

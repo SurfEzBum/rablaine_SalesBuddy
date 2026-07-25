@@ -1046,7 +1046,8 @@ def api_backup_run():
         }), 400
 
     app_root = Path(current_app.root_path).parent
-    db_path = app_root / 'data' / 'salesbuddy.db'
+    from app.db_paths import resolve_db_path
+    db_path = resolve_db_path()
     if not db_path.exists():
         return jsonify({'success': False, 'error': 'Database file not found.'}), 404
 

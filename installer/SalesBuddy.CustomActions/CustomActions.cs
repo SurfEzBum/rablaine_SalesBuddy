@@ -317,8 +317,8 @@ namespace SalesBuddy.CustomActions
                 ProcessRunner.UpdateStatus(session, "Removing shortcuts...");
                 RemoveShortcuts(session);
 
-                // Backup database
-                string dbFile = Path.Combine(installDir, "data", "salesbuddy.db");
+                // Backup database (resolves to the external location once moved).
+                string dbFile = ResolveDbPath(installDir);
                 if (File.Exists(dbFile))
                 {
                     string timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
@@ -1143,7 +1143,7 @@ Write-Host 'winget installation complete.'
         /// </summary>
         private static string BackupDatabase(Session session, string installDir)
         {
-            string dbPath = Path.Combine(installDir, "data", "salesbuddy.db");
+            string dbPath = ResolveDbPath(installDir);
             if (!File.Exists(dbPath))
             {
                 session.Log("No database to back up.");
@@ -1172,10 +1172,10 @@ Write-Host 'winget installation complete.'
         {
             if (backupPath == null || !File.Exists(backupPath))
                 return;
-            string dataDir = Path.Combine(installDir, "data");
-            if (!Directory.Exists(dataDir))
+            string dbPath = ResolveDbPath(installDir);
+            string dataDir = Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(dataDir) && !Directory.Exists(dataDir))
                 Directory.CreateDirectory(dataDir);
-            string dbPath = Path.Combine(dataDir, "salesbuddy.db");
             try
             {
                 File.Copy(backupPath, dbPath, overwrite: true);
@@ -1216,6 +1216,50 @@ Write-Host 'winget installation complete.'
             return Path.Combine(local, "SalesBuddy-backups", "preinstall");
         }
 
+        /// <summary>The production DB location: a sibling of the install dir under
+        /// %LOCALAPPDATA%\SalesBuddy-data that survives any install-dir deletion.</summary>
+        private static string ExternalDbPath()
+        {
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrEmpty(local)) return null;
+            return Path.Combine(local, "SalesBuddy-data", "salesbuddy.db");
+        }
+
+        /// <summary>
+        /// Resolve where the live database is (or should be). In production the DB
+        /// lives OUTSIDE the install dir so no install / upgrade / uninstall can
+        /// delete it. During the transitional upgrade that introduces the move the
+        /// DB is still at the legacy in-install location until the app migrates it
+        /// on first boot, so we prefer, in order:
+        ///   1. the path the app published in installDir\data-path.txt,
+        ///   2. the external location if a DB already exists there,
+        ///   3. the legacy installDir\data location if a DB exists there,
+        ///   4. otherwise the external location (the go-forward default).
+        /// </summary>
+        private static string ResolveDbPath(string installDir)
+        {
+            try
+            {
+                string pathFile = Path.Combine(installDir, "data-path.txt");
+                if (File.Exists(pathFile))
+                {
+                    string published = File.ReadAllText(pathFile).Trim();
+                    if (!string.IsNullOrEmpty(published)) return published;
+                }
+            }
+            catch { }
+
+            string external = ExternalDbPath();
+            string legacy = Path.Combine(installDir, "data", "salesbuddy.db");
+            try
+            {
+                if (!string.IsNullOrEmpty(external) && File.Exists(external)) return external;
+                if (File.Exists(legacy)) return legacy;
+            }
+            catch { }
+            return !string.IsNullOrEmpty(external) ? external : legacy;
+        }
+
         /// <summary>
         /// Copy the live DB to the safeguard dir (outside installDir) before any
         /// destructive install step. No-op if the DB is missing or empty. Prunes
@@ -1225,7 +1269,7 @@ Write-Host 'winget installation complete.'
         {
             try
             {
-                string dbPath = Path.Combine(installDir, "data", "salesbuddy.db");
+                string dbPath = ResolveDbPath(installDir);
                 if (!File.Exists(dbPath))
                 {
                     session.Log("Safeguard: no database to snapshot.");
@@ -1271,7 +1315,7 @@ Write-Host 'winget installation complete.'
         {
             try
             {
-                string dbPath = Path.Combine(installDir, "data", "salesbuddy.db");
+                string dbPath = ResolveDbPath(installDir);
                 bool needRestore = !File.Exists(dbPath)
                     || new FileInfo(dbPath).Length < EmptyDbThreshold;
                 if (!needRestore)
@@ -1287,8 +1331,8 @@ Write-Host 'winget installation complete.'
                     return;
                 }
 
-                string dataDir = Path.Combine(installDir, "data");
-                Directory.CreateDirectory(dataDir);
+                string dataDir = Path.GetDirectoryName(dbPath);
+                if (!string.IsNullOrEmpty(dataDir)) Directory.CreateDirectory(dataDir);
                 // Clear any stale WAL/SHM so SQLite doesn't merge junk over the
                 // restored file.
                 foreach (string ext in new[] { "-wal", "-shm" })
