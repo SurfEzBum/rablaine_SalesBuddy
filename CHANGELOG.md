@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/24/2026
+## 7/24/2026 - 554128d
 
 - Your database now lives in a protected location outside the app's install folder, so it can't be touched by an update, repair, or uninstall. When you first run this version your existing database is moved there automatically and safely - it's verified after the move, and the original is kept as a timestamped backup (never deleted).
 
