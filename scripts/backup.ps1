@@ -23,8 +23,9 @@ param(
 )
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
-$DataDir = Join-Path $RepoRoot 'data'
-$DbFile = Join-Path $DataDir 'salesbuddy.db'
+. (Join-Path $PSScriptRoot 'Resolve-DbPath.ps1')
+$DbFile = Resolve-SalesBuddyDbPath -RepoRoot $RepoRoot
+$DataDir = Split-Path $DbFile -Parent
 $TaskName = 'SalesBuddy-DailyBackup'
 
 # ==============================================================================

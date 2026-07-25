@@ -96,7 +96,8 @@ if ($Silent) {
     # MSI uninstall: backup the database, then remove the cloned repo.
     # The script is running FROM this directory, so we cd out first.
     $clonedRepo = Join-Path $env:LOCALAPPDATA 'SalesBuddy'
-    $dbFile = Join-Path $clonedRepo 'data\salesbuddy.db'
+    . (Join-Path $PSScriptRoot 'Resolve-DbPath.ps1')
+    $dbFile = Resolve-SalesBuddyDbPath -RepoRoot $clonedRepo
     if (Test-Path $dbFile) {
         $dbBackup = Join-Path $env:TEMP "salesbuddy-uninstall-$(Get-Date -Format 'yyyyMMdd-HHmmss').db"
         Copy-Item $dbFile $dbBackup -ErrorAction SilentlyContinue

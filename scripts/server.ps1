@@ -18,6 +18,7 @@ param(
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $RepoRoot
+. (Join-Path $PSScriptRoot 'Resolve-DbPath.ps1')
 
 # Always pin Azure CLI state to an environment-specific path under USERPROFILE.
 # Production uses %USERPROFILE%\SalesBuddy\.azure, development uses
@@ -239,7 +240,7 @@ function Set-OneDrivePathInDb {
     param([string]$Path)
     $pythonExe = Join-Path $RepoRoot 'venv\Scripts\python.exe'
     if (-not (Test-Path $pythonExe)) { return }
-    $dbPath = Join-Path $RepoRoot 'data\salesbuddy.db'
+    $dbPath = Resolve-SalesBuddyDbPath -RepoRoot $RepoRoot
     $script = @"
 import sqlite3, sys
 db, path = sys.argv[1], sys.argv[2]
@@ -256,7 +257,7 @@ conn.close()
 function Get-OneDrivePathFromDb {
     $pythonExe = Join-Path $RepoRoot 'venv\Scripts\python.exe'
     if (-not (Test-Path $pythonExe)) { return '' }
-    $dbPath = Join-Path $RepoRoot 'data\salesbuddy.db'
+    $dbPath = Resolve-SalesBuddyDbPath -RepoRoot $RepoRoot
     $script = @"
 import sqlite3, sys
 db = sys.argv[1]
@@ -473,10 +474,10 @@ function Invoke-DatabaseMigration {
 
 # Backup the database
 function Backup-Database {
-    $dbFile = Join-Path $RepoRoot 'data\salesbuddy.db'
+    $dbFile = Resolve-SalesBuddyDbPath -RepoRoot $RepoRoot
     if (Test-Path $dbFile) {
         $timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
-        $backupFile = Join-Path $RepoRoot "data\salesbuddy_backup_$timestamp.db"
+        $backupFile = Join-Path (Split-Path $dbFile -Parent) "salesbuddy_backup_$timestamp.db"
         Copy-Item $dbFile $backupFile
         Write-Host "  [OK] Database backed up." -ForegroundColor Green
     }

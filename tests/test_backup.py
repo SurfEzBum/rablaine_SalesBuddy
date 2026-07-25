@@ -496,15 +496,7 @@ class TestBackupRunAPI:
             prefs.onedrive_path = str(tmp_path)
             db.session.commit()
 
-        original_truediv = Path.__truediv__
-
-        def patched_truediv(self, other):
-            result = original_truediv(self, other)
-            if str(other) == 'salesbuddy.db' and 'data' in str(self):
-                return fake_db
-            return result
-
-        with patch.object(Path, '__truediv__', patched_truediv):
+        with patch('app.db_paths.resolve_db_path', return_value=fake_db):
             response = client.post('/api/admin/backup/run')
 
         assert response.status_code == 200
@@ -532,15 +524,7 @@ class TestBackupRunAPI:
             prefs.onedrive_path = str(tmp_path)
             db.session.commit()
 
-        original_init = Path.__truediv__
-
-        def patched(self, other):
-            result = original_init(self, other)
-            if str(other) == 'salesbuddy.db' and 'data' in str(self):
-                return fake_db
-            return result
-
-        with patch.object(Path, '__truediv__', patched):
+        with patch('app.db_paths.resolve_db_path', return_value=fake_db):
             response = client.post('/api/admin/backup/run')
 
         assert response.status_code == 200
