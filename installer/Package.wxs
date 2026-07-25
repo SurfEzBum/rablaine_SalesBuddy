@@ -18,7 +18,7 @@
 
     <Package Name="Sales Buddy"
              Manufacturer="Microsoft Corporation"
-             Version="1.1.14"
+             Version="1.1.16"
              UpgradeCode="f3a7c2d1-8e4b-4f9a-b6c5-1d2e3f4a5b6c"
              Scope="perUser"
              InstallerVersion="500">
@@ -31,13 +31,15 @@
         <!-- Upgrade: remove previous versions before install -->
         <MajorUpgrade DowngradeErrorMessage="A newer version of Sales Buddy is already installed." />
 
-        <!-- RUNNING-APP GATE: refuse to install/upgrade while the desktop app is
-             open. A running app locks files (shell exe + venv) and corrupts the
-             install. CheckAppRunning (install-actions.wxs) sets SALESBUDDYRUNNING
-             before LaunchConditions in both sequences, so this blocks interactive
-             AND silent installs. Uninstall (REMOVE) is never blocked. -->
+        <!-- RUNNING-APP GATE: the desktop app locks files (shell exe + venv) that
+             would corrupt an install/upgrade if it stayed open. CheckAppRunning
+             (install-actions.wxs) now CLOSES the app for the user (graceful
+             shutdown request, then force-kill fallback) before LaunchConditions,
+             and only sets SALESBUDDYRUNNING if it truly couldn't be closed - so this
+             condition blocks solely as a last resort. Uninstall (REMOVE) is never
+             blocked. -->
         <Launch Condition="REMOVE OR NOT SALESBUDDYRUNNING"
-                Message="Sales Buddy is still running and can't be updated while it's open. Right-click the Sales Buddy icon in your system tray (bottom-right of the taskbar - it may be hidden under the up-arrow), choose Quit, then run this installer again." />
+                Message="Sales Buddy is still running and couldn't be closed automatically. Right-click the Sales Buddy icon in your system tray (bottom-right of the taskbar - it may be hidden under the up-arrow), choose Quit, then run this installer again." />
 
         <!-- Icon for Add/Remove Programs -->
         <Icon Id="SalesBuddyIcon" SourceFile="..\static\icon.ico" />

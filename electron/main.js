@@ -43,7 +43,12 @@ const STACK_LOG = path.join(LOG_DIR, 'electron-stack.log');
 // it owns the supervisor process; letting server.ps1 tear the tree down would
 // race with our own supervisor-restart handler.
 const UPDATE_REQUEST_FILE = path.join(REPO_ROOT, 'data', 'electron-update.request');
-
+// Sentinel the installer drops to ask us to quit cleanly before it restages the
+// shell, so it can delete our exe without fighting a file lock (and the user
+// doesn't have to manually Quit from the tray first). We watch it the same way
+// as the update request. Shells that predate this just get force-killed by the
+// installer instead - the DB snapshot/restore covers either path.
+const SHUTDOWN_REQUEST_FILE = path.join(REPO_ROOT, 'data', 'shutdown.request');
 const PORT = readEnvPort();
 const HEALTH_URL = `http://localhost:${PORT}/health`;
 const BASE_URL = `http://localhost:${PORT}/`;
@@ -287,9 +292,26 @@ async function runUpdate(trigger) {
 // Poll for the web-app sentinel. Works whether the user clicked Update in the
 // Electron window or in a real browser tab pointed at the same local server.
 function startUpdateRequestWatcher() {
+  // A prior shell that was force-killed or crashed (e.g. the installer closing us
+  // via the fallback path) can leave a stale shutdown.request behind. Clear it
+  // once at startup so THIS freshly-launched shell doesn't read a request meant
+  // for a previous instance and immediately quit. We only honor sentinels that
+  // appear AFTER we start watching.
+  try { fs.unlinkSync(SHUTDOWN_REQUEST_FILE); } catch (_) { /* not present */ }
   setInterval(() => {
-    if (isUpdating) return;
     try {
+      // Installer asking us to close so it can restage the shell. Quit the same
+      // way the tray "Quit" does: isQuitting bypasses close-to-tray, and
+      // before-quit tears the backend down. Checked before the update sentinel
+      // (and regardless of isUpdating) so a shutdown request always wins.
+      if (fs.existsSync(SHUTDOWN_REQUEST_FILE)) {
+        try { fs.unlinkSync(SHUTDOWN_REQUEST_FILE); } catch (_) { /* ignore */ }
+        log('Shutdown requested (installer sentinel) - quitting cleanly');
+        isQuitting = true;
+        app.quit();
+        return;
+      }
+      if (isUpdating) return;
       if (fs.existsSync(UPDATE_REQUEST_FILE)) {
         fs.unlinkSync(UPDATE_REQUEST_FILE);
         runUpdate('web');

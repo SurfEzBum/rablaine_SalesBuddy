@@ -74,11 +74,12 @@
 
         <!-- ================================================================
              RUNNING-APP GATE: immediate action (runs as the interactive user,
-             before LaunchConditions in BOTH sequences) that sets the
-             SALESBUDDYRUNNING property. The <Launch> condition in Package.wxs
-             then refuses the install when the desktop app is running, so it
-             can't hold file locks and corrupt the upgrade. Runs in the UI
-             sequence (interactive) and the execute sequence (covers silent).
+             before LaunchConditions in BOTH sequences) that CLOSES a running
+             desktop app so it can't hold file locks and corrupt the upgrade -
+             graceful shutdown request first, force-kill fallback second. It only
+             sets SALESBUDDYRUNNING if the app couldn't be closed, so the <Launch>
+             condition in Package.wxs blocks purely as a last resort. Runs in the
+             UI sequence (interactive) and the execute sequence (covers silent).
              ================================================================ -->
         <CustomAction Id="CheckAppRunning"
                       BinaryRef="CustomActionsDll"
