@@ -544,8 +544,12 @@ These are the **only categories that count for HoK** credit:
 | Briefing | 861980008 | Executive/technical briefings |
 | Consumption Plan | 861980007 | Planning Azure consumption |
 | Demo | 861980002 | Product/solution demos |
+| L300+ Demo | 606820009 | Level 300+ deep technical demos |
 | PoC/Pilot | 861980005 | Proof of concept work |
+| Rapid Prototyping | 606820006 | Rapid prototyping sessions |
+| Solution Whiteboarding | 606820008 | Solution whiteboarding sessions |
 | Technical Close/Win Plan | 606820005 | Technical win planning |
+| Technical Workshop | 606820007 | Hands-on technical workshops |
 | Workshop | 861980001 | Hands-on workshops |
 
 ### Non-HoK Categories (for reference)
@@ -553,6 +557,7 @@ These are the **only categories that count for HoK** credit:
 | Category | Code |
 |----------|------|
 | ACE | 606820000 |
+| Assessment | 861980014 |
 | Call Back Requested | 861980010 |
 | Cross Segment | 606820001 |
 | Cross Workload | 606820002 |

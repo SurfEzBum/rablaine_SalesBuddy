@@ -545,8 +545,12 @@ HOK_TASK_CATEGORIES = {
     861980008,  # Briefing
     861980007,  # Consumption Plan
     861980002,  # Demo
+    606820009,  # L300+ Demo
     861980005,  # PoC/Pilot
+    606820006,  # Rapid Prototyping
+    606820008,  # Solution Whiteboarding
     606820005,  # Technical Close/Win Plan
+    606820007,  # Technical Workshop
     861980001,  # Workshop
 }
 
@@ -558,11 +562,16 @@ TASK_CATEGORIES = [
     {"label": "Briefing", "value": 861980008, "is_hok": True},
     {"label": "Consumption Plan", "value": 861980007, "is_hok": True},
     {"label": "Demo", "value": 861980002, "is_hok": True},
+    {"label": "L300+ Demo", "value": 606820009, "is_hok": True},
     {"label": "PoC/Pilot", "value": 861980005, "is_hok": True},
+    {"label": "Rapid Prototyping", "value": 606820006, "is_hok": True},
+    {"label": "Solution Whiteboarding", "value": 606820008, "is_hok": True},
     {"label": "Technical Close/Win Plan", "value": 606820005, "is_hok": True},
+    {"label": "Technical Workshop", "value": 606820007, "is_hok": True},
     {"label": "Workshop", "value": 861980001, "is_hok": True},
     # Non-HOK categories
     {"label": "ACE", "value": 606820000, "is_hok": False},
+    {"label": "Assessment", "value": 861980014, "is_hok": False},
     {"label": "Call Back Requested", "value": 861980010, "is_hok": False},
     {"label": "Cross Segment", "value": 606820001, "is_hok": False},
     {"label": "Cross Workload", "value": 606820002, "is_hok": False},
