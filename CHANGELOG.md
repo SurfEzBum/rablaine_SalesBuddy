@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/26/2026
+## 7/26/2026 - 35dbe67
 
 - Installing or updating the desktop app now opens Sales Buddy as soon as it's ready, instead of leaving you staring at a finished installer wondering if anything happened. The app starts warming up in the background during the last step of setup, so by the time you close the installer the window is already coming up.
 
