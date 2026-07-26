@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/25/2026
+
+- Updating the desktop app is now much more resilient. If a previous version didn't shut down cleanly, Sales Buddy clears the leftover background processes on its own the next time it starts - so you no longer get stuck on "can't reach the server" after an update. And if an update can't run (for example, right after a fresh install before your system finishes setting up), the current version keeps running with a clear message instead of being left in a broken state.
+
 ## 7/24/2026 - 554128d
 
 - Your database now lives in a protected location outside the app's install folder, so it can't be touched by an update, repair, or uninstall. When you first run this version your existing database is moved there automatically and safely - it's verified after the move, and the original is kept as a timestamped backup (never deleted).
