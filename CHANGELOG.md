@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/26/2026
+
+- Added new Hands On Keyboard task types for FY27 (L300+ Demo, Rapid Prototyping, Solution Whiteboarding, and Technical Workshop). These now appear when creating MSX tasks and count toward your HoK credit. Also added the Assessment task category.
+
 ## 7/26/2026 - 0991553
 
 - Fixed a problem that could block the desktop app from updating (a leftover build file made the update stop with an error). The app now installs its build dependencies in a way that leaves that file untouched, so updates apply cleanly.
