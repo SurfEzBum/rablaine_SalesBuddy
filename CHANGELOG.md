@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/26/2026
+
+- The desktop app is now packaged with an updated, more secure build toolchain. This clears out the security warnings and "deprecated" notices you may have seen scroll by while installing or updating - including a critical advisory in the old packaging tools - and doesn't change how the app works. It's a behind-the-scenes cleanup of the install and update process.
+
 ## 7/25/2026 - 5d88a42
 
 - Updating the desktop app is now much more resilient. If a previous version didn't shut down cleanly, Sales Buddy clears the leftover background processes on its own the next time it starts - so you no longer get stuck on "can't reach the server" after an update. And if an update can't run (for example, right after a fresh install before your system finishes setting up), the current version keeps running with a clear message instead of being left in a broken state.
