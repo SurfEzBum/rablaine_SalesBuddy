@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/26/2026
+## 7/26/2026 - 6fd6fa2
 
 - Your automatic and manual backups are now taken with a consistent, crash-safe snapshot method, so a backup can never capture a half-written or stale copy of your database - even if you're actively using Sales Buddy the moment it runs.
 - The daily backup no longer flashes a console window on screen at 11 AM. It now runs completely in the background.
