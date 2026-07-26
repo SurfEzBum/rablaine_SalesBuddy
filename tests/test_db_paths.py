@@ -210,3 +210,63 @@ def test_verify_copy_accepts_matching(tmp_path):
     _make_db(legacy, customers=7)
     _make_db(copy, customers=7)
     assert db_paths._verify_copy(legacy, copy, logging.getLogger('t')) is True
+
+
+# ---------------------------------------------------------------------------
+# WAL-safe backup (backup_database)
+# ---------------------------------------------------------------------------
+
+def test_backup_happy_path(tmp_path):
+    src = tmp_path / 'salesbuddy.db'
+    _make_db(src, customers=12)
+    dest = tmp_path / 'out' / 'backup.db'
+
+    assert db_paths.backup_database(dest, src=src) is True
+    assert dest.exists()
+    assert _count(dest) == 12
+    # No leftover partial file.
+    assert not dest.with_name(dest.name + '.partial').exists()
+
+
+def test_backup_is_wal_safe(tmp_path):
+    """Rows committed but still sitting in the -wal (uncheckpointed) must be
+    captured. A naive file copy of the main db file would miss them."""
+    src = tmp_path / 'salesbuddy.db'
+    _make_db(src, customers=3)
+
+    writer = sqlite3.connect(str(src))
+    try:
+        writer.execute('PRAGMA journal_mode=WAL')
+        writer.execute("INSERT INTO customers (name) VALUES ('wal1')")
+        writer.execute("INSERT INTO customers (name) VALUES ('wal2')")
+        writer.commit()  # committed, but not checkpointed -> lives in -wal
+
+        dest = tmp_path / 'backup.db'
+        assert db_paths.backup_database(dest, src=src) is True
+        assert _count(dest) == 5  # all rows, WAL folded into the snapshot
+    finally:
+        writer.close()
+
+
+def test_backup_missing_source_returns_false(tmp_path):
+    assert db_paths.backup_database(
+        tmp_path / 'b.db', src=tmp_path / 'nope.db') is False
+
+
+def test_backup_no_verify(tmp_path):
+    src = tmp_path / 'salesbuddy.db'
+    _make_db(src, customers=2)
+    dest = tmp_path / 'b.db'
+    assert db_paths.backup_database(dest, src=src, verify=False) is True
+    assert _count(dest) == 2
+
+
+def test_backup_verification_failure_discards(tmp_path, monkeypatch):
+    src = tmp_path / 'salesbuddy.db'
+    _make_db(src, customers=4)
+    dest = tmp_path / 'backup.db'
+    monkeypatch.setattr(db_paths, '_verify_copy', lambda *a, **k: False)
+
+    assert db_paths.backup_database(dest, src=src) is False
+    assert not dest.exists()  # bad copy discarded
+    assert not dest.with_name(dest.name + '.partial').exists()

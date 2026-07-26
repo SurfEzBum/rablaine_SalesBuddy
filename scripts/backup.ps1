@@ -288,10 +288,12 @@ function Run-Backup {
     $backupFile = Join-Path $backupDir "salesbuddy_$timestamp.db"
 
     try {
-        Copy-Item $DbFile $backupFile -Force
-        # Copy-Item preserves the source file's LastWriteTime, so every backup
-        # would show the same modified timestamp. Touch it so the backup file's
-        # modification time reflects when the backup was actually taken.
+        if (-not (Backup-SalesBuddyDb -RepoRoot $RepoRoot -SourceDb $DbFile -DestFile $backupFile)) {
+            throw "WAL-safe backup failed (see logs)."
+        }
+        # The backup file's modified time reflects when the backup was actually
+        # taken (the online-backup API writes a fresh file, but touch it anyway
+        # so retention sorting by LastWriteTime is always correct).
         (Get-Item $backupFile).LastWriteTime = Get-Date
         $size = (Get-Item $backupFile).Length
         $sizeMB = [math]::Round($size / 1MB, 1)

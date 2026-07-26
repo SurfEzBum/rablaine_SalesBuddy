@@ -5,7 +5,6 @@ Handles admin panel, user management, and domain whitelisting.
 import base64
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -1046,7 +1045,7 @@ def api_backup_run():
         }), 400
 
     app_root = Path(current_app.root_path).parent
-    from app.db_paths import resolve_db_path
+    from app.db_paths import resolve_db_path, backup_database
     db_path = resolve_db_path()
     if not db_path.exists():
         return jsonify({'success': False, 'error': 'Database file not found.'}), 404
@@ -1055,7 +1054,14 @@ def api_backup_run():
         os.makedirs(backup_dir, exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d_%H%M%S')
         dest = os.path.join(backup_dir, f'salesbuddy_{timestamp}.db')
-        shutil.copy2(str(db_path), dest)
+        # WAL-safe snapshot via the SQLite online-backup API (folds the WAL so a
+        # live write can't produce a torn or stale copy). A plain file copy is
+        # unsafe while the DB is in WAL mode.
+        if not backup_database(dest, src=db_path):
+            return jsonify({
+                'success': False,
+                'error': 'Backup failed (see logs for details).',
+            }), 500
 
         size_mb = os.path.getsize(dest) / (1024 * 1024)
         return jsonify({
