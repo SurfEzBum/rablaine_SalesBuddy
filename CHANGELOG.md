@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/26/2026
+
+- Developer tooling: `scripts/dev.ps1` now accepts dash-prefixed action switches (`-Stop`, `-Start`, `-Restart`, `-Status`) alongside the positional form. Previously a token like `-Stop` was silently ignored and fell through to the default start action, so stopping the dev server actually relaunched it. Also gitignored the installation-specific `data-path.txt`.
+
 ## 7/26/2026 - 5badb46
 
 - Added new Hands On Keyboard task types for FY27 (L300+ Demo, Rapid Prototyping, Solution Whiteboarding, and Technical Workshop). These now appear when creating MSX tasks and count toward your HoK credit. Also added the Assessment task category.

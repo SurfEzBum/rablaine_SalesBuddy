@@ -40,6 +40,9 @@ instance/
 *.sqlite3
 data/
 
+# Installation-specific runtime file (app publishes the resolved DB path here)
+data-path.txt
+
 # IDE
 .vscode/
 .idea/
