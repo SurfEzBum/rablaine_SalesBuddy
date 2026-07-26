@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/26/2026
+
+- Installing or updating the desktop app now opens Sales Buddy as soon as it's ready, instead of leaving you staring at a finished installer wondering if anything happened. The app starts warming up in the background during the last step of setup, so by the time you close the installer the window is already coming up.
+
 ## 7/26/2026 - 2929592
 
 - The desktop app is now packaged with an updated, more secure build toolchain. This clears out the security warnings and "deprecated" notices you may have seen scroll by while installing or updating - including a critical advisory in the old packaging tools - and doesn't change how the app works. It's a behind-the-scenes cleanup of the install and update process.

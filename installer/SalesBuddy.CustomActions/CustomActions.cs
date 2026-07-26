@@ -229,7 +229,9 @@ namespace SalesBuddy.CustomActions
                 // migration share one source of truth: it builds the shell locally
                 // (Node is a prereq), swaps the shortcuts and the ON LOGON task to
                 // Electron, and - on an existing Flask install - stops the old stack
-                // first. The Exit dialog launches the app (hence -NoLaunch).
+                // first. Runs with -NoLaunch: we start the app ourselves at the end
+                // of this action (background warm-up) and the Exit dialog launches
+                // it again on Finish - the shell's single-instance lock dedupes them.
                 ProcessRunner.UpdateStatus(session,
                     existingInstall ? "Switching Sales Buddy to the desktop app..."
                                     : "Building the desktop app... this may take a minute");
@@ -255,6 +257,23 @@ namespace SalesBuddy.CustomActions
                 ConfigureBackupTask(session, installDir);
                 AdvanceProgress(session, WeightAutoStart);
                 AdvanceProgress(session, WeightServer);
+
+                // Kick the desktop app off now, in the background, so its Python
+                // supervisor cold-starts while the user reads the Exit dialog.
+                // Otherwise the ~30s boot only begins on Finish, leaving a "did
+                // it work?" gap after the user expects everything to be done.
+                // The Exit dialog's LaunchApp still fires, but the shell holds a
+                // single-instance lock, so that second launch just focuses the
+                // already-starting window instead of spawning a duplicate. Safe
+                // to do here: all staging/venv/config is finished, and the app's
+                // data lives outside the install dir, so it can't race the MSI's
+                // file commit. Only when the Electron shell staged cleanly - the
+                // web fallback path already started its own server above.
+                if (electronOk)
+                {
+                    ProcessRunner.UpdateStatus(session, "Starting Sales Buddy...");
+                    LaunchDesktopApp(session, installDir);
+                }
 
                 // Step 12: Done
                 AdvanceProgress(session, WeightFinish);
@@ -378,19 +397,7 @@ namespace SalesBuddy.CustomActions
                         "SalesBuddy");
                 }
 
-                string exe = Path.Combine(installDir, "electron-dist", "Sales Buddy.exe");
-                if (File.Exists(exe))
-                {
-                    session.Log($"Launching desktop app: {exe}");
-                    Process.Start(exe);
-                }
-                else
-                {
-                    int port = GetPortFromEnv(installDir);
-                    string url = $"http://localhost:{port}";
-                    session.Log($"Desktop exe not found; launching browser: {url}");
-                    Process.Start("explorer.exe", url);
-                }
+                LaunchDesktopApp(session, installDir);
             }
             catch (Exception ex)
             {
@@ -398,6 +405,30 @@ namespace SalesBuddy.CustomActions
             }
 
             return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Launch the staged desktop shell if present, else fall back to the web
+        /// UI in the browser. Safe to call more than once: the Electron shell
+        /// holds a single-instance lock, so a second launch just focuses the
+        /// existing window rather than spawning a duplicate. Used both by the
+        /// end-of-install warm-up and the Exit dialog's LaunchApp action.
+        /// </summary>
+        private static void LaunchDesktopApp(Session session, string installDir)
+        {
+            string exe = Path.Combine(installDir, "electron-dist", "Sales Buddy.exe");
+            if (File.Exists(exe))
+            {
+                session.Log($"Launching desktop app: {exe}");
+                Process.Start(exe);
+            }
+            else
+            {
+                int port = GetPortFromEnv(installDir);
+                string url = $"http://localhost:{port}";
+                session.Log($"Desktop exe not found; launching browser: {url}");
+                Process.Start("explorer.exe", url);
+            }
         }
 
         /// <summary>
