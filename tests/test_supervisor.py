@@ -169,3 +169,40 @@ def test_supervised_web_defers_schedulers():
 def test_managed_child_stores_env():
     child = sup.ManagedChild("web", ["x"], env={"SALESBUDDY_SUPERVISED": "1"})
     assert child.env == {"SALESBUDDY_SUPERVISED": "1"}
+
+
+# --- self-healing pre-flight ------------------------------------------------
+
+def test_port_is_free_detects_busy():
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("0.0.0.0", 0))  # exclusive hold (no SO_REUSEADDR)
+    port = s.getsockname()[1]
+    s.listen()
+    try:
+        assert sup._port_is_free(port) is False
+    finally:
+        s.close()
+
+
+def test_preflight_sweeps_then_returns_when_port_free(monkeypatch):
+    """Pre-flight should attempt the sweep, then return once the port is free.
+    subprocess.run + _repo_root are stubbed so the real sweep never runs (it would
+    otherwise match this dev checkout's processes)."""
+    from pathlib import Path
+    calls = []
+    monkeypatch.setattr(sup, "_repo_root", lambda: Path("C:/nonexistent-test-root"))
+    monkeypatch.setattr(sup.subprocess, "run", lambda *a, **k: calls.append((a, k)))
+    monkeypatch.setattr(sup, "_port_is_free", lambda p: True)
+    # os.name is 'nt' on the dev box, so the (stubbed) sweep path runs.
+    sup.preflight_clear_stale_backend(5151)
+    if sup.os.name == "nt":
+        assert len(calls) == 1  # sweep attempted exactly once
+
+
+def test_preflight_noop_off_windows(monkeypatch):
+    calls = []
+    monkeypatch.setattr(sup.os, "name", "posix")
+    monkeypatch.setattr(sup.subprocess, "run", lambda *a, **k: calls.append(a))
+    sup.preflight_clear_stale_backend(5151)
+    assert calls == []  # never touches processes off Windows

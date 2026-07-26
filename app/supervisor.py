@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -59,6 +60,76 @@ def _repo_root() -> Path:
 
 def _default_port() -> int:
     return int(os.environ.get("PORT", "5151"))
+
+
+def _port_is_free(port: int) -> bool:
+    """True if the web port can be bound (nothing holding it). Strict test (no
+    SO_REUSEADDR) so a still-alive squatter reads as busy."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("0.0.0.0", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def preflight_clear_stale_backend(port: int) -> None:
+    """Self-healing pre-flight, run ONCE by the supervisor before it touches the DB
+    or forks web + worker.
+
+    A prior update whose teardown didn't fully complete can leave a STALE backend
+    (supervisor / worker / waitress) squatting the web port or holding the DB open.
+    That's what makes an update look like it "never came back up" - the new web
+    can't bind. Here we kill any leftover install-scoped backend that isn't THIS
+    process or its launcher, then wait for the port to actually free, so a fresh
+    supervisor always starts from a clean slate. Windows-only (prod). Never raises.
+    """
+    if os.name != "nt":
+        return
+
+    # Never kill ourselves or our venv-launcher parent (both are install-scoped
+    # python running app.supervisor). We haven't forked our own children yet, so
+    # every OTHER matching process is a leftover from a previous boot.
+    keep = {os.getpid()}
+    try:
+        keep.add(os.getppid())
+    except Exception:
+        pass
+
+    try:
+        root = str(_repo_root()).replace("'", "''")
+        keep_list = ",".join(str(p) for p in keep)
+        ps = (
+            "$keep=@(" + keep_list + "); "
+            "Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR "
+            "Name='pythonw.exe' OR Name='waitress-serve.exe'\" | Where-Object { "
+            "$_.CommandLine -like '*" + root + "*' -and "
+            "$keep -notcontains $_.ProcessId } | ForEach-Object { "
+            "taskkill /PID $_.ProcessId /T /F 2>$null }"
+        )
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            timeout=30, check=False,
+        )
+        logger.info("preflight: swept stale install-scoped backend (kept %s)", keep)
+    except Exception as exc:
+        logger.warning("preflight sweep failed (continuing): %s", exc)
+
+    # Wait (bounded) for the port to actually free so waitress binds on the first
+    # try instead of crash-looping. A freshly-killed listener sits in TIME_WAIT
+    # for a moment, so give it up to ~15s.
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if _port_is_free(port):
+            return
+        time.sleep(0.5)
+    logger.warning("preflight: port %d still busy after wait; web may retry", port)
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +353,15 @@ def main() -> None:
     from app.services.azure_profile import ensure_azure_profile
     ensure_azure_profile()
 
+    port = _default_port()
+
+    # Self-healing pre-flight: kill any STALE install-scoped backend and free the
+    # web port BEFORE we touch the DB or fork children. A previous update whose
+    # teardown didn't fully complete can leave a squatter on the port (or a stale
+    # backend holding the DB open); clearing it here means a fresh supervisor
+    # always starts clean and the app reliably comes back up.
+    preflight_clear_stale_backend(port)
+
     # One-time move of the DB to its external location, done ONCE here in the
     # single supervisor process BEFORE forking web + worker (so they never race
     # to migrate). Children carry SALESBUDDY_SUPERVISED and skip their own copy.
@@ -293,7 +373,6 @@ def main() -> None:
     except Exception:
         logger.exception("DB path bootstrap failed (continuing on legacy location)")
 
-    port = _default_port()
     # Mark children as supervised so the web process defers the heavy schedulers
     # to the worker instead of running them inline.
     child_env = {**os.environ, "SALESBUDDY_SUPERVISED": "1"}
