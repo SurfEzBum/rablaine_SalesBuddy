@@ -478,8 +478,13 @@ function Backup-Database {
     if (Test-Path $dbFile) {
         $timestamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
         $backupFile = Join-Path (Split-Path $dbFile -Parent) "salesbuddy_backup_$timestamp.db"
-        Copy-Item $dbFile $backupFile
-        Write-Host "  [OK] Database backed up." -ForegroundColor Green
+        # WAL-safe snapshot (SQLite online-backup API) instead of a naive copy,
+        # so a live write can't leave the pre-update backup torn or stale.
+        if (Backup-SalesBuddyDb -RepoRoot $RepoRoot -SourceDb $dbFile -DestFile $backupFile) {
+            Write-Host "  [OK] Database backed up." -ForegroundColor Green
+        } else {
+            Write-Host "  [WARNING] Database backup failed (continuing)." -ForegroundColor Yellow
+        }
     }
 }
 

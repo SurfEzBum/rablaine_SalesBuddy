@@ -308,3 +308,76 @@ def migrate_db_to_new_location(log: Optional[logging.Logger] = None, *,
         except Exception:
             pass
         return False
+
+
+def backup_database(dest, *, src: Optional[Path] = None, verify: bool = True,
+                    log: Optional[logging.Logger] = None) -> bool:
+    """Create a WAL-safe backup of the SQLite database at ``dest``.
+
+    Uses the SQLite online-backup API, which folds any pending WAL into the
+    snapshot, so the copy is always internally consistent - even if the app is
+    mid-write. A naive file copy of ``salesbuddy.db`` can capture a torn or stale
+    snapshot (committed rows may still live in ``salesbuddy.db-wal`` until a
+    checkpoint), which is exactly what this avoids.
+
+    The backup is written to a ``.partial`` sidecar and atomically moved into
+    place only after it succeeds (and, when ``verify`` is set, passes an
+    integrity check plus customer-row parity against the source), so a failed or
+    interrupted backup can never masquerade as a complete one.
+
+    Args:
+        dest: Destination file path for the backup.
+        src: Source database path. Defaults to the resolved production DB.
+        verify: When True, run ``PRAGMA integrity_check`` and confirm the
+            customer row count matches the source before trusting the copy.
+        log: Optional logger; defaults to this module's logger.
+
+    Returns:
+        True on success. Never raises - on any error it logs and returns False
+        so callers can surface a clean failure.
+    """
+    log = log or logger
+    src = Path(src) if src is not None else resolve_db_path()
+    dest = Path(dest)
+    tmp: Optional[Path] = None
+    try:
+        if not src.exists():
+            log.error('backup: source database not found: %s', src)
+            return False
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + '.partial')
+        if tmp.exists():
+            tmp.unlink()
+
+        # Consistent snapshot via the online-backup API (read-only source so we
+        # never touch the live DB's WAL).
+        source = sqlite3.connect(f'file:{src}?mode=ro', uri=True)
+        try:
+            out = sqlite3.connect(str(tmp))
+            try:
+                source.backup(out)
+            finally:
+                out.close()
+        finally:
+            source.close()
+
+        if verify and not _verify_copy(src, tmp, log):
+            log.error('backup: verification failed - discarding %s', dest)
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+            return False
+
+        os.replace(str(tmp), str(dest))
+        log.info('backup: wrote WAL-safe snapshot to %s', dest)
+        return True
+    except Exception as exc:
+        log.error('backup: failed (%s)', exc)
+        try:
+            if tmp is not None and tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
+        return False
