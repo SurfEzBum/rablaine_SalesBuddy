@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/26/2026
+## 7/26/2026 - dccf0ec
 
 - Developer tooling: `scripts/dev.ps1` now accepts dash-prefixed action switches (`-Stop`, `-Start`, `-Restart`, `-Status`) alongside the positional form. Previously a token like `-Stop` was silently ignored and fell through to the default start action, so stopping the dev server actually relaunched it. Also gitignored the installation-specific `data-path.txt`.
 
