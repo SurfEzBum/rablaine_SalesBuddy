@@ -25,8 +25,22 @@
 param(
     [ValidateSet('start', 'stop', 'restart', 'status')]
     [string]$Action = 'start',
+    [switch]$Start,
+    [switch]$Stop,
+    [switch]$Restart,
+    [switch]$Status,
     [int]$Port = 5000
 )
+
+# Allow dash-prefixed action switches (e.g. `dev.ps1 -Stop`) in addition to the
+# positional form (`dev.ps1 stop`). Without these, a token like `-Stop` doesn't
+# bind to $Action, silently falls through to the default 'start', and the
+# server gets relaunched instead of stopped. A switch wins over the positional
+# default; if several are passed, the most "destructive" one wins.
+if ($Stop) { $Action = 'stop' }
+elseif ($Restart) { $Action = 'restart' }
+elseif ($Status) { $Action = 'status' }
+elseif ($Start) { $Action = 'start' }
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
 $VenvFlask = Join-Path $RepoRoot 'venv\Scripts\flask.exe'
