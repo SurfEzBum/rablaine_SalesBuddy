@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/26/2026
+
+- Fixed a problem that could block the desktop app from updating (a leftover build file made the update stop with an error). The app now installs its build dependencies in a way that leaves that file untouched, so updates apply cleanly.
+
 ## 7/26/2026 - 6fd6fa2
 
 - Your automatic and manual backups are now taken with a consistent, crash-safe snapshot method, so a backup can never capture a half-written or stale copy of your database - even if you're actively using Sales Buddy the moment it runs.
