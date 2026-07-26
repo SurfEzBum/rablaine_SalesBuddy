@@ -151,6 +151,56 @@ function startStack() {
   });
 }
 
+// Block the calling thread for `ms` milliseconds. Used between teardown sweeps
+// so killed handles have a beat to release before we recheck the port. Node has
+// no synchronous sleep, so we park on an Atomics.wait against a throwaway buffer.
+function sleepSync(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+  catch (_) { /* SharedArrayBuffer unavailable - skip the pause */ }
+}
+
+// True when nothing is LISTENING on `port`. We ask Windows directly (rather than
+// trying an async bind) so this stays synchronous inside teardown. On any error
+// we conservatively report "busy" so callers keep trying rather than racing a
+// squatter for the port.
+function portIsFree(port) {
+  if (!IS_WIN) return true;
+  try {
+    const out = execFileSync('powershell',
+      ['-NoProfile', '-NonInteractive', '-Command',
+        `if (Get-NetTCPConnection -LocalPort ${port} -State Listen ` +
+        `-ErrorAction SilentlyContinue) { 'BUSY' } else { 'FREE' }`],
+      { windowsHide: true, timeout: 10000 }).toString();
+    return out.includes('FREE');
+  } catch (_) {
+    return false; // uncertain -> treat as busy
+  }
+}
+
+// Kill every backend process rooted in THIS install (python/waitress shims plus
+// any wedged WorkIQ node child) and wait for `port` to actually free up. We run
+// a bounded number of passes rather than trusting a single kill, because a
+// wedged process (e.g. a stuck WorkIQ subprocess) can take a moment to die.
+// Returns true once the port is free, false if it never freed.
+function sweepInstallBackendUntilPortFree(port, passes) {
+  const root = REPO_ROOT.replace(/'/g, "''");
+  const ps =
+    "Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR " +
+    "Name='pythonw.exe' OR Name='waitress-serve.exe' OR Name='node.exe'\" | " +
+    "Where-Object { $_.CommandLine -like '*" + root + "*' } | ForEach-Object { " +
+    "taskkill /PID $_.ProcessId /T /F 2>$null }";
+  for (let i = 0; i < passes; i++) {
+    try {
+      execFileSync('powershell',
+        ['-NoProfile', '-NonInteractive', '-Command', ps],
+        { windowsHide: true, stdio: 'ignore', timeout: 15000 });
+    } catch (_) { /* best effort */ }
+    if (portIsFree(port)) return true;
+    sleepSync(500); // let handles release before the next pass
+  }
+  return portIsFree(port);
+}
+
 function stopStack() {
   if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
   const pid = supervisorProc ? supervisorProc.pid : null;
@@ -172,23 +222,23 @@ function stopStack() {
   if (pid) {
     log(`Stopping supervisor tree (pid ${pid})`);
     try {
+      // NOTE: a timeout is essential. Without it, a taskkill that blocks on a
+      // process wedged in the kernel would hang stopStack forever, which in turn
+      // would keep runUpdate from ever reaching app.exit() - so the old shell
+      // lingers holding the single-instance lock and the relaunched shell can
+      // never take over. That is the exact shape of the prod update outage.
       execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'],
-        { windowsHide: true, stdio: 'ignore' });
-    } catch (_) { /* already gone */ }
+        { windowsHide: true, stdio: 'ignore', timeout: 20000 });
+    } catch (_) { /* already gone, or timed out - the sweep below is the backstop */ }
   }
-  // Scoped sweep: kill any python/waitress backend whose command line references
-  // this install dir, catching shim-orphaned grandchildren taskkill /T can't see.
-  try {
-    const root = REPO_ROOT.replace(/'/g, "''");
-    const ps =
-      "Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR " +
-      "Name='pythonw.exe' OR Name='waitress-serve.exe'\" | Where-Object { " +
-      "$_.CommandLine -like '*" + root + "*' } | ForEach-Object { " +
-      "taskkill /PID $_.ProcessId /T /F 2>$null }";
-    execFileSync('powershell',
-      ['-NoProfile', '-NonInteractive', '-Command', ps],
-      { windowsHide: true, stdio: 'ignore', timeout: 15000 });
-  } catch (_) { /* best effort */ }
+  // Bounded-retry scoped sweep: kill any backend whose command line references
+  // this install dir (catching shim-orphaned grandchildren and wedged WorkIQ node
+  // children taskkill /T can't see), retrying until port PORT is actually free.
+  const freed = sweepInstallBackendUntilPortFree(PORT, 6);
+  if (!freed) {
+    log(`WARNING: port ${PORT} still busy after teardown sweeps - the next ` +
+      `supervisor boot will self-heal via its pre-flight clear`);
+  }
   log('Stack stopped');
 }
 
@@ -257,6 +307,18 @@ function showUpdatingScreen() {
   for (const w of windows) { if (!w.isDestroyed()) w.loadURL(data); }
 }
 
+// True when `cmd` resolves on PATH. Used to confirm git is reachable BEFORE we
+// tear the backend down for an update.
+function commandAvailable(cmd) {
+  try {
+    execFileSync(IS_WIN ? 'where' : 'which', [cmd],
+      { windowsHide: true, stdio: 'ignore', timeout: 5000 });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 // Stop the stack, git pull, reinstall deps, then relaunch Electron. Relaunch
 // re-runs this shell (picks up main.js changes) and re-spawns the stack (picks
 // up backend changes); DB migrations run automatically on the next boot.
@@ -264,8 +326,26 @@ async function runUpdate(trigger) {
   if (isUpdating) return;
   isUpdating = true;
   log(`Update starting (trigger=${trigger})`);
+  // Confirm git is reachable BEFORE tearing the backend down. On a fresh install
+  // the shell's PATH may not have picked up git yet (winget just added it); if we
+  // stopped the stack first and THEN failed the pull, the app would be left dead.
+  // Missing git = no-op: leave the running version untouched.
+  if (!commandAvailable('git')) {
+    log('Update aborted: git not found on PATH; leaving current version running');
+    isUpdating = false;
+    dialog.showErrorBox(
+      'Sales Buddy Update',
+      'Git was not found, so the update could not run.\n\n' +
+      'The current version will keep running. If updates keep failing, restart ' +
+      'your computer (so PATH refreshes) or reinstall Sales Buddy.'
+    );
+    return;
+  }
   showUpdatingScreen();
-  stopStack();
+  // Never let a teardown error keep us from proceeding to relaunch - the next
+  // supervisor boot self-heals the port via its pre-flight clear regardless.
+  try { stopStack(); }
+  catch (e) { log(`stopStack error during update (continuing): ${(e && e.message) || e}`); }
   try {
     await runStep('git', ['pull', '--ff-only'], REPO_ROOT);
     await runStep(
@@ -279,13 +359,16 @@ async function runUpdate(trigger) {
     const msg = (e && e.message) || String(e);
     log(`Update failed: ${msg}`);
     isUpdating = false;
+    // Bring the backend back up FIRST, then tell the user. showErrorBox is a
+    // blocking modal - if we showed it before restarting, the app would sit dead
+    // behind the dialog the whole time the user reads it.
+    startStack();
+    reloadAllWindows();
     dialog.showErrorBox(
       'Sales Buddy Update',
       `The update could not be completed:\n\n${msg}\n\n` +
       'The current version will keep running.'
     );
-    startStack();
-    reloadAllWindows();
   }
 }
 

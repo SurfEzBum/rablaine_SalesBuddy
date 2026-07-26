@@ -21,9 +21,11 @@ languages can never drift.
 """
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -120,6 +122,64 @@ def _customer_count(con: sqlite3.Connection) -> int:
     return con.execute('SELECT COUNT(*) FROM customers').fetchone()[0]
 
 
+def _rename_with_retry(src: Path, dst: Path, log: logging.Logger,
+                       attempts: int = 5) -> bool:
+    """``os.replace`` with a short backoff + ``gc.collect()`` between tries.
+
+    On Windows a freshly closed SQLite connection can briefly keep the underlying
+    file locked (the classic ``WinError 32`` "used by another process"). Forcing a
+    gc pass drops any lingering connection object and a couple of retries clear the
+    transient lock. Returns True on success, False after exhausting ``attempts``.
+    """
+    for i in range(attempts):
+        try:
+            os.replace(str(src), str(dst))
+            return True
+        except OSError as exc:
+            if i == attempts - 1:
+                log.warning('DB migration: could not rename %s -> %s after %d tries: %s',
+                            src.name, dst.name, attempts, exc)
+                return False
+            gc.collect()
+            time.sleep(0.3)
+    return False
+
+
+def _drop_legacy_sidecars(legacy: Path) -> None:
+    """Delete the now-orphaned WAL/SHM sidecars next to a moved legacy DB."""
+    for ext in ('-wal', '-shm'):
+        side = Path(str(legacy) + ext)
+        if side.exists():
+            try:
+                side.unlink()
+            except Exception:
+                pass
+
+
+def _cleanup_leftover_legacy(legacy: Path, log: logging.Logger) -> None:
+    """Rename a leftover in-install legacy DB out of the way after the migration
+    has already happened.
+
+    A prior boot may have copied + verified the DB to the external location but
+    then failed to rename the original (a transient ``WinError 32`` handle lock).
+    Because the idempotency check short-circuits once the new DB exists, that
+    orphan would otherwise linger forever in the install dir where an old build
+    could accidentally reopen it. Clean it up here. Best-effort; never raises.
+    """
+    try:
+        if not legacy.exists() or legacy.stat().st_size < _MIN_REAL_DB_BYTES:
+            return
+        ts = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
+        preserved = legacy.with_name(legacy.name + f'.migrated-{ts}.bak')
+        if _rename_with_retry(legacy, preserved, log):
+            _drop_legacy_sidecars(legacy)
+            log.info('DB migration: cleaned up leftover legacy DB (-> %s)',
+                     preserved.name)
+    except Exception as exc:  # pragma: no cover - best effort
+        log.debug('DB migration: leftover legacy cleanup skipped: %s', exc)
+
+
+
 def _verify_copy(legacy_path: Path, copy_path: Path,
                  log: logging.Logger) -> bool:
     """Verify the migrated copy: PRAGMA integrity_check == ok AND the customer
@@ -186,6 +246,10 @@ def migrate_db_to_new_location(log: Optional[logging.Logger] = None, *,
             return False
 
     if new_path.exists() and new_path.stat().st_size >= _MIN_REAL_DB_BYTES:
+        # Already migrated. A prior run may have left the legacy DB behind if it
+        # couldn't be renamed at the time (a transient WinError 32 file lock), so
+        # sweep that orphan now before short-circuiting.
+        _cleanup_leftover_legacy(legacy, log)
         return False  # already migrated
 
     if not legacy.exists() or legacy.stat().st_size < _MIN_REAL_DB_BYTES:
@@ -223,23 +287,18 @@ def migrate_db_to_new_location(log: Optional[logging.Logger] = None, *,
 
         # Preserve the original (NEVER delete). Rename with a UTC timestamp and
         # drop the now-orphaned WAL/SHM sidecars so the legacy dir holds no live
-        # database that an old build could accidentally reopen.
+        # database that an old build could accidentally reopen. The rename retries
+        # through transient Windows file locks (the freshly-closed backup handle).
         ts = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
         preserved = legacy.with_name(legacy.name + f'.migrated-{ts}.bak')
-        try:
-            os.replace(str(legacy), str(preserved))
-            for ext in ('-wal', '-shm'):
-                side = Path(str(legacy) + ext)
-                if side.exists():
-                    try:
-                        side.unlink()
-                    except Exception:
-                        pass
+        if _rename_with_retry(legacy, preserved, log):
+            _drop_legacy_sidecars(legacy)
             log.info('DB migration: complete (legacy preserved as %s)', preserved.name)
-        except Exception as exc:
-            # Copy is in place and verified; failing to rename the original is
-            # not fatal (idempotency skips it next time via the size check).
-            log.warning('DB migration: copy in place but could not rename legacy: %s', exc)
+        else:
+            # Copy is in place and verified; failing to rename the original is not
+            # fatal. The next boot's idempotency path (_cleanup_leftover_legacy)
+            # sweeps the orphan once the lock clears.
+            log.warning('DB migration: copy in place but legacy rename deferred to next boot')
         return True
     except Exception as exc:
         log.error('DB migration: failed (%s); falling back to legacy location', exc)

@@ -148,6 +148,51 @@ def test_migrate_verification_failure_keeps_legacy(tmp_path, monkeypatch):
     assert not new.exists()     # bad copy cleaned up
 
 
+def test_migrate_cleans_leftover_legacy_on_next_boot(tmp_path):
+    """If a prior migration copied+verified the DB but couldn't rename the legacy
+    (a transient WinError 32 lock), the next no-op call sweeps the orphan - and
+    its WAL/SHM sidecars - out of the install dir."""
+    new = tmp_path / 'new' / 'salesbuddy.db'
+    legacy = tmp_path / 'old' / 'salesbuddy.db'
+    _make_db(new, customers=42)     # already migrated
+    _make_db(legacy, customers=42)  # orphan left behind last boot
+    Path(str(legacy) + '-wal').write_bytes(b'x')
+    Path(str(legacy) + '-shm').write_bytes(b'x')
+
+    # No-op migration (new already populated) still cleans the orphan.
+    assert db_paths.migrate_db_to_new_location(new_path=new, legacy=legacy) is False
+    assert not legacy.exists()
+    assert not Path(str(legacy) + '-wal').exists()
+    assert not Path(str(legacy) + '-shm').exists()
+    baks = list(legacy.parent.glob('salesbuddy.db.migrated-*.bak'))
+    assert len(baks) == 1
+    assert _count(baks[0]) == 42
+    assert _count(new) == 42  # new untouched
+
+
+def test_rename_with_retry_succeeds(tmp_path):
+    import logging
+    src = tmp_path / 'a.txt'
+    src.write_text('x')
+    dst = tmp_path / 'b.txt'
+    assert db_paths._rename_with_retry(src, dst, logging.getLogger('t')) is True
+    assert dst.exists() and not src.exists()
+
+
+def test_rename_with_retry_gives_up(tmp_path, monkeypatch):
+    import logging
+
+    def _boom(*a, **k):
+        raise OSError('locked')
+
+    src = tmp_path / 'a.txt'
+    src.write_text('x')
+    dst = tmp_path / 'b.txt'
+    monkeypatch.setattr(db_paths.os, 'replace', _boom)
+    assert db_paths._rename_with_retry(
+        src, dst, logging.getLogger('t'), attempts=2) is False
+
+
 def test_verify_copy_rejects_row_mismatch(tmp_path):
     """_verify_copy must reject a copy whose customer count differs from source."""
     import logging
