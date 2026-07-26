@@ -1,4 +1,4 @@
-﻿# What's New in Sales Buddy
+# What's New in Sales Buddy
 
 Recent updates and improvements, newest first.
 
@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/26/2026
+## 7/26/2026 - 2929592
 
 - The desktop app is now packaged with an updated, more secure build toolchain. This clears out the security warnings and "deprecated" notices you may have seen scroll by while installing or updating - including a critical advisory in the old packaging tools - and doesn't change how the app works. It's a behind-the-scenes cleanup of the install and update process.
 
