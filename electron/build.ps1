@@ -10,7 +10,7 @@
     folder is what the MSI harvests and what scripts/migrate-to-electron.ps1
     drops into <install>\electron-dist\.
 .PARAMETER SkipInstall
-    Skip "npm install" (use when node_modules is already present).
+    Skip the dependency install (use when node_modules is already present).
 .PARAMETER SkipSign
     Build only; do not code-sign (useful for local dev builds).
 .EXAMPLE
@@ -37,9 +37,26 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 Push-Location $scriptDir
 try {
     if (-not $SkipInstall) {
-        Write-Host "`nInstalling npm dependencies..." -ForegroundColor Yellow
-        & npm install
-        if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+        # Prefer `npm ci`: it installs strictly from package-lock.json and NEVER
+        # rewrites it. `npm install` can rewrite the lockfile (npm version / metadata
+        # differences) even when nothing changed, which dirties the tracked file on
+        # every user's machine and causes conflicts on the next git-pull update.
+        # Fall back to `npm install` only if ci can't run (missing lockfile) or fails
+        # (lock/package.json drift), so a build never hard-stops here.
+        $lockFile = Join-Path $scriptDir 'package-lock.json'
+        if (Test-Path $lockFile) {
+            Write-Host "`nInstalling npm dependencies (npm ci)..." -ForegroundColor Yellow
+            & npm ci
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  npm ci failed - falling back to npm install..." -ForegroundColor DarkYellow
+                & npm install
+                if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+            }
+        } else {
+            Write-Host "`nInstalling npm dependencies (npm install; no lockfile)..." -ForegroundColor Yellow
+            & npm install
+            if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+        }
     }
 
     Write-Host "`nBuilding unpacked app (electron-builder --dir)..." -ForegroundColor Yellow
