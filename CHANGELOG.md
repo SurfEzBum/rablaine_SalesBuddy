@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/27/2026
+
+- Developer tooling: `scripts/dev.ps1` no longer leaks `AZURE_CONFIG_DIR` into the calling terminal. It now restores `FLASK_ENV` and `AZURE_CONFIG_DIR` to their prior values when the dev server exits, so later `az` commands in the same shell aren't silently redirected to the dev-isolated config dir.
+
 ## 7/27/2026 - 2d102fd
 
 - The **Rebuild desktop app** button no longer hangs on older installs. If your installed app is too old to rebuild itself, you now get a clear message and a link to download the installer instead of a spinner that never finishes.
