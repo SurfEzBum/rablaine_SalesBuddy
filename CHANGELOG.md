@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/26/2026
+## 7/26/2026 - 631983a
 
 - New **Start minimized** setting (Admin panel > Auto-Start, desktop app only). Turn it on and Sales Buddy starts quietly in the system tray when you log in instead of opening a window - your morning updates run in the background and the app opens instantly when you click the tray icon. Opening it from a desktop or Start Menu shortcut always shows the window.
 - Installing or updating now warms the app up hidden in the tray during the final step, so when you click Finish the window pops up already loaded instead of cold-starting.
