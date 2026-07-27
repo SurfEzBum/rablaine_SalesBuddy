@@ -5,6 +5,7 @@ Electron shell-rebuild detection, and the rebuild-shell endpoint.
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -168,3 +169,42 @@ class TestRebuildShellEndpoint:
             resp = client.post('/api/admin/rebuild-shell')
         assert resp.status_code == 400
         assert not REBUILD_SENTINEL.exists()
+
+
+# ---------------------------------------------------------------------------
+# Rebuild-status polling (detects a shell too old to consume the sentinel)
+# ---------------------------------------------------------------------------
+
+class TestRebuildStatusEndpoint:
+    def _cleanup(self):
+        if REBUILD_SENTINEL.exists():
+            REBUILD_SENTINEL.unlink()
+
+    def test_no_sentinel_is_not_pending(self, client):
+        self._cleanup()
+        data = client.get('/api/admin/rebuild-status').get_json()
+        assert data == {'pending': False, 'stale': False}
+
+    def test_fresh_sentinel_is_pending(self, client):
+        REBUILD_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
+        REBUILD_SENTINEL.write_text('rebuild', encoding='utf-8')
+        try:
+            data = client.get('/api/admin/rebuild-status').get_json()
+            assert data == {'pending': True, 'stale': False}
+        finally:
+            self._cleanup()
+
+    def test_old_sentinel_is_stale_and_cleaned_up(self, client):
+        """An unconsumed sentinel means the shell has no rebuild watcher."""
+        from app.routes.admin import REBUILD_SENTINEL_STALE_SECONDS
+        REBUILD_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
+        REBUILD_SENTINEL.write_text('rebuild', encoding='utf-8')
+        try:
+            old = time.time() - (REBUILD_SENTINEL_STALE_SECONDS + 5)
+            os.utime(REBUILD_SENTINEL, (old, old))
+            data = client.get('/api/admin/rebuild-status').get_json()
+            assert data == {'pending': False, 'stale': True}
+            # Cleaned up so a future shell doesn't rebuild on its first boot.
+            assert not REBUILD_SENTINEL.exists()
+        finally:
+            self._cleanup()
