@@ -332,6 +332,10 @@ def run_migrations(db):
     # Migration: Rename CHURN_RISK category to DECLINING
     _rename_churn_risk_to_declining(db)
 
+    # Migration: Add start_minimized to user_preferences (desktop shell tray boot)
+    _add_column_if_not_exists(db, inspector, 'user_preferences',
+                              'start_minimized', "BOOLEAN NOT NULL DEFAULT 0")
+
     # =========================================================================
     # End migrations
     # =========================================================================

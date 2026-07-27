@@ -313,6 +313,18 @@
                             </div>
                         </div>
                         <small class="text-muted d-block mt-1">Starts Sales Buddy automatically when you log in.</small>
+                        {% if is_electron %}
+                        <hr class="my-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <span>Start Sales Buddy minimized</span>
+                            </div>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" role="switch" id="startMinimizedSwitch" {{ 'checked' if pref and pref.start_minimized else '' }}>
+                            </div>
+                        </div>
+                        <small class="text-muted d-block mt-1">Start Sales Buddy in the background, out of your way.</small>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -933,6 +945,15 @@
                                 <i class="bi bi-power"></i> Shut Down Server
                             </button>
                         </div>
+                        {% if is_electron %}
+                        <div class="col-md-6">
+                            <h6><i class="bi bi-arrow-repeat"></i> Rebuild Desktop App</h6>
+                            <p class="small text-muted mb-2">Rebuild and restage the desktop app from the current version. Use this if a desktop-app update didn't take effect. Takes a minute or two, then Sales Buddy restarts itself.</p>
+                            <button class="btn btn-sm btn-danger" id="rebuildShellBtn">
+                                <i class="bi bi-arrow-repeat"></i> Rebuild Desktop App
+                            </button>
+                        </div>
+                        {% endif %}
                     </div>
                     <hr>
                     <!-- Delete Operations -->
@@ -1465,6 +1486,46 @@ document.getElementById('shutdownServerBtn').addEventListener('click', function(
         document.body.innerHTML = '<div class="d-flex justify-content-center align-items-center" style="height:100vh"><div class="text-center"><h2 class="text-muted mb-3"><i class="bi bi-power"></i></h2><h4 class="text-muted">Server has been shut down</h4><p class="text-muted">Run <code>start.bat</code> to restart.</p></div></div>';
     });
 });
+
+// Start Minimized Toggle (Auto-Start card; desktop app only, element absent in web mode)
+const startMinimizedSwitch = document.getElementById('startMinimizedSwitch');
+if (startMinimizedSwitch) {
+    startMinimizedSwitch.addEventListener('change', function() {
+        fetch('/api/preferences/start-minimized', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ start_minimized: this.checked })
+        });
+    });
+}
+
+// Rebuild Desktop App (failsafe; desktop app only, button absent in web mode)
+const rebuildShellBtn = document.getElementById('rebuildShellBtn');
+if (rebuildShellBtn) {
+    rebuildShellBtn.addEventListener('click', function() {
+        if (!confirm('Rebuild the desktop app from the current version?\n\nThis takes a minute or two. Sales Buddy will close and restart itself when it\'s done.')) return;
+        this.disabled = true;
+        this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Rebuilding...';
+        fetch('/api/admin/rebuild-shell', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.body.innerHTML = '<div class="d-flex justify-content-center align-items-center" style="height:100vh"><div class="text-center"><div class="spinner-border text-primary mb-3" role="status"></div><h4 class="text-muted">Rebuilding the desktop app</h4><p class="text-muted">This takes a minute or two, then Sales Buddy will restart itself.</p></div></div>';
+            } else {
+                alert(data.error || 'Could not start the rebuild.');
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-arrow-repeat"></i> Rebuild Desktop App';
+            }
+        })
+        .catch(() => {
+            // The shell is likely tearing down to rebuild - show the same splash.
+            document.body.innerHTML = '<div class="d-flex justify-content-center align-items-center" style="height:100vh"><div class="text-center"><div class="spinner-border text-primary mb-3" role="status"></div><h4 class="text-muted">Rebuilding the desktop app</h4><p class="text-muted">This takes a minute or two, then Sales Buddy will restart itself.</p></div></div>';
+        });
+    });
+}
 
 // Clear Revenue Data
 document.getElementById('clearRevenueBtn').addEventListener('click', function() {
@@ -2270,8 +2331,18 @@ function checkForUpdates(refresh) {
                             <i class="bi bi-arrow-repeat"></i> New code is on disk but the server is still running <code>${data.boot_commit}</code>. Restart to apply.
                         </div>`;
                 }
+                // When the incoming update touches the desktop app, it needs a
+                // rebuild (not just a pull) - warn the user and tell applyUpdate
+                // to request the auto-chained rebuild.
+                let rebuildHtml = '';
+                if (data.pending_rebuild) {
+                    rebuildHtml = `
+                        <div class="mt-2 alert alert-info mb-0 py-2">
+                            <i class="bi bi-box-arrow-in-down"></i> This update includes desktop-app changes, so it will take a bit longer and the window will restart itself when it's done.
+                        </div>`;
+                }
                 const updateBtnHtml = `
-                    <button class="btn btn-success btn-sm" id="applyUpdateBtn" onclick="applyUpdate()">
+                    <button class="btn btn-success btn-sm" id="applyUpdateBtn" onclick="applyUpdate(${data.pending_rebuild ? 'true' : 'false'})">
                         <i class="bi bi-download"></i> Update Now
                     </button>`;
                 html = `
@@ -2282,6 +2353,7 @@ function checkForUpdates(refresh) {
                         ${data.restart_needed ? 'Running' : 'Current'}: <code>${data.boot_commit || data.local_commit}</code> &rarr; Latest: <code>${data.remote_commit}</code>
                     </div>
                     ${renderChangelogSection(data.changelog && data.changelog.pending, "What you'll get")}
+                    ${rebuildHtml}
                     ${restartHtml}
                     ${renderActionBar(updateBtnHtml)}
                 `;
@@ -2522,7 +2594,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-function applyUpdate() {
+function applyUpdate(rebuild) {
     const card = document.getElementById('updateCheckContent');
     const btn = document.getElementById('applyUpdateBtn');
 
@@ -2562,7 +2634,11 @@ function applyUpdate() {
     `;
     wireChangelogToggle();
 
-    fetch('/api/admin/update-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    fetch('/api/admin/update-apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rebuild: !!rebuild })
+    })
         .then(r => r.json())
         .then(data => {
             if (!data.success) {

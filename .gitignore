@@ -40,6 +40,9 @@ instance/
 *.sqlite3
 data/
 
+# Local-only primed seed DB (past the new-user onboarding) for dev testing
+seed_db/
+
 # Installation-specific runtime file (app publishes the resolved DB path here)
 data-path.txt
 

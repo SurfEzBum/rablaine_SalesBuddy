@@ -204,9 +204,12 @@ if ($NoAutoStart) {
     # abort the migration before we set autostart / shortcuts.
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     try { & cmd.exe /c "schtasks /delete /tn ""$taskName"" /f >nul 2>&1" } catch {}
-    # Per-user Run entry -> launch the Electron exe at login.
+    # Per-user Run entry -> launch the Electron exe at login. The --startup flag
+    # marks this as an automatic (login) launch so the shell honors the user's
+    # "start minimized" preference. The desktop/Start Menu shortcuts stay
+    # argument-free, so double-clicking them always shows the window.
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-    New-ItemProperty -Path $runKey -Name 'SalesBuddy' -Value ('"{0}"' -f $destExe) `
+    New-ItemProperty -Path $runKey -Name 'SalesBuddy' -Value ('"{0}" --startup' -f $destExe) `
         -PropertyType String -Force | Out-Null
 }
 

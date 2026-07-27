@@ -1758,6 +1758,35 @@ def update_dashboard_toggle():
     }), 200
 
 
+@main_bp.route('/api/preferences/start-minimized', methods=['GET', 'POST'])
+def update_start_minimized():
+    """Get or set whether the desktop shell boots to the tray at login.
+
+    On POST the value is stored AND mirrored to data/shell-prefs.json so the
+    Electron shell can read it synchronously at boot (before the backend is up).
+    """
+    from app.services.shell_prefs import write_shell_prefs
+
+    pref = UserPreference.query.first()
+    if request.method == 'GET':
+        return jsonify({
+            'start_minimized': bool(pref.start_minimized) if pref else False
+        }), 200
+
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get('start_minimized', False))
+
+    if not pref:
+        pref = UserPreference()
+        db.session.add(pref)
+    pref.start_minimized = enabled
+    db.session.commit()
+
+    write_shell_prefs(enabled)
+
+    return jsonify({'success': True, 'start_minimized': pref.start_minimized}), 200
+
+
 @main_bp.route('/api/copilot-actions/sync', methods=['POST'])
 def trigger_copilot_sync():
     """Manually trigger a Copilot action items sync."""

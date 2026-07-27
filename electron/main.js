@@ -49,6 +49,19 @@ const UPDATE_REQUEST_FILE = path.join(REPO_ROOT, 'data', 'electron-update.reques
 // as the update request. Shells that predate this just get force-killed by the
 // installer instead - the DB snapshot/restore covers either path.
 const SHUTDOWN_REQUEST_FILE = path.join(REPO_ROOT, 'data', 'shutdown.request');
+// Sentinel the web app drops to ask the shell to rebuild itself from the current
+// on-disk repo source (Danger Zone "Rebuild desktop app" button, and the
+// auto-chain after a shell-touching update). Handled like the update request but
+// runs the build/stage chain instead of a git pull.
+const REBUILD_REQUEST_FILE = path.join(REPO_ROOT, 'data', 'electron-rebuild.request');
+// Small JSON the backend mirrors shell-relevant preferences into, so the shell
+// can read them synchronously at boot before the backend is up (currently just
+// start_minimized).
+const SHELL_PREFS_FILE = path.join(REPO_ROOT, 'data', 'shell-prefs.json');
+// Scripts invoked for a self-rebuild: build.ps1 produces a fresh win-unpacked,
+// migrate-to-electron.ps1 stages it into electron-dist and relaunches.
+const BUILD_SCRIPT = path.join(REPO_ROOT, 'electron', 'build.ps1');
+const MIGRATE_SCRIPT = path.join(REPO_ROOT, 'scripts', 'migrate-to-electron.ps1');
 const PORT = readEnvPort();
 const HEALTH_URL = `http://localhost:${PORT}/health`;
 const BASE_URL = `http://localhost:${PORT}/`;
@@ -60,6 +73,17 @@ let isQuitting = false;
 let isUpdating = false;
 let isBooting = true;
 let restartTimer = null;
+
+// Launch flags. --startup = an automatic launch (login autostart / installer
+// warm-up): honor the start-minimized preference. --minimized = force hidden
+// regardless of the pref (installer warm-up, so it stays hidden until the user
+// clicks Finish). No flag = an explicit user launch (shortcut / pin) -> always
+// show the window.
+const ARG_STARTUP = process.argv.includes('--startup');
+const ARG_MINIMIZED = process.argv.includes('--minimized');
+// A show requested during boot (tray click, second-instance, or the installer's
+// Finish launch) is remembered and honored once the server is ready.
+let pendingShowRequest = false;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,6 +114,22 @@ function readFlaskEnv() {
     if (m) return m[1].trim().replace(/^['"]|['"]$/g, '').toLowerCase();
   } catch (_) { /* ignore */ }
   return 'production';
+}
+
+// Read the start-minimized preference the backend mirrors into shell-prefs.json.
+// Synchronous + defensive so it works at boot before the backend is up.
+function readStartMinimizedPref() {
+  try {
+    const obj = JSON.parse(fs.readFileSync(SHELL_PREFS_FILE, 'utf8'));
+    return !!(obj && obj.start_minimized);
+  } catch (_) { return false; }
+}
+
+// Whether this launch should boot straight to the tray (no window) once ready.
+function shouldBootHidden() {
+  if (ARG_MINIMIZED) return true;                            // warm-up: always hidden
+  if (ARG_STARTUP && readStartMinimizedPref()) return true;  // login + pref on
+  return false;                                              // explicit launch / off
 }
 
 // Build the environment for the spawned stack. Mirrors scripts/supervisor.ps1:
@@ -288,9 +328,11 @@ function runStep(file, args, cwd) {
   });
 }
 
-// Replace the window contents with a lightweight "updating" splash so the user
-// isn't staring at a dead backend while we pull and reinstall.
-function showUpdatingScreen() {
+// Replace the window contents with a lightweight splash so the user isn't
+// staring at a dead backend while we pull/reinstall or rebuild the shell.
+function showUpdatingScreen(title, subtitle) {
+  const h1 = title || 'Updating Sales Buddy';
+  const p = subtitle || 'Pulling the latest version. The app will restart automatically.';
   const html =
     '<!doctype html><html><head><meta charset="utf-8"><style>' +
     'body{font-family:Segoe UI,system-ui,sans-serif;background:#0d1117;color:#e6edf3;' +
@@ -299,8 +341,8 @@ function showUpdatingScreen() {
     'border-top-color:#2f81f7;border-radius:50%;animation:spin 1s linear infinite;' +
     'margin-bottom:22px}@keyframes spin{to{transform:rotate(360deg)}}h1{font-weight:600;' +
     'font-size:20px;margin:0 0 8px}p{color:#8b949e;margin:0}</style></head><body>' +
-    '<div class="s"></div><h1>Updating Sales Buddy</h1>' +
-    '<p>Pulling the latest version. The app will restart automatically.</p>' +
+    '<div class=\"s\"></div><h1>' + h1 + '</h1>' +
+    '<p>' + p + '</p>' +
     '</body></html>';
   ensureWindow();
   const data = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
@@ -322,7 +364,7 @@ function commandAvailable(cmd) {
 // Stop the stack, git pull, reinstall deps, then relaunch Electron. Relaunch
 // re-runs this shell (picks up main.js changes) and re-spawns the stack (picks
 // up backend changes); DB migrations run automatically on the next boot.
-async function runUpdate(trigger) {
+async function runUpdate(trigger, rebuildAfter = false) {
   if (isUpdating) return;
   isUpdating = true;
   log(`Update starting (trigger=${trigger})`);
@@ -351,6 +393,15 @@ async function runUpdate(trigger) {
     await runStep(
       PYTHON, ['-m', 'pip', 'install', '-q', '-r', 'requirements.txt'], REPO_ROOT
     );
+    if (rebuildAfter) {
+      // The incoming update touches the Electron shell (a git pull alone won't
+      // apply main.js changes bundled in the exe). Chain the shell rebuild in
+      // the same motion instead of relaunching the stale shell. runRebuild owns
+      // the relaunch/exit from here.
+      log('Update complete; chaining desktop-app rebuild');
+      await runRebuild('update');
+      return;
+    }
     log('Update complete; relaunching');
     isQuitting = true;
     app.relaunch();
@@ -369,6 +420,112 @@ async function runUpdate(trigger) {
       `The update could not be completed:\n\n${msg}\n\n` +
       'The current version will keep running.'
     );
+  }
+}
+
+// Rebuild the Electron shell from the current on-disk repo source, then relaunch.
+// Two phases:
+//   1. Build a fresh shell (build.ps1 -SkipSign) into electron/dist/win-unpacked
+//      WHILE we're still alive. That dir is separate from the live electron-dist,
+//      so there's no file conflict, a "Building..." splash covers the slow part,
+//      and a build failure leaves the current app running (we just relaunch).
+//   2. A running exe can't overwrite its own files, so hand off to a DETACHED
+//      helper (migrate-to-electron.ps1 -SkipPull) that waits for our exe handle
+//      to release, stages the freshly built shell into electron-dist, repoints
+//      autostart/shortcuts, and relaunches. Then we exit so it can take the lock.
+// Per decision 4 this is a full teardown (Option B): before-quit tears the
+// backend down and the new shell boots it fresh - simpler and race-free.
+// May be called standalone (Danger Zone button) or chained from runUpdate.
+async function runRebuild(trigger) {
+  isUpdating = true; // idempotent: already true when chained from runUpdate
+  log(`Shell rebuild starting (trigger=${trigger})`);
+
+  if (!fs.existsSync(BUILD_SCRIPT) || !fs.existsSync(MIGRATE_SCRIPT)) {
+    log('Rebuild aborted: build.ps1 or migrate-to-electron.ps1 missing; relaunching');
+    isQuitting = true;
+    app.relaunch();
+    app.exit(0);
+    return;
+  }
+
+  showUpdatingScreen(
+    'Building the desktop app',
+    'Applying a desktop-app update. This takes a minute or two, then Sales Buddy restarts itself.'
+  );
+
+  // Phase 1: build (guarded - failure leaves the current shell intact).
+  try {
+    await runStep(
+      'powershell.exe',
+      ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', BUILD_SCRIPT, '-SkipSign'],
+      REPO_ROOT
+    );
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    log(`Shell rebuild (build phase) failed: ${msg}`);
+    dialog.showErrorBox(
+      'Sales Buddy',
+      `The desktop-app update could not be built:\n\n${msg}\n\n` +
+      'Sales Buddy will restart on the current version.'
+    );
+    isQuitting = true;
+    app.relaunch();
+    app.exit(0);
+    return;
+  }
+
+  // Phase 2: hand off to a helper that stages the freshly built shell and
+  // relaunches. It uses the win-unpacked we just built (no -Rebuild) and skips
+  // the pull. TWO Windows gotchas handled here:
+  //   1. Job object: Electron puts spawned children in a job object that is
+  //      terminated when the app exits. A plain `spawn(..., {detached:true})`
+  //      helper therefore gets KILLED the instant we app.exit() - which is
+  //      exactly why an earlier version built the shell but never restaged. We
+  //      launch through `cmd /c start`, which starts the helper in a process that
+  //      breaks out of that job so it survives our exit. We also wait for the
+  //      launcher to actually fire `start` before exiting.
+  //   2. Blindness: the helper's output is teed to logs/shell-rebuild.log so a
+  //      failure in this phase is diagnosable instead of silent.
+  log('Build complete; handing off to restage helper');
+  const rebuildLog = path.join(LOG_DIR, 'shell-rebuild.log');
+  const helperCmd = path.join(REPO_ROOT, 'data', 'shell-rebuild-helper.cmd');
+  try {
+    fs.mkdirSync(path.dirname(helperCmd), { recursive: true });
+    fs.writeFileSync(
+      helperCmd,
+      '@echo off\r\n' +
+      `cd /d "${REPO_ROOT}"\r\n` +
+      `powershell.exe -ExecutionPolicy Bypass -NoProfile -File "${MIGRATE_SCRIPT}" ` +
+      `-SkipPull > "${rebuildLog}" 2>&1\r\n`
+    );
+    const finishExit = () => { isQuitting = true; app.exit(0); };
+    // `start "" /min "<helper>"` breaks the helper out of Electron's job object.
+    // Wait for the short-lived cmd launcher to exit (meaning `start` has fired
+    // and the helper is now independent) before we quit; a safety timeout covers
+    // the case where the exit event never arrives.
+    const child = spawn(
+      'cmd.exe', ['/c', 'start', '', '/min', helperCmd],
+      { cwd: REPO_ROOT, stdio: 'ignore', windowsHide: true }
+    );
+    child.on('exit', finishExit);
+    child.on('error', (e) => {
+      log(`Restage launcher error: ${(e && e.message) || e}; relaunching current shell`);
+      isQuitting = true;
+      app.relaunch();
+      app.exit(0);
+    });
+    setTimeout(finishExit, 5000);
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    log(`Failed to launch restage helper: ${msg}; relaunching current shell`);
+    dialog.showErrorBox(
+      'Sales Buddy',
+      'The desktop-app update could not be finished. Sales Buddy will restart on ' +
+      'the current version. You can retry from Admin > Danger Zone > Rebuild desktop app.'
+    );
+    isQuitting = true;
+    app.relaunch();
+    app.exit(0);
   }
 }
 
@@ -395,9 +552,21 @@ function startUpdateRequestWatcher() {
         return;
       }
       if (isUpdating) return;
+      // Rebuild request (Danger Zone failsafe): rebuild the shell from the
+      // current on-disk source, no git pull.
+      if (fs.existsSync(REBUILD_REQUEST_FILE)) {
+        try { fs.unlinkSync(REBUILD_REQUEST_FILE); } catch (_) { /* ignore */ }
+        runRebuild('web');
+        return;
+      }
       if (fs.existsSync(UPDATE_REQUEST_FILE)) {
-        fs.unlinkSync(UPDATE_REQUEST_FILE);
-        runUpdate('web');
+        // Content 'rebuild' = the incoming update touches the shell, so chain a
+        // rebuild after the pull. Anything else (a timestamp) = pull + relaunch.
+        let content = '';
+        try { content = fs.readFileSync(UPDATE_REQUEST_FILE, 'utf8'); } catch (_) { /* ignore */ }
+        try { fs.unlinkSync(UPDATE_REQUEST_FILE); } catch (_) { /* ignore */ }
+        const rebuildAfter = content.trim().toLowerCase() === 'rebuild';
+        runUpdate('web', rebuildAfter);
       }
     } catch (_) { /* ignore */ }
   }, 1500);
@@ -732,7 +901,9 @@ function showAbout() {
 function showWindow() {
   // During boot the first window is deferred until /health answers, so a tray
   // click or second-instance must not create an early "Not Running" window.
-  if (isBooting) return;
+  // Remember the request so it fires once boot completes (covers a minimized
+  // boot and the installer's Finish launch racing our startup).
+  if (isBooting) { pendingShowRequest = true; return; }
   // Un-hide the window that was last closed to tray, if any; else ensure one.
   const hidden = [...windows].find((w) => !w.isDestroyed() && !w.isVisible());
   if (hidden) {
@@ -779,7 +950,15 @@ if (!app.requestSingleInstanceLock()) {
     startStack();
     waitForServer(() => {
       isBooting = false;
-      ensureWindow();
+      // Boot straight to the tray (no window) for an automatic launch when the
+      // user asked to start minimized, or when forced (installer warm-up) -
+      // unless a show was already requested during boot (e.g. the installer's
+      // Finish launch fired a second-instance while we were still starting).
+      if (!shouldBootHidden() || pendingShowRequest) {
+        ensureWindow();
+      } else {
+        log('Starting minimized to the system tray.');
+      }
       createTray();
       startUpdateRequestWatcher();
       // Quiet check shortly after boot: only prompts if an update is available.

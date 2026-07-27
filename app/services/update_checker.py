@@ -325,6 +325,45 @@ def entries_newer_than(entries: list, cutoff_date: str | None) -> list:
     return [e for e in entries if e.get('date_iso', '') > cutoff_date]
 
 
+# ---------------------------------------------------------------------------
+# Electron shell rebuild detection
+# ---------------------------------------------------------------------------
+
+# A changelog bullet describing a change that requires the Electron desktop
+# shell to be rebuilt (not just a git pull) starts with this marker, e.g.:
+#   - *Electron Shell Update* - the desktop app can now start minimized.
+# The `*...*` renders as italic to users but is a precise signal to us.
+SHELL_UPDATE_MARKER = 'electron shell update'
+
+
+def _bullet_flags_shell_rebuild(bullet: str) -> bool:
+    """True if a changelog bullet carries the *Electron Shell Update* marker.
+
+    Case-insensitive and tolerant of leading markdown emphasis (`*`, `_`) and
+    whitespace, so `*Electron Shell Update* - ...` matches.
+    """
+    text = (bullet or '').strip().lstrip('*_ ').lower()
+    return text.startswith(SHELL_UPDATE_MARKER)
+
+
+def entries_require_shell_rebuild(entries: list, commits: set) -> bool:
+    """True if any changelog entry tagged with a hash in ``commits`` carries the
+    *Electron Shell Update* marker on one of its bullets.
+
+    Used to detect ahead of time (pending range: current..remote) that an update
+    will need a desktop-app rebuild, so the UI can warn and the shell can chain
+    the rebuild after the pull.
+    """
+    for e in entries:
+        commit = e.get('commit')
+        if not commit or commit[:7] not in commits:
+            continue
+        for bullet in e.get('bullets', []):
+            if _bullet_flags_shell_rebuild(bullet):
+                return True
+    return False
+
+
 def _check_loop(interval_seconds: int) -> None:
     """Background loop that checks for updates periodically.
 

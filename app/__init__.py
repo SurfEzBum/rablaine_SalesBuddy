@@ -146,6 +146,15 @@ def create_app():
             pref = UserPreference()
             db.session.add(pref)
             db.session.commit()
+
+        # Reconcile the shell-prefs bridge file to the stored preference so the
+        # Electron shell reads the right start-minimized value at next boot
+        # (self-heals after a restore, manual edit, or a version predating it).
+        try:
+            from app.services.shell_prefs import reconcile_shell_prefs
+            reconcile_shell_prefs(UserPreference.query.first())
+        except Exception:
+            pass
     
     # Load app-wide preferences into g
     @app.before_request

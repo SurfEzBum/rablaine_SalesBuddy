@@ -82,7 +82,7 @@ def admin_panel():
             fy_season = False
 
     return render_template('admin_panel.html', stats=stats, fy_season=fy_season,
-                           is_electron=_is_electron())
+                           pref=pref, is_electron=_is_electron())
 
 
 @admin_bp.route('/admin/ai-logs')
@@ -203,6 +203,7 @@ def api_update_check():
         get_update_state, check_for_updates,
         get_changelog_state, fetch_changelog,
         get_local_head_date, get_commits_in_range, entries_in_commits,
+        entries_require_shell_rebuild,
     )
 
     # Always pull a fresh changelog. Cheap HTTP call, removes the entire
@@ -267,6 +268,15 @@ def api_update_check():
     }
     state['previous_commit'] = pref.previous_commit if pref else None
     state['current_commit'] = pref.current_commit if pref else None
+
+    # Whether the pending update includes an Electron shell change that needs a
+    # rebuild (not just a git pull) to take effect. The front-end uses this to
+    # warn the user and to request the auto-chained rebuild on Update. Only
+    # meaningful under the desktop shell.
+    state['pending_rebuild'] = (
+        _is_electron()
+        and entries_require_shell_rebuild(changelog['entries'], pending_commits)
+    )
 
     return jsonify(state)
 
@@ -375,8 +385,15 @@ def api_update_apply():
         try:
             sentinel = repo_root / 'data' / 'electron-update.request'
             sentinel.parent.mkdir(parents=True, exist_ok=True)
+            # If the incoming update carries an Electron shell change, ask the
+            # shell to chain a rebuild after the pull (content = 'rebuild').
+            # Otherwise a plain timestamp = pull + relaunch, today's behavior.
+            data = request.get_json(silent=True) or {}
+            want_rebuild = bool(data.get('rebuild', False))
             sentinel.write_text(
-                datetime.now(timezone.utc).isoformat(), encoding='utf-8'
+                'rebuild' if want_rebuild
+                else datetime.now(timezone.utc).isoformat(),
+                encoding='utf-8'
             )
         except Exception as e:
             return jsonify({'error': f'Failed to request update: {e}'}), 500
@@ -438,6 +455,36 @@ def api_update_apply():
     return jsonify({
         'success': True,
         'message': 'Update started. The server will restart momentarily.',
+    })
+
+
+@admin_bp.route('/api/admin/rebuild-shell', methods=['POST'])
+def api_rebuild_shell():
+    """Manually rebuild the Electron desktop shell (failsafe).
+
+    Drops the electron-rebuild.request sentinel the shell watches for; the shell
+    builds the new shell from the current repo source, stages it, and relaunches.
+    This is the always-available Danger Zone fallback for the transition window
+    where auto-detection can't fire (the bootstrap change, an update.bat pull, or
+    an interrupted auto-rebuild). No git pull - it rebuilds whatever is on disk.
+    """
+    if not _is_electron():
+        return jsonify({'error': 'The desktop app is not running'}), 400
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    try:
+        sentinel = repo_root / 'data' / 'electron-rebuild.request'
+        sentinel.parent.mkdir(parents=True, exist_ok=True)
+        sentinel.write_text(
+            datetime.now(timezone.utc).isoformat(), encoding='utf-8'
+        )
+    except Exception as e:
+        return jsonify({'error': f'Failed to request rebuild: {e}'}), 500
+
+    return jsonify({
+        'success': True,
+        'message': ('Rebuilding the desktop app. This takes a minute or two, '
+                    'then Sales Buddy will restart itself.'),
     })
 
 
