@@ -313,6 +313,18 @@
                             </div>
                         </div>
                         <small class="text-muted d-block mt-1">Starts Sales Buddy automatically when you log in.</small>
+                        {% if is_electron %}
+                        <hr class="my-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div>
+                                <span>Start Sales Buddy minimized</span>
+                            </div>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" role="switch" id="startMinimizedSwitch" {{ 'checked' if pref and pref.start_minimized else '' }}>
+                            </div>
+                        </div>
+                        <small class="text-muted d-block mt-1">Start Sales Buddy in the background, out of your way.</small>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -1474,6 +1486,18 @@ document.getElementById('shutdownServerBtn').addEventListener('click', function(
         document.body.innerHTML = '<div class="d-flex justify-content-center align-items-center" style="height:100vh"><div class="text-center"><h2 class="text-muted mb-3"><i class="bi bi-power"></i></h2><h4 class="text-muted">Server has been shut down</h4><p class="text-muted">Run <code>start.bat</code> to restart.</p></div></div>';
     });
 });
+
+// Start Minimized Toggle (Auto-Start card; desktop app only, element absent in web mode)
+const startMinimizedSwitch = document.getElementById('startMinimizedSwitch');
+if (startMinimizedSwitch) {
+    startMinimizedSwitch.addEventListener('change', function() {
+        fetch('/api/preferences/start-minimized', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ start_minimized: this.checked })
+        });
+    });
+}
 
 // Rebuild Desktop App (failsafe; desktop app only, button absent in web mode)
 const rebuildShellBtn = document.getElementById('rebuildShellBtn');

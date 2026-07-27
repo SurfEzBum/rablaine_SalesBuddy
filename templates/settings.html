@@ -25,24 +25,6 @@
             </div>
         </div>
 
-        {% if is_electron %}
-        <!-- Startup (desktop app only) -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-box-arrow-in-down"></i> Startup</h5>
-            </div>
-            <div class="card-body">
-                <div class="form-check form-switch mb-0">
-                    <input class="form-check-input" type="checkbox" id="startMinimizedSwitch" {{ 'checked' if pref and pref.start_minimized else '' }}>
-                    <label class="form-check-label" for="startMinimizedSwitch">
-                        <strong>Start minimized to the system tray</strong>
-                    </label>
-                    <div><small class="text-muted">When you log in, Sales Buddy starts quietly in the background instead of opening a window - so your morning updates are ready and the app opens instantly when you click the tray icon. Opening it from the desktop or Start Menu shortcut always shows the window.</small></div>
-                </div>
-            </div>
-        </div>
-        {% endif %}
-
         <!-- Dashboard -->
         <div class="card mb-4">
             <div class="card-header">
@@ -231,18 +213,6 @@ document.getElementById('msxAutoWritebackSwitch').addEventListener('change', fun
         body: JSON.stringify({ msx_auto_writeback: this.checked })
     });
 });
-
-// Start Minimized Toggle (desktop app only; element absent in web mode)
-const startMinimizedSwitch = document.getElementById('startMinimizedSwitch');
-if (startMinimizedSwitch) {
-    startMinimizedSwitch.addEventListener('change', function() {
-        fetch('/api/preferences/start-minimized', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ start_minimized: this.checked })
-        });
-    });
-}
 
 // WorkIQ Prompt Save/Reset
 const savePromptBtn = document.getElementById('savePromptBtn');

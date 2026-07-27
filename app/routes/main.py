@@ -1216,16 +1216,11 @@ def preferences():
     from app.services.workiq_service import DEFAULT_SUMMARY_PROMPT
     workiq_prompt = pref.workiq_summary_prompt if pref and pref.workiq_summary_prompt else DEFAULT_SUMMARY_PROMPT
 
-    # The "start minimized" setting only applies under the desktop shell; a pure
-    # web-fallback install has no tray/window to minimize, so hide it there.
-    is_electron = os.environ.get('SALESBUDDY_ELECTRON', '').strip().lower() in ('1', 'true', 'yes')
-
     return render_template('settings.html',
                          pref=pref,
                          templates=templates,
                          workiq_prompt=workiq_prompt,
-                         default_workiq_prompt=DEFAULT_SUMMARY_PROMPT,
-                         is_electron=is_electron)
+                         default_workiq_prompt=DEFAULT_SUMMARY_PROMPT)
 
 
 # =============================================================================

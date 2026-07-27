@@ -82,7 +82,7 @@ def admin_panel():
             fy_season = False
 
     return render_template('admin_panel.html', stats=stats, fy_season=fy_season,
-                           is_electron=_is_electron())
+                           pref=pref, is_electron=_is_electron())
 
 
 @admin_bp.route('/admin/ai-logs')
