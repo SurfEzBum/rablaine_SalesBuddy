@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 7/27/2026
+## 7/27/2026 - 2d102fd
 
 - The **Rebuild desktop app** button no longer hangs on older installs. If your installed app is too old to rebuild itself, you now get a clear message and a link to download the installer instead of a spinner that never finishes.
 
