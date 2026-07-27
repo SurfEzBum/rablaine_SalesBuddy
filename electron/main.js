@@ -474,19 +474,50 @@ async function runRebuild(trigger) {
     return;
   }
 
-  // Phase 2: detached helper stages the new shell + relaunches. It uses the
-  // win-unpacked we just built (no -Rebuild) and skips the pull.
-  log('Build complete; handing off to detached restage helper');
+  // Phase 2: hand off to a helper that stages the freshly built shell and
+  // relaunches. It uses the win-unpacked we just built (no -Rebuild) and skips
+  // the pull. TWO Windows gotchas handled here:
+  //   1. Job object: Electron puts spawned children in a job object that is
+  //      terminated when the app exits. A plain `spawn(..., {detached:true})`
+  //      helper therefore gets KILLED the instant we app.exit() - which is
+  //      exactly why an earlier version built the shell but never restaged. We
+  //      launch through `cmd /c start`, which starts the helper in a process that
+  //      breaks out of that job so it survives our exit. We also wait for the
+  //      launcher to actually fire `start` before exiting.
+  //   2. Blindness: the helper's output is teed to logs/shell-rebuild.log so a
+  //      failure in this phase is diagnosable instead of silent.
+  log('Build complete; handing off to restage helper');
+  const rebuildLog = path.join(LOG_DIR, 'shell-rebuild.log');
+  const helperCmd = path.join(REPO_ROOT, 'data', 'shell-rebuild-helper.cmd');
   try {
-    const child = spawn(
-      'powershell.exe',
-      ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', MIGRATE_SCRIPT, '-SkipPull'],
-      { cwd: REPO_ROOT, detached: true, stdio: 'ignore', windowsHide: true }
+    fs.mkdirSync(path.dirname(helperCmd), { recursive: true });
+    fs.writeFileSync(
+      helperCmd,
+      '@echo off\r\n' +
+      `cd /d "${REPO_ROOT}"\r\n` +
+      `powershell.exe -ExecutionPolicy Bypass -NoProfile -File "${MIGRATE_SCRIPT}" ` +
+      `-SkipPull > "${rebuildLog}" 2>&1\r\n`
     );
-    child.unref();
+    const finishExit = () => { isQuitting = true; app.exit(0); };
+    // `start "" /min "<helper>"` breaks the helper out of Electron's job object.
+    // Wait for the short-lived cmd launcher to exit (meaning `start` has fired
+    // and the helper is now independent) before we quit; a safety timeout covers
+    // the case where the exit event never arrives.
+    const child = spawn(
+      'cmd.exe', ['/c', 'start', '', '/min', helperCmd],
+      { cwd: REPO_ROOT, stdio: 'ignore', windowsHide: true }
+    );
+    child.on('exit', finishExit);
+    child.on('error', (e) => {
+      log(`Restage launcher error: ${(e && e.message) || e}; relaunching current shell`);
+      isQuitting = true;
+      app.relaunch();
+      app.exit(0);
+    });
+    setTimeout(finishExit, 5000);
   } catch (e) {
     const msg = (e && e.message) || String(e);
-    log(`Failed to spawn restage helper: ${msg}; relaunching current shell`);
+    log(`Failed to launch restage helper: ${msg}; relaunching current shell`);
     dialog.showErrorBox(
       'Sales Buddy',
       'The desktop-app update could not be finished. Sales Buddy will restart on ' +
@@ -495,13 +526,7 @@ async function runRebuild(trigger) {
     isQuitting = true;
     app.relaunch();
     app.exit(0);
-    return;
   }
-
-  // Exit so the detached helper can take our file locks and restage. Full
-  // teardown (before-quit -> stopStack); the new shell boots the stack fresh.
-  isQuitting = true;
-  app.exit(0);
 }
 
 // Poll for the web-app sentinel. Works whether the user clicked Update in the
