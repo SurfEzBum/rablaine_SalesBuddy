@@ -18,7 +18,10 @@
 #     touches the installed production app (waitress on 5151) or other repos.
 #   - Sets FLASK_ENV=development and points Azure CLI at the dev-isolated
 #     config dir (%USERPROFILE%\SalesBuddyDev\.azure) so MSX calls use the
-#     dev sign-in.
+#     dev sign-in. Both env vars are restored to their previous values when
+#     flask exits, so the caller's terminal is left untouched (important: the
+#     dev config dir must stay on the corp tenant, and leaking it would break
+#     later `az` work such as MSI code signing in the same shell).
 #   - 'start' runs in the foreground so you see logs; Ctrl+C to stop normally,
 #     and if a straggler survives, the next 'start' (or 'stop') clears it.
 
@@ -98,6 +101,14 @@ function Start-DevFlask {
     Set-Location $RepoRoot
     & (Join-Path $RepoRoot 'venv\Scripts\Activate.ps1')
 
+    # Point Flask + Azure CLI at the dev-isolated config for the duration of
+    # this run ONLY. These are process-session env vars, so we must restore the
+    # caller's originals when flask exits - otherwise every later `az` command in
+    # this terminal silently targets SalesBuddyDev\.azure (which must stay signed
+    # into the corp tenant), clobbering unrelated az work like MSI code signing.
+    $prevFlaskEnv = $env:FLASK_ENV
+    $prevAzureConfigDir = $env:AZURE_CONFIG_DIR
+
     $env:FLASK_ENV = 'development'
     $env:AZURE_CONFIG_DIR = Join-Path $env:USERPROFILE 'SalesBuddyDev\.azure'
 
@@ -106,7 +117,18 @@ function Start-DevFlask {
     Write-Host "Ctrl+C to stop (or run: .\scripts\dev.ps1 stop)" -ForegroundColor DarkGray
     Write-Host ""
 
-    flask run --port $Port
+    try {
+        flask run --port $Port
+    }
+    finally {
+        # Restore (or remove, if they weren't set before) so the caller's shell
+        # is left exactly as we found it.
+        if ($null -eq $prevFlaskEnv) { Remove-Item Env:\FLASK_ENV -ErrorAction SilentlyContinue }
+        else { $env:FLASK_ENV = $prevFlaskEnv }
+
+        if ($null -eq $prevAzureConfigDir) { Remove-Item Env:\AZURE_CONFIG_DIR -ErrorAction SilentlyContinue }
+        else { $env:AZURE_CONFIG_DIR = $prevAzureConfigDir }
+    }
 }
 
 switch ($Action) {
