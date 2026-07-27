@@ -8,11 +8,15 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/27/2026
+
+- The **Rebuild desktop app** button no longer hangs on older installs. If your installed app is too old to rebuild itself, you now get a clear message and a link to download the installer instead of a spinner that never finishes.
+
 ## 7/26/2026 - 631983a
 
 - New **Start minimized** setting (Admin panel > Auto-Start, desktop app only). Turn it on and Sales Buddy starts quietly in the system tray when you log in instead of opening a window - your morning updates run in the background and the app opens instantly when you click the tray icon. Opening it from a desktop or Start Menu shortcut always shows the window.
 - Installing or updating now warms the app up hidden in the tray during the final step, so when you click Finish the window pops up already loaded instead of cold-starting.
-- Desktop-app updates can now finish themselves: when an update includes changes to the app shell, the Update button lets you know it'll take a little longer and rebuilds the desktop app automatically - no reinstall needed. A **Rebuild desktop app** button is also available under Admin > Danger Zone if you ever need to trigger it manually. (One-time note: after installing this update, use that Danger Zone button once to pick up the new self-updating desktop app.)
+- Desktop-app updates can now finish themselves: when an update includes changes to the app shell, the Update button lets you know it'll take a little longer and rebuilds the desktop app automatically - no reinstall needed. A **Rebuild desktop app** button is also available under Admin > Danger Zone if you ever need to trigger it manually. (One-time note: your current app is too old to rebuild itself, so pick up this change by downloading the installer once from the [releases page](https://github.com/rablaine/SalesBuddy/releases/latest). Everything is automatic after that.)
 
 ## 7/26/2026 - dccf0ec
 

@@ -1502,6 +1502,35 @@ if (startMinimizedSwitch) {
 // Rebuild Desktop App (failsafe; desktop app only, button absent in web mode)
 const rebuildShellBtn = document.getElementById('rebuildShellBtn');
 if (rebuildShellBtn) {
+    const showRebuildSplash = () => {
+        document.body.innerHTML = '<div class="d-flex justify-content-center align-items-center" style="height:100vh"><div class="text-center"><div class="spinner-border text-primary mb-3" role="status"></div><h4 class="text-muted">Rebuilding the desktop app</h4><p class="text-muted">This takes a minute or two, then Sales Buddy will restart itself.</p></div></div>';
+    };
+
+    // The installed app is older than the self-rebuild feature, so it will never
+    // act on the request. Point the user at the installer instead of leaving a
+    // spinner up forever.
+    const showReinstallFallback = () => {
+        document.body.innerHTML = '<div class="d-flex justify-content-center align-items-center" style="height:100vh"><div class="text-center" style="max-width:32rem"><i class="bi bi-box-arrow-down text-primary" style="font-size:2.5rem"></i><h4 class="mt-3">This version can\'t rebuild itself</h4><p class="text-muted">Your installed app predates the self-updating desktop app, so it needs one manual install. After this, the Rebuild button works on its own.</p><p class="text-muted small">Your notes and settings are stored separately and are not touched by reinstalling.</p><a href="https://github.com/rablaine/SalesBuddy/releases/latest" target="_blank" rel="noopener" class="btn btn-primary"><i class="bi bi-download"></i> Download the installer</a><div class="mt-3"><a href="/admin" class="btn btn-sm btn-link text-muted">Back to admin</a></div></div></div>';
+    };
+
+    // The shell deletes the sentinel within ~1.5s of picking it up. If it is
+    // still there, the running shell has no rebuild watcher.
+    const watchRebuildRequest = () => {
+        const poll = setInterval(() => {
+            fetch('/api/admin/rebuild-status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.stale) {
+                        clearInterval(poll);
+                        showReinstallFallback();
+                    } else if (!data.pending) {
+                        clearInterval(poll);  // Picked up - rebuild is running.
+                    }
+                })
+                .catch(() => clearInterval(poll));  // Backend torn down = rebuilding.
+        }, 2000);
+    };
+
     rebuildShellBtn.addEventListener('click', function() {
         if (!confirm('Rebuild the desktop app from the current version?\n\nThis takes a minute or two. Sales Buddy will close and restart itself when it\'s done.')) return;
         this.disabled = true;
@@ -1513,7 +1542,8 @@ if (rebuildShellBtn) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                document.body.innerHTML = '<div class="d-flex justify-content-center align-items-center" style="height:100vh"><div class="text-center"><div class="spinner-border text-primary mb-3" role="status"></div><h4 class="text-muted">Rebuilding the desktop app</h4><p class="text-muted">This takes a minute or two, then Sales Buddy will restart itself.</p></div></div>';
+                showRebuildSplash();
+                watchRebuildRequest();
             } else {
                 alert(data.error || 'Could not start the rebuild.');
                 this.disabled = false;
@@ -1522,7 +1552,7 @@ if (rebuildShellBtn) {
         })
         .catch(() => {
             // The shell is likely tearing down to rebuild - show the same splash.
-            document.body.innerHTML = '<div class="d-flex justify-content-center align-items-center" style="height:100vh"><div class="text-center"><div class="spinner-border text-primary mb-3" role="status"></div><h4 class="text-muted">Rebuilding the desktop app</h4><p class="text-muted">This takes a minute or two, then Sales Buddy will restart itself.</p></div></div>';
+            showRebuildSplash();
         });
     });
 }

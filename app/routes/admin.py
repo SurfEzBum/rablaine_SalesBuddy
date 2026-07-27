@@ -458,6 +458,12 @@ def api_update_apply():
     })
 
 
+# The shell polls for the rebuild sentinel every 1.5s. If it is still on disk
+# after this many seconds, the running shell has no rebuild watcher (pre-7/2026
+# build) and never will consume it.
+REBUILD_SENTINEL_STALE_SECONDS = 15
+
+
 @admin_bp.route('/api/admin/rebuild-shell', methods=['POST'])
 def api_rebuild_shell():
     """Manually rebuild the Electron desktop shell (failsafe).
@@ -486,6 +492,38 @@ def api_rebuild_shell():
         'message': ('Rebuilding the desktop app. This takes a minute or two, '
                     'then Sales Buddy will restart itself.'),
     })
+
+
+@admin_bp.route('/api/admin/rebuild-status', methods=['GET'])
+def api_rebuild_status():
+    """Report whether the running shell picked up a pending rebuild request.
+
+    The shell polls for the sentinel every 1.5s and deletes it the moment it
+    starts. A sentinel that is still sitting there after a few seconds means the
+    running shell predates the rebuild watcher and will never consume it, so the
+    rebuild would hang forever. In that case we clean the sentinel up (otherwise
+    a future shell would rebuild unexpectedly on its first boot) and tell the
+    caller to show the reinstall fallback.
+    """
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    sentinel = repo_root / 'data' / 'electron-rebuild.request'
+
+    if not sentinel.exists():
+        return jsonify({'pending': False, 'stale': False})
+
+    try:
+        age = datetime.now(timezone.utc).timestamp() - sentinel.stat().st_mtime
+    except OSError:
+        return jsonify({'pending': False, 'stale': False})
+
+    if age < REBUILD_SENTINEL_STALE_SECONDS:
+        return jsonify({'pending': True, 'stale': False})
+
+    try:
+        sentinel.unlink()
+    except OSError:
+        pass
+    return jsonify({'pending': False, 'stale': True})
 
 
 @admin_bp.route('/api/admin/migrate-to-electron', methods=['POST'])
