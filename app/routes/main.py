@@ -1216,11 +1216,16 @@ def preferences():
     from app.services.workiq_service import DEFAULT_SUMMARY_PROMPT
     workiq_prompt = pref.workiq_summary_prompt if pref and pref.workiq_summary_prompt else DEFAULT_SUMMARY_PROMPT
 
+    # The "start minimized" setting only applies under the desktop shell; a pure
+    # web-fallback install has no tray/window to minimize, so hide it there.
+    is_electron = os.environ.get('SALESBUDDY_ELECTRON', '').strip().lower() in ('1', 'true', 'yes')
+
     return render_template('settings.html',
                          pref=pref,
                          templates=templates,
                          workiq_prompt=workiq_prompt,
-                         default_workiq_prompt=DEFAULT_SUMMARY_PROMPT)
+                         default_workiq_prompt=DEFAULT_SUMMARY_PROMPT,
+                         is_electron=is_electron)
 
 
 # =============================================================================
@@ -1756,6 +1761,35 @@ def update_dashboard_toggle():
         'show_stale_milestones': pref.show_stale_milestones,
         'show_hygiene_tasks': pref.show_hygiene_tasks,
     }), 200
+
+
+@main_bp.route('/api/preferences/start-minimized', methods=['GET', 'POST'])
+def update_start_minimized():
+    """Get or set whether the desktop shell boots to the tray at login.
+
+    On POST the value is stored AND mirrored to data/shell-prefs.json so the
+    Electron shell can read it synchronously at boot (before the backend is up).
+    """
+    from app.services.shell_prefs import write_shell_prefs
+
+    pref = UserPreference.query.first()
+    if request.method == 'GET':
+        return jsonify({
+            'start_minimized': bool(pref.start_minimized) if pref else False
+        }), 200
+
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get('start_minimized', False))
+
+    if not pref:
+        pref = UserPreference()
+        db.session.add(pref)
+    pref.start_minimized = enabled
+    db.session.commit()
+
+    write_shell_prefs(enabled)
+
+    return jsonify({'success': True, 'start_minimized': pref.start_minimized}), 200
 
 
 @main_bp.route('/api/copilot-actions/sync', methods=['POST'])

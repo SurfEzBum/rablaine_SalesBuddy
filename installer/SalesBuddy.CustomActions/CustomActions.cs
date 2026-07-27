@@ -272,7 +272,12 @@ namespace SalesBuddy.CustomActions
                 if (electronOk)
                 {
                     ProcessRunner.UpdateStatus(session, "Starting Sales Buddy...");
-                    LaunchDesktopApp(session, installDir);
+                    // Warm up hidden in the tray (--startup --minimized) so the
+                    // Python supervisor cold-starts during the Exit page without a
+                    // window popping up mid-install. The Exit dialog's LaunchApp
+                    // then launches with no args, firing the shell's
+                    // second-instance handler to pop the (already booted) window.
+                    LaunchDesktopApp(session, installDir, "--startup --minimized");
                 }
 
                 // Step 12: Done
@@ -413,14 +418,22 @@ namespace SalesBuddy.CustomActions
         /// holds a single-instance lock, so a second launch just focuses the
         /// existing window rather than spawning a duplicate. Used both by the
         /// end-of-install warm-up and the Exit dialog's LaunchApp action.
+        ///
+        /// <paramref name="args"/> lets the warm-up pass "--startup --minimized"
+        /// so the shell boots hidden to the tray; the Exit dialog's Finish launch
+        /// passes none, which fires the shell's second-instance handler and pops
+        /// the (already warmed) window up.
         /// </summary>
-        private static void LaunchDesktopApp(Session session, string installDir)
+        private static void LaunchDesktopApp(Session session, string installDir, string args = "")
         {
             string exe = Path.Combine(installDir, "electron-dist", "Sales Buddy.exe");
             if (File.Exists(exe))
             {
-                session.Log($"Launching desktop app: {exe}");
-                Process.Start(exe);
+                session.Log($"Launching desktop app: {exe} {args}".TrimEnd());
+                if (string.IsNullOrEmpty(args))
+                    Process.Start(exe);
+                else
+                    Process.Start(exe, args);
             }
             else
             {

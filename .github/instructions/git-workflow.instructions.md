@@ -99,6 +99,31 @@ You can also tag manually if you prefer: `git log --merges -1 --format=%h`, then
 Good: `Add changelog viewer to admin Updates card so you can see what's new before and after applying an update`
 Bad: `Refactor checkForUpdates to call renderChangelogSection helper`
 
+### Electron Shell Update marker
+
+The desktop shell (`electron/main.js` and anything bundled into the exe) does NOT
+update via a plain `git pull` - it needs the shell to be rebuilt and restaged. To
+make that automatic, **prefix any changelog bullet describing a change that
+requires a shell rebuild with `*Electron Shell Update* - `**:
+
+```
+- *Electron Shell Update* - the desktop app can now start minimized to the tray.
+```
+
+The `*...*` renders as italic to users but is a precise signal the app scans for.
+When a pending update carries this marker, the admin Update button warns the user
+and auto-chains the shell rebuild after the pull (see
+`app/services/update_checker.py::entries_require_shell_rebuild`).
+
+**Rules:**
+- Add the marker for any change to `electron/main.js`, `electron/package.json`,
+  the Electron build config, or anything else compiled into `Sales Buddy.exe`.
+  Pure backend/template/route/CSS changes do NOT need it (they ship via git pull).
+- **Never put the marker on the bootstrap commit** - the first commit that
+  introduces this detection logic. The version running before it can't detect
+  with code it doesn't have yet; that first shell change relies on the manual
+  Admin > Danger Zone > Rebuild desktop app button instead.
+
 ## DO NOT Auto-Merge
 
 - **NEVER merge a feature branch to `main` on your own** - always wait for the user to test and explicitly say to merge
