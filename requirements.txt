@@ -22,7 +22,9 @@ pytest-xdist==3.8.0
 azure-identity==1.25.2
 
 # Image Processing
-opencv-python-headless
+# Pin to the 4.x line: OpenCV 5.0 removed cv2.CascadeClassifier from the
+# headless build, which breaks contact-photo face detection (500 on save).
+opencv-python-headless<5
 
 # Production Server
 waitress
