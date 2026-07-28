@@ -163,3 +163,25 @@ class TestContactPhotoProcessing:
         from app.services.contact_photo import process_contact_photo
         with pytest.raises(Exception):
             process_contact_photo(base64.b64encode(b'not an image').decode())
+
+    def test_process_falls_back_when_cascade_unavailable(self, app):
+        """OpenCV 5.0 headless dropped cv2.CascadeClassifier; the service must
+        degrade to a center crop instead of raising a 500."""
+        import cv2
+        from app.services import contact_photo
+
+        contact_photo._face_cascade = None  # reset lazy cache
+        had_attr = hasattr(cv2, 'CascadeClassifier')
+        saved = getattr(cv2, 'CascadeClassifier', None)
+        if had_attr:
+            delattr(cv2, 'CascadeClassifier')
+        try:
+            cropped, full = contact_photo.process_contact_photo(_make_test_image_b64())
+            assert cropped
+            assert full
+            base64.b64decode(cropped)
+            base64.b64decode(full)
+        finally:
+            if had_attr:
+                cv2.CascadeClassifier = saved
+            contact_photo._face_cascade = None

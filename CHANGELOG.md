@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 7/28/2026
+
+- Fixed pasting contact photos failing with "Error saving photo". A newer version of the image library (OpenCV 5) dropped the face-detection feature the app relied on, which broke photo saves. Photos now save reliably again, and the app automatically uses the compatible library version.
+
 ## 7/27/2026 - a2c9c7e
 
 - Updated the revenue import instructions to point at the new **Azure Service Level Subscription Details SL4 - WW** MSXI report, and to check both **ServiceLevel2** and **ServiceLevel4** under Choose Fields when exporting your CSV.

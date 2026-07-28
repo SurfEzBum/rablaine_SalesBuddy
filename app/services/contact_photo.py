@@ -17,9 +17,20 @@ _face_cascade = None
 
 
 def _get_face_cascade():
-    """Lazy-load the face detection cascade."""
+    """Lazy-load the face detection cascade.
+
+    Returns None if the running OpenCV build has no Haar cascade support
+    (e.g. OpenCV 5.0 headless dropped ``cv2.CascadeClassifier``). Callers
+    fall back to a center crop in that case instead of raising.
+    """
     global _face_cascade
     if _face_cascade is None:
+        if not hasattr(cv2, 'CascadeClassifier'):
+            logger.warning(
+                "cv2.CascadeClassifier unavailable (OpenCV %s); "
+                "falling back to center crop", cv2.__version__
+            )
+            return None
         cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
         _face_cascade = cv2.CascadeClassifier(cascade_path)
     return _face_cascade
@@ -55,15 +66,18 @@ def process_contact_photo(full_b64: str) -> Tuple[str, str]:
     _, full_buf = cv2.imencode('.png', img)
     scaled_full_b64 = base64.b64encode(full_buf).decode('ascii')
 
-    # Detect faces
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # Detect faces (skip gracefully if the OpenCV build has no cascade support)
     cascade = _get_face_cascade()
-    faces = cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(20, 20),
-    )
+    if cascade is not None:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(20, 20),
+        )
+    else:
+        faces = []
 
     # Determine crop region
     crop_size = 120
