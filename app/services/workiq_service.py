@@ -241,6 +241,7 @@ _SUMMARY_TRAILER_RE = re.compile(
     r'(?:'
     r'[A-Z][A-Z _&/]{2,}:'                 # ALL-CAPS label followed by a colon
     r'|(?i:action[ _]?items?)\**:?[ \t]*$'  # "Action Items" heading (any case)
+    r'|(?i:meeting[ _]?(?:metadata|details|information))\**:?[ \t]*$'  # metadata heading
     r')',
     re.MULTILINE,
 )
@@ -1179,8 +1180,13 @@ def _parse_summary_response(response: str) -> Dict[str, Any]:
         r'TASK[_\s]?(?:TITLE|DESCRIPTION):\s*.+?(?:\n|$)', '', response, flags=re.IGNORECASE
     ).strip()
     
-    # Check if response has structured format
-    has_structured = 'SUMMARY:' in cleaned_response or 'TECHNOLOGIES:' in cleaned_response
+    # Check if response has structured format. Only the legacy SUMMARY:/
+    # TECHNOLOGIES:/ACTION_ITEMS: format uses the marker parser, and it always
+    # leads with SUMMARY:. A stray ALL-CAPS metadata label like "TECHNOLOGIES:"
+    # in an otherwise natural-language response must NOT trigger it - the marker
+    # parser only captures text after SUMMARY:, so with no SUMMARY: line the
+    # whole narrative is dropped and the summary comes back blank.
+    has_structured = 'SUMMARY:' in cleaned_response
     
     if not has_structured:
         # Use natural language parsing
