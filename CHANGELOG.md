@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 8/3/2026
+## 8/3/2026 - 1cc45ad
 
 - Fixed some imported meeting summaries still coming back blank. Certain WorkIQ responses were being misread as a different format, which dropped the whole summary. They now import fully every time.
 
