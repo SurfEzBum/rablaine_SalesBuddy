@@ -223,6 +223,44 @@ _REFUSAL_PATTERNS = [
 _MIN_SUMMARY_WORDS = 30
 
 
+# WorkIQ appends structured trailing sections after the narrative summary:
+# an "Action Items" list plus account-planning metadata blocks (ORGANIZER:,
+# CUSTOMER:, TECHNOLOGIESMENTIONED:, etc.). None of these belong in the summary
+# prose - action items are parsed separately, and the metadata is noise. This
+# matches the FIRST line that begins such a trailing section so we can cut the
+# narrative there.
+#
+# The metadata labels WorkIQ emits are always ALL-CAPS with a colon
+# (ORGANIZER:, CUSTOMERPARTICIPANTS:, TECHNOLOGIESMENTIONED:). Requiring
+# uppercase is critical: a case-insensitive match would fire on ordinary prose
+# ("Next steps: ...", "Technologies discussed: ...") and wrongly truncate - or
+# empty - a perfectly good summary. The one non-uppercase exception is an
+# "Action Items" heading, which we match separately as a whole-line heading.
+_SUMMARY_TRAILER_RE = re.compile(
+    r'^[ \t>*_#]*'
+    r'(?:'
+    r'[A-Z][A-Z _&/]{2,}:'                 # ALL-CAPS label followed by a colon
+    r'|(?i:action[ _]?items?)\**:?[ \t]*$'  # "Action Items" heading (any case)
+    r')',
+    re.MULTILINE,
+)
+
+
+def _strip_trailing_metadata(summary: str) -> str:
+    """Cut the narrative summary at the first trailing metadata/action section.
+
+    WorkIQ returns the prose summary followed by an "Action Items" list and a
+    stack of labeled metadata blocks. Those are captured elsewhere (or dropped
+    on purpose), so anything from the first trailing marker onward is removed.
+    """
+    match = _SUMMARY_TRAILER_RE.search(summary)
+    if match:
+        summary = summary[:match.start()]
+    # Collapse any 3+ newline runs left behind and normalize paragraph breaks.
+    summary = re.sub(r'\n{3,}', '\n\n', summary)
+    return summary.strip()
+
+
 def _clean_ai_preamble(text: str) -> str:
     """Strip conversational AI preamble, disclaimers, and follow-up offers.
 
@@ -945,6 +983,15 @@ def _normalize_workiq_response(response: str) -> str:
         0xFEFF: None,  # zero-width no-break space / BOM
     })
 
+    # Fix 3b: Strip standalone citation-number lines. WorkIQ appends a bare
+    # footnote number (e.g. "12", "13") on its own line after each paragraph
+    # and bullet. Remove the whole line - if left in place, the reflow (Fix 4)
+    # glues the number inline ("...applications. 12") and, worse, collapses the
+    # surrounding blank line so paragraph breaks are lost. Removing the number
+    # line first keeps the \n\n paragraph boundaries intact.
+    response = re.sub(r'\n[ \t]*\d{1,3}[ \t]*(?=\n)', '', response)
+    response = re.sub(r'\n[ \t]*\d{1,3}[ \t]*$', '', response)
+
     # Fix 1: Insert a newline before any section marker that isn't already at
     # the start of a line. Catches both underscored (`TASK_TITLE:`) and
     # unseparated (`TASKTITLE:`) variants. Triggers whether the marker is
@@ -1143,11 +1190,15 @@ def _parse_summary_response(response: str) -> Dict[str, Any]:
         # Remove heading markers
         clean_response = re.sub(r'^#{1,6}\s*', '', cleaned_response, flags=re.MULTILINE)
         
-        # The whole response is the summary  
-        result['summary'] = clean_response.strip()
+        # The whole response is the summary, minus the trailing Action Items
+        # list and metadata blocks that WorkIQ appends (those are parsed
+        # separately below or dropped on purpose).
+        result['summary'] = _strip_trailing_metadata(clean_response.strip())
         
-        # Try to extract action items (look for "next steps" patterns)
-        action_pattern = r'(?:next steps?|action items?|follow[- ]?ups?|to[- ]?do)[:\s]*(?:\n|$)((?:[-•*\d\.]+\s*.+\n?)+)'
+        # Try to extract action items (look for "next steps" patterns).
+        # Allow the label to be glued ("ACTIONITEMS") or spaced/underscored,
+        # since WorkIQ emits all three variants.
+        action_pattern = r'(?:next[ _]?steps?|action[ _]?items?|follow[- ]?ups?|to[- ]?do)[:\s]*(?:\n|$)((?:[-•*\d\.]+\s*.+\n?)+)'
         action_match = re.search(action_pattern, cleaned_response, re.IGNORECASE)
         if action_match:
             items_text = action_match.group(1)
