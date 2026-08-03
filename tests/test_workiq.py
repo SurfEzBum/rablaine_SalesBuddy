@@ -318,6 +318,62 @@ class TestNaturalLanguageSummaryFormatting:
         assert "ORGANIZER" not in result['summary']
         assert result['summary'].strip()
 
+    def test_trailing_technologies_label_does_not_blank_summary(self):
+        """A trailing ALL-CAPS 'TECHNOLOGIES:' metadata label must NOT route a
+        natural-language response through the legacy structured parser. That
+        parser only keeps text after a 'SUMMARY:' marker, so without one the
+        whole narrative was dropped and the summary came back blank.
+        """
+        response = (
+            "The team discussed a compliant licensing model for the growing\n"
+            "Power BI solution and how viewers should be licensed.\n"
+            "12\n"
+            "\n"
+            "The customer explained the dashboard is business critical and\n"
+            "adoption is increasing across teams.\n"
+            "1\n"
+            "\n"
+            "CONNECTIMPACT:\n"
+            "*  Customer solution is delivering measurable operational value.\n"
+            "1\n"
+            "\n"
+            "CUSTOMER: Flexential\n"
+            "ORGANIZER: Ben Fanning\n"
+            "TECHNOLOGIES: Microsoft Fabric, Power BI, Fabric Trial\n"
+            "PRIMARYTOPIC: Licensing strategy for a growing Power BI solution.\n"
+        )
+        result = _parse_summary_response(response)
+        assert result['summary'].strip(), "summary must not be blank"
+        assert "The team discussed a compliant licensing model" in result['summary']
+        assert "TECHNOLOGIES" not in result['summary']
+        assert "CUSTOMER" not in result['summary']
+        assert "PRIMARYTOPIC" not in result['summary']
+        assert len(result['connect_impact']) == 1
+
+    def test_bulleted_meeting_metadata_block_is_stripped(self):
+        """Some responses append a Title-case 'Meeting Metadata' heading with
+        bulleted 'Meeting:', 'Organizer:', etc. labels. That block must not
+        leak into the summary prose.
+        """
+        response = (
+            "The customer walked through their reporting needs and current\n"
+            "dashboard usage.\n"
+            "12\n"
+            "\n"
+            "Meeting Metadata\n"
+            "*  Meeting: Reporting Sync\n"
+            "*  Date/Time: July 24, 2026, 1:00 PM-1:45 PM\n"
+            "*  Organizer: Ben Fanning\n"
+            "*  Customer: Flexential\n"
+            "*  Technologies Mentioned: Power BI, Microsoft Fabric\n"
+        )
+        result = _parse_summary_response(response)
+        assert result['summary'].strip()
+        assert "The customer walked through their reporting needs" in result['summary']
+        assert "Meeting Metadata" not in result['summary']
+        assert "Date/Time" not in result['summary']
+        assert "Organizer:" not in result['summary']
+
 
 class TestFindBestCustomerMatch:
     """Test customer matching against meetings."""
