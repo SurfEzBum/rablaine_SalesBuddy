@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/3/2026
+
+- Fixed meeting summaries imported from WorkIQ losing their formatting. Summaries now keep their paragraph breaks instead of collapsing into one block of text, no longer pull in stray meeting metadata, and reliably show their action items. Some imports had also started coming back with a blank summary, which is fixed too.
+
 ## 7/28/2026 - bd7246d
 
 - Fixed pasting contact photos failing with "Error saving photo". A newer version of the image library (OpenCV 5) dropped the face-detection feature the app relied on, which broke photo saves. Photos now save reliably again, and the app automatically uses the compatible library version.

@@ -183,6 +183,142 @@ class TestSummaryResponseParsing:
         assert len(result['action_items']) == 0
 
 
+class TestNaturalLanguageSummaryFormatting:
+    """WorkIQ often returns a multi-paragraph narrative followed by an
+    'Action Items' list, TASK/CONNECT_IMPACT blocks, bare citation numbers,
+    and a stack of metadata labels (ORGANIZER:, CUSTOMER:, etc.). The parser
+    must keep only the narrative (with paragraph breaks intact) in `summary`
+    and pull the structured pieces into their own fields.
+    """
+
+    # Trimmed but representative of a real WorkIQ meeting_summary response.
+    RESPONSE = (
+        "Walbridge outlined plans to support broader citizen developer\n"
+        "adoption using AI-assisted application development.\n"
+        "12\n"
+        "\n"
+        "The discussion focused on a proof of concept using SharePoint pages\n"
+        "to launch Azure Static Web Apps.\n"
+        "12\n"
+        "\n"
+        "The meeting was impacted by audio issues, so the group agreed to\n"
+        "reschedule for a full technical demonstration.\n"
+        "12\n"
+        "\n"
+        "Action Items\n"
+        "*  Microsoft to review the proposed architecture and identify\n"
+        "governance gaps.\n"
+        "13\n"
+        "*  Reschedule the discussion to complete the walkthrough.\n"
+        "1\n"
+        "\n"
+        "TASKTITLE: Review Citizen App Architecture\n"
+        "\n"
+        "TASKDESCRIPTION: Assess the security and governance model.\n"
+        "\n"
+        "CONNECTIMPACT:\n"
+        "*  Customer has already built a working proof of concept.\n"
+        "31\n"
+        "*  Customer is preparing to scale citizen developer adoption.\n"
+        "31\n"
+        "\n"
+        "ORGANIZER:\n"
+        "Tim O'Shea\n"
+        "1\n"
+        "\n"
+        "CUSTOMER: Walbridge\n"
+        "3\n"
+        "\n"
+        "TECHNOLOGIESMENTIONED: Azure Static Web Apps; SharePoint; Claude\n"
+        "12\n"
+        "\n"
+        "NEXTSTEP: Conduct a detailed security and architecture review.\n"
+        "13\n"
+    )
+
+    def test_summary_excludes_trailing_metadata(self):
+        result = _parse_summary_response(self.RESPONSE)
+        summary = result['summary']
+        # Narrative content is present.
+        assert "Walbridge outlined plans" in summary
+        assert "audio issues" in summary
+        # None of the trailing sections leak into the summary prose.
+        assert "Action Items" not in summary
+        assert "ORGANIZER" not in summary
+        assert "CUSTOMER" not in summary
+        assert "TECHNOLOGIESMENTIONED" not in summary
+        assert "NEXTSTEP" not in summary
+        assert "Tim O'Shea" not in summary
+
+    def test_summary_preserves_paragraph_breaks(self):
+        result = _parse_summary_response(self.RESPONSE)
+        # Paragraphs stay separated by blank lines so the note renders as
+        # multiple <p> blocks rather than one glued wall of text.
+        assert "\n\n" in result['summary']
+        paragraphs = [p for p in result['summary'].split("\n\n") if p.strip()]
+        assert len(paragraphs) == 3
+
+    def test_summary_strips_citation_numbers(self):
+        result = _parse_summary_response(self.RESPONSE)
+        # Bare footnote numbers must not survive as standalone lines.
+        assert "\n12\n" not in result['summary']
+        assert not any(
+            line.strip().isdigit()
+            for line in result['summary'].splitlines()
+        )
+
+    def test_action_items_and_impact_extracted_separately(self):
+        result = _parse_summary_response(self.RESPONSE)
+        assert len(result['action_items']) == 2
+        assert any("review the proposed architecture" in a
+                   for a in result['action_items'])
+        assert len(result['connect_impact']) == 2
+        assert any("working proof of concept" in c
+                   for c in result['connect_impact'])
+        assert result['task_subject'] == "Review Citizen App Architecture"
+
+    def test_inline_prose_labels_do_not_truncate_summary(self):
+        """Prose that happens to contain lowercase 'Next steps:' or
+        'Technologies discussed:' must NOT be mistaken for a trailing metadata
+        section. Only ALL-CAPS labels (ORGANIZER:, CUSTOMER:) get cut.
+        """
+        response = (
+            "The team met to review the migration plan. Next steps: the group\n"
+            "will align on a timeline before the next sync.\n"
+            "\n"
+            "Technologies discussed: the customer is standardizing on Azure.\n"
+            "Participants agreed to reconvene next week.\n"
+            "\n"
+            "ORGANIZER: Jane Doe\n"
+            "CUSTOMER: Contoso\n"
+        )
+        result = _parse_summary_response(response)
+        assert result['summary'].strip(), "summary must not be empty"
+        assert "Next steps:" in result['summary']
+        assert "Technologies discussed:" in result['summary']
+        assert "ORGANIZER" not in result['summary']
+        assert "CUSTOMER" not in result['summary']
+
+    def test_glued_actionitems_label_still_extracts(self):
+        """WorkIQ sometimes emits the label glued as 'ACTIONITEMS:' with no
+        space. Action items must still be pulled out of the summary.
+        """
+        response = (
+            "Short recap of the sync meeting about the rollout plan.\n"
+            "\n"
+            "ACTIONITEMS:\n"
+            "*  Send the updated proposal to the customer.\n"
+            "*  Schedule the follow-up review.\n"
+            "\n"
+            "ORGANIZER: Jane Doe\n"
+        )
+        result = _parse_summary_response(response)
+        assert len(result['action_items']) == 2
+        assert "ACTIONITEMS" not in result['summary']
+        assert "ORGANIZER" not in result['summary']
+        assert result['summary'].strip()
+
+
 class TestFindBestCustomerMatch:
     """Test customer matching against meetings."""
     
