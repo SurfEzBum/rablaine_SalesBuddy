@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/3/2026
+
+- Fixed some imported meeting summaries still coming back blank. Certain WorkIQ responses were being misread as a different format, which dropped the whole summary. They now import fully every time.
+
 ## 8/3/2026 - 0b2e841
 
 - Fixed meeting summaries imported from WorkIQ losing their formatting. Summaries now keep their paragraph breaks instead of collapsing into one block of text, no longer pull in stray meeting metadata, and reliably show their action items. Some imports had also started coming back with a blank summary, which is fixed too.
