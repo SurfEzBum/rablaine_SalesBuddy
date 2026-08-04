@@ -53,8 +53,12 @@ function Backup-SalesBuddyDb {
     API so the snapshot folds in the WAL and is always consistent - unlike a plain
     Copy-Item, which can capture a torn or stale snapshot in WAL mode.
 
-    Loads db_paths.py standalone (it imports only the stdlib) instead of the Flask
-    app package, so it stays safe to call from a scheduled task / SYSTEM context.
+    Runs scripts/_backup_db.py (which loads db_paths.py standalone - stdlib only,
+    no Flask app package) so it stays safe to call from a scheduled task / SYSTEM
+    context. A real script file is used instead of `python -c "<inline>"` because
+    Windows PowerShell 5.1 (what the scheduled task + run-hidden.vbs launch) strips
+    embedded double quotes when passing a -c argument to a native exe, which
+    silently corrupted the inline backup script and broke every scheduled backup.
     Returns $true on success, $false on failure.
     #>
     param(
@@ -67,17 +71,10 @@ function Backup-SalesBuddyDb {
     if (-not (Test-Path $pythonExe)) { $pythonExe = 'python' }
     $dbPathsFile = Join-Path $RepoRoot 'app\db_paths.py'
     if (-not (Test-Path $dbPathsFile)) { return $false }
+    $backupScript = Join-Path $RepoRoot 'scripts\_backup_db.py'
+    if (-not (Test-Path $backupScript)) { return $false }
 
-    $py = @'
-import importlib.util, sys
-spec = importlib.util.spec_from_file_location("db_paths", sys.argv[1])
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-ok = mod.backup_database(sys.argv[3], src=sys.argv[2])
-sys.exit(0 if ok else 1)
-'@
-
-    & $pythonExe -c $py $dbPathsFile $SourceDb $DestFile
+    & $pythonExe $backupScript $dbPathsFile $SourceDb $DestFile
     return ($LASTEXITCODE -eq 0)
 }
 
