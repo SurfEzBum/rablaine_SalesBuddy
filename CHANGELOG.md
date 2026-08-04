@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/4/2026
+
+- Fixed daily automatic backups silently stopping. The recent WAL-safe backup change wasn't compatible with the way the scheduled task runs, so the backup failed every day without warning and no new files were saved. Backups now run correctly again.
+
 ## 8/3/2026 - 1cc45ad
 
 - Fixed some imported meeting summaries still coming back blank. Certain WorkIQ responses were being misread as a different format, which dropped the whole summary. They now import fully every time.
