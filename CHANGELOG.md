@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 8/4/2026
+## 8/4/2026 - 3696d7e
 
 - Fixed daily automatic backups silently stopping. The recent WAL-safe backup change wasn't compatible with the way the scheduled task runs, so the backup failed every day without warning and no new files were saved. Backups now run correctly again.
 
