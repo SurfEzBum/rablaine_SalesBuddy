@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/5/2026
+
+- *Electron Shell Update* - Added Find in Page to the desktop app. Press Ctrl+F (or Edit > Find in Page) to search the current page, cycle matches with Enter and Shift+Enter, and close with Esc. Matches are highlighted with the current one in orange, and a counter shows your position.
+
 ## 8/5/2026 - bc26b1b
 
 - Added a hidden beta "Revenue Pull" page that fetches your Azure ACR directly from MSXI - fully headless using your `az login`, with no manual CSV export. It reports coverage stats and a per-account audit so we can validate it against full account lists before it replaces the manual revenue import.

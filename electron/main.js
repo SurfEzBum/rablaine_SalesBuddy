@@ -664,7 +664,11 @@ const WINDOW_OPTS = {
   icon: ICON,
   backgroundColor: '#0d1117',
   autoHideMenuBar: false,
-  webPreferences: { contextIsolation: true, nodeIntegration: false },
+  webPreferences: {
+    contextIsolation: true,
+    nodeIntegration: false,
+    preload: path.join(__dirname, 'preload.js'),
+  },
 };
 
 // Open a NEW app window (browser-tab style). Every window is an independent view
@@ -833,6 +837,12 @@ function buildAppMenu() {
         { role: 'copy' },
         { role: 'paste' },
         { role: 'selectAll' },
+        { type: 'separator' },
+        {
+          label: 'Find in Page',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => { const w = activeWindow(); if (w) w.webContents.send('find:show'); },
+        },
       ],
     },
     {
