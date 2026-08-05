@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Revenue Pull (Beta) - Sales Buddy{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <div>
+      <h1 class="h4 mb-1">
+        <i class="bi bi-cloud-download"></i> Programmatic Revenue Pull
+        <span class="badge bg-warning text-dark align-middle">Beta</span>
+      </h1>
+      <p class="text-muted mb-0">
+        Pulls MSXI ACR for your accounts directly from Power BI, headlessly, with
+        your <code>az login</code> - no manual CSV export. Audit coverage here before it goes live.
+      </p>
+    </div>
+  </div>
+
+  <div class="alert alert-info d-flex gap-2">
+    <i class="bi bi-info-circle fs-5"></i>
+    <div>
+      Requires <code>az login</code> (Microsoft corporate account) + corporate VPN. Results are
+      scoped by MSX to your assigned accounts, so coverage reflects your current MSX territory.
+      <strong>{{ customer_count }}</strong> customers with a TPID in this database.
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="row g-3 align-items-end">
+        <div class="col-auto">
+          <label class="form-label mb-1">Fiscal years</label>
+          <div>
+            {% for fy in fiscal_years %}
+            <span class="badge bg-secondary">{{ fy }}</span>
+            {% endfor %}
+          </div>
+          <div class="form-text">Current + prior FY · full customer book.</div>
+        </div>
+        <div class="col-auto">
+          <button id="runBtn" class="btn btn-primary">
+            <i class="bi bi-play-fill"></i> Run pull &amp; audit
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="status" class="mb-3"></div>
+  <div id="results"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const runBtn = document.getElementById('runBtn');
+  const statusEl = document.getElementById('status');
+  const resultsEl = document.getElementById('results');
+
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const money = (n) => (n == null || isNaN(n)) ? '' :
+    '$' + Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+  function stat(value, label, kind) {
+    return '<div class="col">' +
+      '<div class="border rounded p-3 text-center h-100">' +
+      '<div class="fs-3 fw-bold text-' + (kind || 'body') + '">' + value + '</div>' +
+      '<div class="small text-muted">' + esc(label) + '</div></div></div>';
+  }
+
+  function render(d) {
+    let html = '';
+
+    // --- statistics header ---
+    html += '<div class="row g-2 mb-3">';
+    html += stat(d.customers_with_data + ' / ' + d.total_customers, 'Customers with ACR data',
+                 d.customers_with_data ? 'success' : 'secondary');
+    html += stat(d.coverage_pct + '%', 'Coverage');
+    html += stat(money(d.total_acr), 'Total ACR (period)', 'primary');
+    html += stat(d.customers_without_data, 'No data', d.customers_without_data ? 'warning' : 'body');
+    html += stat((d.distinct_months || []).length, 'Months');
+    html += stat((d.distinct_buckets || []).length, 'Buckets');
+    html += '</div>';
+
+    html += '<p class="text-muted small mb-3">' +
+      'Pulled ' + d.row_count + ' rows for ' + esc((d.fiscal_years || []).join(', ')) +
+      ' in ' + d.elapsed_s + 's · generated ' + esc(d.generated_at) +
+      ' · months: <code>' + esc((d.distinct_months || []).join(', ')) + '</code></p>';
+
+    // --- per-customer audit table ---
+    html += '<div class="card mb-3"><div class="card-header fw-semibold">' +
+      'Customers with ACR (' + (d.per_customer || []).length + ')</div>' +
+      '<div class="card-body p-0"><div class="table-responsive">' +
+      '<table class="table table-sm table-striped mb-0"><thead><tr>' +
+      '<th>TPID</th><th>Account</th><th class="text-end">Total ACR</th>' +
+      '<th class="text-end">Buckets</th><th class="text-end">Months</th></tr></thead><tbody>';
+    for (const c of (d.per_customer || [])) {
+      html += '<tr><td>' + esc(c.tpid) + '</td><td>' + esc(c.name) + '</td>' +
+        '<td class="text-end">' + money(c.total_acr) + '</td>' +
+        '<td class="text-end">' + esc(c.bucket_count) + '</td>' +
+        '<td class="text-end">' + esc(c.month_count) + '</td></tr>';
+    }
+    html += '</tbody></table></div></div></div>';
+
+    // --- accounts with no data (auditable) ---
+    if ((d.without_data || []).length) {
+      html += '<details class="mb-3"><summary class="fw-semibold">' +
+        'Accounts with no ACR data (' + d.customers_without_data + ')</summary>' +
+        '<div class="table-responsive mt-2"><table class="table table-sm mb-0"><thead><tr>' +
+        '<th>TPID</th><th>Account</th></tr></thead><tbody>';
+      for (const c of d.without_data) {
+        html += '<tr><td>' + esc(c.tpid) + '</td><td>' + esc(c.name) + '</td></tr>';
+      }
+      html += '</tbody></table></div>';
+      if (d.customers_without_data > d.without_data.length) {
+        html += '<p class="text-muted small mt-1">Showing first ' + d.without_data.length + '.</p>';
+      }
+      html += '</details>';
+    }
+
+    resultsEl.innerHTML = html;
+  }
+
+  runBtn.addEventListener('click', function () {
+    runBtn.disabled = true;
+    resultsEl.innerHTML = '';
+    statusEl.innerHTML = '<div class="d-flex align-items-center gap-2 text-muted">' +
+      '<div class="spinner-border spinner-border-sm"></div> Pulling ACR from Power BI ' +
+      '(this can take a minute for the whole book)...</div>';
+
+    fetch('{{ url_for("revenue.revenue_pull_test_run") }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    })
+      .then(r => r.json())
+      .then(d => {
+        statusEl.innerHTML = '';
+        if (d.error) {
+          resultsEl.innerHTML = '<div class="alert alert-danger">' +
+            '<strong>Pull failed.</strong><pre class="mb-0 mt-2" style="white-space:pre-wrap;">' +
+            esc(d.error) + '</pre></div>';
+          return;
+        }
+        render(d);
+      })
+      .catch(err => {
+        statusEl.innerHTML = '<div class="alert alert-danger">Request failed: ' + esc(err) + '</div>';
+      })
+      .finally(() => { runBtn.disabled = false; });
+  });
+})();
+</script>
+{% endblock %}

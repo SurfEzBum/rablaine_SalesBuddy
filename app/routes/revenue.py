@@ -135,6 +135,50 @@ def revenue_import():
     )
 
 
+@revenue_bp.route('/revenue/pull-test', methods=['GET'])
+def revenue_pull_test():
+    """Hidden beta page for the programmatic (headless) MSXI revenue pull.
+
+    Not linked in the nav - navigate to it directly. Lets a tester validate that
+    the headless pull returns ACR for their accounts before it feeds the import.
+    """
+    from app.services.revenue_pull import get_customer_tpids, default_fiscal_years
+
+    customer_count = len(get_customer_tpids())
+    return render_template(
+        'revenue_pull_test.html',
+        customer_count=customer_count,
+        fiscal_years=default_fiscal_years(),
+    )
+
+
+@revenue_bp.route('/api/revenue/pull-test', methods=['POST'])
+def revenue_pull_test_run():
+    """Run the headless pull for the whole account book and return audit stats."""
+    from app.services import revenue_pull
+
+    payload = request.get_json(silent=True) or {}
+    fiscal_years = payload.get('fiscal_years') or None
+    if fiscal_years and not isinstance(fiscal_years, list):
+        fiscal_years = None
+
+    customers = revenue_pull.get_customer_tpids()
+    if not customers:
+        return jsonify({'error': 'No customers with a TPID found in this database.'}), 400
+
+    tpids = [t for t, _ in customers]
+    t0 = time.time()
+    try:
+        rows = revenue_pull.pull_acr_for_customers(tpids, fiscal_years=fiscal_years)
+    except Exception as exc:  # noqa: BLE001 - surface the raw error to the page
+        return jsonify({'error': str(exc), 'elapsed_s': round(time.time() - t0, 1)}), 200
+
+    audit = revenue_pull.build_audit(rows, customers)
+    audit['elapsed_s'] = round(time.time() - t0, 1)
+    audit['fiscal_years'] = fiscal_years or revenue_pull.default_fiscal_years()
+    return jsonify(audit)
+
+
 @revenue_bp.route('/api/revenue/import', methods=['POST'])
 def revenue_import_stream():
     """Import revenue CSV with streaming progress updates."""

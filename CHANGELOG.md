@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/5/2026
+
+- Added a hidden beta "Revenue Pull" page that fetches your Azure ACR directly from MSXI - fully headless using your `az login`, with no manual CSV export. It reports coverage stats and a per-account audit so we can validate it against full account lists before it replaces the manual revenue import.
+
 ## 8/4/2026 - 3696d7e
 
 - Fixed daily automatic backups silently stopping. The recent WAL-safe backup change wasn't compatible with the way the scheduled task runs, so the backup failed every day without warning and no new files were saved. Backups now run correctly again.
