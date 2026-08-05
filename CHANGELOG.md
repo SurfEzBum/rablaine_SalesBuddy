@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 8/5/2026
+## 8/5/2026 - 5055be1
 
 - *Electron Shell Update* - Added Find in Page to the desktop app. Press Ctrl+F (or Edit > Find in Page) to search the current page, cycle matches with Enter and Shift+Enter, and close with Esc. Matches are highlighted with the current one in orange, and a counter shows your position.
 
