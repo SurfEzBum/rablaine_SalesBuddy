@@ -1296,15 +1296,6 @@
                             </div>
                         </div>
                         
-                        <div class="alert alert-info mb-0">
-                            <div class="d-flex align-items-start">
-                                <i class="bi bi-lightbulb me-2 mt-1"></i>
-                                <div>
-                                    <strong>Tip:</strong> Nothing to prepare for the next step - Sales Buddy pulls your
-                                    revenue straight from MSXI. Just make sure the corporate VPN stays connected.
-                                </div>
-                            </div>
-                        </div>
                     </div>
 
                     <!-- STEP 5: Revenue & Finish -->
@@ -1317,11 +1308,11 @@
                                 <div id="revenueInstructions">
                                     <p class="mb-2">
                                         Sales Buddy pulls your Azure consumed revenue straight from MSXI using the
-                                        Azure sign-in you set up earlier. No export, no spreadsheet.
+                                        Azure sign-in you set up earlier.
                                     </p>
                                     <p class="small text-muted mb-3">
-                                        <i class="bi bi-shield-check"></i> You'll need the corporate VPN connected.
-                                        It fetches two years of history for every account, so give it about a minute.
+                                        <i class="bi bi-shield-check"></i> Requires VPN. It fetches two years of
+                                        history for every account, so give it about a minute.
                                     </p>
                                 </div>
 
@@ -1365,7 +1356,23 @@
                                 </div>
                             </div>
                         </div>
-                        
+
+                        {% if user_role != 'dss' %}
+                        <div class="card mb-3 d-none" id="onboardBucketPickerCard">
+                            <div class="card-header py-2">
+                                <h6 class="mb-0"><i class="bi bi-funnel"></i> Select Your Buckets</h6>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted small mb-2">Check the service comp groupings you're compensated on. This filters your revenue views across the app. You can change it later from Revenue Import.</p>
+                                <div id="onboardBucketList">
+                                    <div class="text-center text-muted py-2">
+                                        <div class="spinner-border spinner-border-sm"></div> Loading buckets...
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
                         <p class="small text-muted mb-0"><i class="bi bi-info-circle"></i> Optional — you can do this anytime from the Revenue Analyzer.</p>
                     </div>
 
@@ -2541,7 +2548,8 @@
                                 '</ul>';
                         }
                         showRevenueState('Success');
-                        // Seed the bucket filter from whatever the sync actually returned.
+                        // Seed the bucket filter from whatever the sync actually returned,
+                        // then let the user narrow it to the buckets they're paid on.
                         try {
                             const bucketsResp = await fetch('/api/revenue/buckets');
                             const buckets = await bucketsResp.json();
@@ -2552,6 +2560,7 @@
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify(buckets),
                                 });
+                                renderOnboardBucketPicker(buckets);
                             }
                         } catch (e) { /* best effort */ }
                         setWizardProgress(90);
@@ -2567,6 +2576,93 @@
 
                 document.getElementById('onboardImportRevenue').addEventListener('click', () => importRevenue());
                 document.getElementById('importRevenueRetry').addEventListener('click', () => importRevenue());
+
+                // Bucket picker shown once revenue lands, mirroring the import page.
+                // Built with DOM calls rather than innerHTML since bucket names are data.
+                function renderOnboardBucketPicker(buckets) {
+                    const card = document.getElementById('onboardBucketPickerCard');
+                    const listEl = document.getElementById('onboardBucketList');
+                    if (!card || !listEl) return;
+                    card.classList.remove('d-none');
+                    listEl.innerHTML = '';
+
+                    let selected = new Set(buckets);
+                    try {
+                        const saved = JSON.parse(localStorage.getItem('salesbuddy_revenue_bucket_filter'));
+                        if (saved && Array.isArray(saved) && saved.length) selected = new Set(saved);
+                    } catch (e) {}
+
+                    const search = document.createElement('input');
+                    search.type = 'text';
+                    search.className = 'form-control form-control-sm mb-2';
+                    search.placeholder = 'Search';
+                    search.autocomplete = 'off';
+                    listEl.appendChild(search);
+
+                    const selAllLabel = document.createElement('label');
+                    selAllLabel.className = 'form-check d-flex align-items-center gap-2 mb-1 border-bottom pb-1';
+                    selAllLabel.style.cursor = 'pointer';
+                    const selAllCb = document.createElement('input');
+                    selAllCb.type = 'checkbox';
+                    selAllCb.className = 'form-check-input mt-0';
+                    selAllCb.checked = buckets.every(b => selected.has(b));
+                    const selAllText = document.createElement('span');
+                    selAllText.className = 'small fw-semibold';
+                    selAllText.textContent = 'Select all';
+                    selAllLabel.appendChild(selAllCb);
+                    selAllLabel.appendChild(selAllText);
+                    listEl.appendChild(selAllLabel);
+
+                    const itemsDiv = document.createElement('div');
+                    itemsDiv.style.maxHeight = '220px';
+                    itemsDiv.style.overflowY = 'auto';
+                    const rows = [];
+
+                    function save() {
+                        const sel = rows.filter(r => r.cb.checked).map(r => r.cb.value);
+                        localStorage.setItem('salesbuddy_revenue_bucket_filter', JSON.stringify(sel));
+                        fetch('/api/revenue/compensated-buckets', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(sel),
+                        }).catch(() => {});
+                    }
+
+                    buckets.forEach(b => {
+                        const label = document.createElement('label');
+                        label.className = 'form-check d-flex align-items-center gap-2 mb-0 py-1';
+                        label.style.cursor = 'pointer';
+                        label.dataset.name = b.toLowerCase();
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.className = 'form-check-input mt-0';
+                        cb.value = b;
+                        cb.checked = selected.has(b);
+                        const span = document.createElement('span');
+                        span.className = 'small';
+                        span.textContent = b;
+                        label.appendChild(cb);
+                        label.appendChild(span);
+                        itemsDiv.appendChild(label);
+                        rows.push({ label, cb });
+                        cb.addEventListener('change', function () {
+                            save();
+                            selAllCb.checked = rows.every(r => r.cb.checked);
+                        });
+                    });
+                    listEl.appendChild(itemsDiv);
+
+                    selAllCb.addEventListener('change', function () {
+                        rows.forEach(r => { r.cb.checked = this.checked; });
+                        save();
+                    });
+                    search.addEventListener('input', function () {
+                        const term = this.value.toLowerCase().trim();
+                        rows.forEach(r => {
+                            r.label.classList.toggle('d-none', term && !r.label.dataset.name.includes(term));
+                        });
+                    });
+                }
 
 
 
@@ -2620,6 +2716,16 @@
                     }
                     if (revenueSyncState === 'incomplete' || revenueSyncState === 'failed') {
                         document.getElementById('revenueIncompleteWarning').classList.remove('d-none');
+                    }
+
+                    // Resuming with revenue already loaded: offer the picker straight away.
+                    if (revenueImported) {
+                        fetch('/api/revenue/buckets')
+                            .then(r => r.json())
+                            .then(buckets => {
+                                if (buckets && buckets.length) renderOnboardBucketPicker(buckets);
+                            })
+                            .catch(() => {});
                     }
 
                     modal.show();

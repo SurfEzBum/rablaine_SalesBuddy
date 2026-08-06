@@ -891,6 +891,22 @@ class TestWizardOptionalSteps:
         assert 'id="revenueTipInstructionsStep4"' not in html
         assert 'export your revenue CSV' not in html
 
+    def test_step5_has_bucket_picker(self, client, app):
+        """After syncing, the wizard lets the user pick compensated buckets."""
+        response = client.get('/')
+        html = response.data.decode('utf-8')
+        assert 'onboardBucketPickerCard' in html
+        assert 'onboardBucketList' in html
+        assert 'renderOnboardBucketPicker' in html
+
+    def test_step5_copy_does_not_mention_exports(self, client, app):
+        """New users should never learn about a CSV path that no longer exists."""
+        response = client.get('/')
+        html = response.data.decode('utf-8')
+        step5 = html.split('onboardingStep5')[1][:2000]
+        assert 'spreadsheet' not in step5.lower()
+        assert 'No export' not in step5
+
     def test_step5_skip_button_visible_in_js(self, client, app):
         """Skip step button should appear on step 5 when revenue not imported (JS logic)."""
         response = client.get('/')
