@@ -1400,7 +1400,6 @@ class UserPreference(db.Model):
     compensated_buckets = db.Column(db.Text, nullable=True)  # JSON array of selected ServiceCompGrouping buckets (fallback for localStorage)
     bucket_taxonomy_version = db.Column(db.Integer, default=0, nullable=False, server_default='0')  # Bumped when MSXI renames/retires buckets so clients drop cached selections
     bucket_taxonomy_notice = db.Column(db.Text, nullable=True)  # JSON describing the last taxonomy change, shown once to the user
-    revenue_import_reminder = db.Column(db.Boolean, default=True, nullable=False, server_default='1')
     alignment_override_active = db.Column(db.Boolean, default=False, nullable=False, server_default='0')  # When on, account sync uses declared territory alignment instead of msp_accountteams
     start_minimized = db.Column(db.Boolean, default=False, nullable=False, server_default='0')  # Desktop shell boots to the tray at login instead of showing a window
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)

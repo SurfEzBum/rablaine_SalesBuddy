@@ -257,10 +257,6 @@ def run_migrations(db):
     _add_column_if_not_exists(db, inspector, 'user_preferences',
                               'compensated_buckets', "TEXT")
 
-    # Migration: Add revenue_import_reminder to user_preferences
-    _add_column_if_not_exists(db, inspector, 'user_preferences',
-                              'revenue_import_reminder', "BOOLEAN DEFAULT 1 NOT NULL")
-
     # Migration: Add milestone sync scheduler fields to user_preferences
     _add_column_if_not_exists(db, inspector, 'user_preferences',
                               'milestone_auto_sync', "BOOLEAN DEFAULT 1 NOT NULL")

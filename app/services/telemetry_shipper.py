@@ -24,8 +24,7 @@ Sent (per install, ~once per day):
     - user_role        ("se", "dss", or "unknown")
     - feature flags    (msx_auto_writeback, copilot_actions_enabled,
                        show_stale_milestones, show_hygiene_tasks,
-                       milestone_auto_sync, workiq_connect_impact,
-                       revenue_import_reminder, dark_mode)
+                       milestone_auto_sync, workiq_connect_impact, dark_mode)
     - entity counts    (notes, customers, engagements, milestones,
                        projects, partners) - rough usage signal
 
@@ -542,7 +541,6 @@ def _collect_install_profile(app) -> Optional[dict[str, Any]]:
                     'show_hygiene_tasks': False,
                     'milestone_auto_sync': False,
                     'workiq_connect_impact': False,
-                    'revenue_import_reminder': False,
                     'dark_mode': False,
                     'has_workiq_prompt': False,
                     'has_default_template_customer': False,
@@ -557,7 +555,6 @@ def _collect_install_profile(app) -> Optional[dict[str, Any]]:
                     'show_hygiene_tasks': bool(prefs.show_hygiene_tasks),
                     'milestone_auto_sync': bool(prefs.milestone_auto_sync),
                     'workiq_connect_impact': bool(prefs.workiq_connect_impact),
-                    'revenue_import_reminder': bool(prefs.revenue_import_reminder),
                     'dark_mode': bool(prefs.dark_mode) if prefs.dark_mode is not None else False,
                     'has_workiq_prompt': bool(prefs.workiq_summary_prompt),
                     'has_default_template_customer': prefs.default_template_customer_id is not None,
