@@ -1275,8 +1275,6 @@
                             </div>
                         </div>
                         {% endif %}
-
-                        <p class="small text-muted mb-0"><i class="bi bi-info-circle"></i> You can finish once milestones are done. Revenue can be re-run anytime from the Revenue Analyzer.</p>
                     </div>
 
 
@@ -1677,6 +1675,7 @@
                 let milestonesImported = {{ 'true' if has_milestones else 'false' }};
                 let revenueImported = {{ 'true' if has_revenue else 'false' }};
                 let importRunning = false;
+                let importFailed = false;
                 let selectedRole = '{{ user_role }}';  // Updated after the account import auto-detect
                 const milestonesSyncState = '{{ milestones_sync_state }}';
                 const revenueSyncState = '{{ revenue_sync_state }}';
@@ -1753,10 +1752,14 @@
                 function updateNextButton() {
                     if (currentStep === 1) {
                         nextBtn.disabled = !(authCompleted && vpnVerified);
-                    } else {
-                        // Revenue stays optional; milestones are required to finish.
-                        nextBtn.disabled = !milestonesImported;
+                        return;
                     }
+                    const allDone = accountsImported && milestonesImported && revenueImported;
+                    // Everything is automatic now, so hold them here until it all lands.
+                    // The exception is a failure: accounts alone make the app usable, so
+                    // don't trap someone whose milestone or revenue sync keeps dying.
+                    const escapeHatch = accountsImported && importFailed && !importRunning;
+                    nextBtn.disabled = !(allDone || escapeHatch);
                 }
 
                 nextBtn.addEventListener('click', async () => {
@@ -2196,6 +2199,7 @@
                     } catch (err) {
                         const msg = err.message || 'Connection error during import';
                         setPhaseState('accounts', 'error', msg.charAt(0).toUpperCase() + msg.slice(1));
+                        importFailed = true;
                         return false;
                     }
                 }
@@ -2297,6 +2301,7 @@
                     } catch (err) {
                         const mMsg = err.message || 'Connection error during sync';
                         setPhaseState('milestones', 'error', mMsg.charAt(0).toUpperCase() + mMsg.slice(1));
+                        importFailed = true;
                         return false;
                     }
                 }
@@ -2366,6 +2371,7 @@
                     } catch (err) {
                         const msg = err.message || 'Connection error during sync';
                         setPhaseState('revenue', 'error', msg.charAt(0).toUpperCase() + msg.slice(1));
+                        importFailed = true;
                         return false;
                     }
                 }
@@ -2375,6 +2381,7 @@
                 async function startImport() {
                     if (importRunning) return;
                     importRunning = true;
+                    importFailed = false;
                     document.getElementById('importAllInitial').classList.add('d-none');
                     document.getElementById('importAllCard').classList.remove('d-none');
                     if (window.showBrainrotInCard) window.showBrainrotInCard('importAllCard');
@@ -2400,6 +2407,7 @@
                 async function retryPhase(fn) {
                     if (importRunning) return;
                     importRunning = true;
+                    importFailed = false;
                     window.addEventListener('beforeunload', warnOnLeave);
                     try {
                         await fn();

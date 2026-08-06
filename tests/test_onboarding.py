@@ -824,11 +824,19 @@ class TestWizardImportStep:
         html = response.data.decode('utf-8')
         assert 'onboardSkipStepBtn' not in html
 
-    def test_milestones_required_to_finish(self, client, app):
-        """Finish stays disabled until the milestone sync completes."""
+    def test_all_syncs_required_to_finish(self, client, app):
+        """Everything runs automatically, so hold the user until it all lands."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        assert 'nextBtn.disabled = !milestonesImported;' in html
+        assert 'const allDone = accountsImported && milestonesImported && revenueImported;' in html
+        assert 'nextBtn.disabled = !(allDone || escapeHatch);' in html
+
+    def test_failure_lets_the_user_out_after_accounts(self, client, app):
+        """A repeatedly failing sync must not trap them in the wizard."""
+        response = client.get('/')
+        html = response.data.decode('utf-8')
+        assert 'const escapeHatch = accountsImported && importFailed && !importRunning;' in html
+        assert 'importFailed = true;' in html
 
     def test_inline_revenue_sync(self, client, app):
         """Revenue syncs from MSXI inline (no CSV, no link to another page)."""
@@ -841,7 +849,6 @@ class TestWizardImportStep:
         assert 'onboardGoToRevenue' not in html
         # Should NOT have the old "You're all set" hero section
         assert "You're all set!" not in html
-        assert 'Revenue Analyzer' in html
 
     def test_import_step_has_vpn_warning(self, client, app):
         """The import step warns about VPN once, not per phase."""
@@ -872,12 +879,12 @@ class TestWizardImportStep:
         assert 'spreadsheet' not in import_step.lower()
         assert 'No export' not in import_step
 
-    def test_revenue_is_optional_to_finish(self, client, app):
-        """Revenue can wait - only the milestone sync blocks Finish."""
+    def test_no_optional_revenue_copy(self, client, app):
+        """Revenue is no longer opt-out, so don't tell users they can skip it."""
         response = client.get('/')
         html = response.data.decode('utf-8')
+        assert 'You can finish once milestones are done' not in html
         assert 'nextBtn.disabled = !revenueImported' not in html
-        assert 'Revenue Analyzer' in html
 
     def test_revenue_state_var_present(self, client, app):
         """revenueImported JS variable should be initialized from server data."""
