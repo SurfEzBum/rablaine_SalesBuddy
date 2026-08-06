@@ -19,9 +19,8 @@ class TestOnboardingWizardDisplay:
         assert b'id="welcomeModal"' in response.data
         assert b'onboardingStep1' in response.data
         assert b'onboardingStep2' in response.data
-        assert b'onboardingStep3' in response.data
-        assert b'onboardingStep4' in response.data
-        assert b'onboardingStep5' in response.data
+        # The wizard is two steps now - nothing past step 2 should exist.
+        assert b'onboardingStep3' not in response.data
 
     def test_onboarding_modal_hidden_when_dismissed(self, client, app):
         """Onboarding wizard should not appear when first_run_modal_dismissed is True."""
@@ -52,31 +51,25 @@ class TestOnboardingWizardDisplay:
         assert b'id="welcomeModal"' in response.data
 
     def test_onboarding_step_structure(self, client, app):
-        """Verify all wizard steps have proper structure."""
+        """Verify both wizard steps have proper structure."""
         response = client.get('/')
         html = response.data.decode('utf-8')
 
-        # Step 1: Welcome + Dark Mode
+        # Step 1: welcome, theme, and sign-in all on one screen
         assert "get you set up" in html.lower()
         assert 'onboardDarkModeToggle' in html
-
-        # Step 2: Authentication (az login flow)
         assert 'Connect to MSX' in html
         assert 'startSignInBtn' in html
         assert 'Sign In to Azure' in html
 
-        # Step 3: Import Accounts (with progress bar)
+        # Step 2: accounts first, then milestones and revenue
         assert 'Import Your Accounts' in html
         assert 'onboardImportAccounts' in html
         assert 'importAccountsProgressBar' in html
-
-        # Step 4: Import Milestones (with progress bar)
         assert 'Import Milestones' in html
         assert 'onboardImportMilestones' in html
         assert 'importMilestonesProgressBar' in html
-
-        # Step 5: Revenue & Finish (inline MSXI sync)
-        assert 'One More Thing: Revenue Data' in html
+        assert 'Revenue Data' in html
         assert 'onboardImportRevenue' in html
         assert 'importRevenueProgress' in html
 
@@ -100,7 +93,7 @@ class TestOnboardingWizardDisplay:
         html = response.data.decode('utf-8')
         assert 'onboardingProgress' in html
         assert 'onboardingStepBadge' in html
-        assert 'Step 1 of 5' in html
+        assert 'Step 1 of 2' in html
 
 
 class TestDismissWelcomeModalEndpoint:
@@ -791,14 +784,17 @@ class TestWizardResumeLogic:
         assert 'async function initWizard()' in html
         assert 'initWizard();' in html
 
-    def test_wizard_has_next_incomplete_step_helper(self, client, app):
-        """Wizard should have nextIncompleteStep helper for smart step skipping."""
+    def test_wizard_has_import_gate_helpers(self, client, app):
+        """Step 2 needs helpers to gate the syncs and weight the progress bar."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        assert 'function nextIncompleteStep()' in html
+        assert 'function updateImportGates()' in html
+        assert 'function importProgressPct()' in html
+        # Per-step skipping is gone now that the imports share one step.
+        assert 'function nextIncompleteStep()' not in html
 
     def test_wizard_shows_already_done_state_for_accounts(self, client, app):
-        """Step 3 should show 'already imported' state when accounts exist."""
+        """Accounts should show an 'already imported' state when they exist."""
         response = client.get('/')
         html = response.data.decode('utf-8')
         # The showImportAlreadyDone function should exist
@@ -806,7 +802,7 @@ class TestWizardResumeLogic:
         assert 'Accounts already imported' in html
 
     def test_wizard_shows_already_done_state_for_milestones(self, client, app):
-        """Step 4 should show 'already synced' state when milestones exist."""
+        """Milestones should show an 'already synced' state when they exist."""
         response = client.get('/')
         html = response.data.decode('utf-8')
         assert 'Milestones already synced' in html
@@ -819,44 +815,38 @@ class TestWizardResumeLogic:
         assert 'let milestonesImported = false;' in html
 
 
-class TestWizardOptionalSteps:
-    """Tests for optional step skip functionality."""
+class TestWizardImportStep:
+    """Tests for the combined import step (accounts, milestones, revenue)."""
 
-    def test_step4_has_optional_hint(self, client, app):
-        """Step 4 should tell user milestones are optional."""
+    def test_milestones_and_revenue_start_gated(self, client, app):
+        """Both syncs ship disabled and say why until accounts land."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        assert 'Optional' in html
-        assert 'Milestone Tracker' in html
+        assert 'id="onboardImportMilestones" disabled' in html
+        assert 'id="onboardImportRevenue" disabled' in html
+        assert 'id="milestonesGateNote"' in html
+        assert 'id="revenueGateNote"' in html
 
-    def test_wizard_has_skip_button_element(self, client, app):
-        """Wizard footer should have a Skip button (used on step 5 for revenue)."""
+    def test_gates_open_on_accounts_alone(self, client, app):
+        """One condition frees both syncs, so they can then run in parallel."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        assert 'id="onboardSkipStepBtn"' in html
+        assert 'btn.disabled = !accountsImported;' in html
 
-    def test_step5_skip_button_visibility_logic(self, client, app):
-        """Skip button should only show on step 5 when revenue not imported."""
+    def test_wizard_has_no_skip_button(self, client, app):
+        """Skip is gone - Finish itself is the 'skip revenue' path."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        assert 'currentStep === 5 && !revenueImported' in html
+        assert 'onboardSkipStepBtn' not in html
 
-    def test_milestones_required_for_next_button(self, client, app):
-        """Step 4 Next button should be gated on milestonesImported."""
+    def test_milestones_required_to_finish(self, client, app):
+        """Finish stays disabled until the milestone sync completes."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        assert "currentStep === 4 && !milestonesImported" in html
+        assert 'nextBtn.disabled = !milestonesImported;' in html
 
-    def test_step4_no_skip_button(self, client, app):
-        """Milestones step should NOT allow skipping — skip is only for revenue."""
-        response = client.get('/')
-        html = response.data.decode('utf-8')
-        # Skip button condition should NOT reference step 4
-        assert 'currentStep === 4 && !milestonesImported' not in html.split('skipStepBtn')[0] or \
-               'currentStep === 5 && !revenueImported' in html
-
-    def test_step5_inline_revenue_sync(self, client, app):
-        """Step 5 syncs revenue from MSXI inline (no CSV, no link to another page)."""
+    def test_inline_revenue_sync(self, client, app):
+        """Revenue syncs from MSXI inline (no CSV, no link to another page)."""
         response = client.get('/')
         html = response.data.decode('utf-8')
         # Inline sync button
@@ -877,21 +867,21 @@ class TestWizardOptionalSteps:
         # Card should have a primary border to stand out
         assert 'border-primary' in html
 
-    def test_step4_has_vpn_warning(self, client, app):
-        """Step 4 should have the VPN required warning."""
+    def test_import_step_has_vpn_warnings(self, client, app):
+        """Each sync in the import step should carry the VPN warning."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        # There should be VPN warnings (step 3 and step 4)
+        # Accounts, milestones, and revenue each warn about VPN
         assert html.count('Requires VPN.') >= 2
 
-    def test_step4_revenue_tip_no_longer_asks_for_an_export(self, client, app):
-        """The step-4 tip used to walk through a CSV export; the sync needs no prep."""
+    def test_revenue_tip_no_longer_asks_for_an_export(self, client, app):
+        """The old tip walked through a CSV export; the sync needs no prep."""
         response = client.get('/')
         html = response.data.decode('utf-8')
         assert 'id="revenueTipInstructionsStep4"' not in html
         assert 'export your revenue CSV' not in html
 
-    def test_step5_has_bucket_picker(self, client, app):
+    def test_has_bucket_picker(self, client, app):
         """After syncing, the wizard lets the user pick compensated buckets."""
         response = client.get('/')
         html = response.data.decode('utf-8')
@@ -899,28 +889,20 @@ class TestWizardOptionalSteps:
         assert 'onboardBucketList' in html
         assert 'renderOnboardBucketPicker' in html
 
-    def test_step5_copy_does_not_mention_exports(self, client, app):
+    def test_revenue_copy_does_not_mention_exports(self, client, app):
         """New users should never learn about a CSV path that no longer exists."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        step5 = html.split('onboardingStep5')[1][:2000]
-        assert 'spreadsheet' not in step5.lower()
-        assert 'No export' not in step5
+        import_step = html.split('onboardingStep2')[-1].split('modal-footer')[0]
+        assert 'spreadsheet' not in import_step.lower()
+        assert 'No export' not in import_step
 
-    def test_step5_skip_button_visible_in_js(self, client, app):
-        """Skip step button should appear on step 5 when revenue not imported (JS logic)."""
+    def test_revenue_is_optional_to_finish(self, client, app):
+        """Revenue can wait - only the milestone sync blocks Finish."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        # The JS logic should show skipStepBtn on step 5
-        assert 'currentStep === 5 && !revenueImported' in html
-
-    def test_step5_finish_gated_on_revenue(self, client, app):
-        """Finish button should be disabled until revenue is imported (JS logic)."""
-        response = client.get('/')
-        html = response.data.decode('utf-8')
-        # updateNextButton should gate step 5 on revenueImported
-        assert 'currentStep === 5 && !revenueImported' in html
-        assert 'nextBtn.disabled = true' in html
+        assert 'nextBtn.disabled = !revenueImported' not in html
+        assert 'Revenue Analyzer' in html
 
     def test_revenue_state_var_present(self, client, app):
         """revenueImported JS variable should be initialized from server data."""
@@ -936,10 +918,3 @@ class TestWizardOptionalSteps:
         assert 'cursor: pointer;' in html
         # Should also have the toggle-enhancing CSS
         assert '#onboardDarkModeToggle:not(:checked)' in html
-
-    def test_step5_skip_dismisses_on_last_step(self, client, app):
-        """Skip step on step 5 should dismiss the wizard (JS calls dismissOnboarding)."""
-        response = client.get('/')
-        html = response.data.decode('utf-8')
-        # The skipStepBtn handler should dismiss when on the last step
-        assert 'currentStep >= totalSteps' in html

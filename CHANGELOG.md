@@ -14,6 +14,7 @@ Format: `## M/D/YYYY - <merge-short-sha>`. See
 - The sync pulls 25 months of history (two full fiscal years plus the current one) and every bucket, rather than only the ones you picked in the export.
 - Revenue rows now link to your customer records by TPID instead of guessing from the account name, so revenue lands on the right customer far more reliably.
 - Sales Buddy now notices when MSXI renames or retires revenue buckets at the fiscal year boundary. If buckets you had selected disappear, it clears the selection, tells you which ones went away, and shows the new list to pick from. Review notes on surviving buckets are kept; the rest are saved to a JSON archive in your data folder before being removed.
+- The setup wizard is down to two steps. Sign-in now sits on the welcome screen, and the account, milestone, and revenue imports share a single screen so you can see everything you need up front. Milestones and revenue unlock once your accounts finish and can run at the same time.
 
 ## 8/5/2026 - 5055be1
 

@@ -1075,14 +1075,15 @@
         }
     </style>
     <div class="modal fade" id="welcomeModal" tabindex="-1" aria-labelledby="welcomeModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+        <!-- Scrollable: step 2 stacks three imports, so the footer must stay reachable. -->
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="welcomeModalLabel">
                         <i class="bi bi-rocket-takeoff"></i> Welcome to Sales Buddy!
                     </h5>
                     <!-- Step indicator -->
-                    <span class="badge bg-secondary ms-auto me-2" id="onboardingStepBadge">Step 1 of 5</span>
+                    <span class="badge bg-secondary ms-auto me-2" id="onboardingStepBadge">Step 1 of 2</span>
                 </div>
                 <div class="modal-body">
                     <!-- Progress bar -->
@@ -1090,7 +1091,7 @@
                         <div class="progress-bar" id="onboardingProgress" role="progressbar" style="width: 20%"></div>
                     </div>
 
-                    <!-- STEP 1: Welcome + Dark Mode -->
+                    <!-- STEP 1: Welcome + Theme + Sign In -->
                     <div class="onboarding-step" id="onboardingStep1">
                         <p class="lead mb-3">Let's get you set up! This wizard will walk you through connecting to MSX, enabling AI-powered features, and importing your data.</p>
                         <div class="card mb-3">
@@ -1111,15 +1112,8 @@
                             </div>
                         </div>
 
-                        <div class="alert alert-info mb-0">
-                            <i class="bi bi-info-circle"></i> <strong>What's next:</strong> We'll sign you in to Azure (which also enables AI features like topic suggestions and engagement summaries), then import your accounts, milestones, and revenue data.
-                        </div>
-                    </div>
-
-                    <!-- STEP 2: Connect to MSX -->
-                    <div class="onboarding-step d-none" id="onboardingStep2">
-                        <h6 class="mb-3"><i class="bi bi-shield-lock text-primary"></i> Connect to MSX</h6>
-                        <p>Sign in to Azure to access MSX data and enable AI features.</p>
+                        <h6 class="mb-2"><i class="bi bi-shield-lock text-primary"></i> Connect to MSX</h6>
+                        <p>Sign in to Azure to access MSX data and enable AI features like topic suggestions and engagement summaries.</p>
 
                         <div class="card mb-3">
                             <div class="card-body" id="authCard">
@@ -1198,8 +1192,10 @@
                         </div>
                     </div>
 
-                    <!-- STEP 3: Import Accounts -->
-                    <div class="onboarding-step d-none" id="onboardingStep3">
+                    <!-- STEP 2: Import Data (accounts gate milestones + revenue, which run in parallel) -->
+                    <div class="onboarding-step d-none" id="onboardingStep2">
+                        <p class="lead mb-3">Now let's pull in your data. Start with your accounts - the milestone and revenue syncs unlock once that finishes, and you can run both at the same time.</p>
+
                         <h6 class="mb-3"><i class="bi bi-building text-primary"></i> Import Your Accounts <span class="text-muted fw-normal">(~1-3 min)</span></h6>
                         <p>We'll import your customer accounts, territories, sellers, and POD members from MSX.</p>
                         
@@ -1244,14 +1240,16 @@
                                 </div>
                             </div>
                         </div>
-                        
-                    </div>
 
-                    <!-- STEP 4: Import Milestones -->
-                    <div class="onboarding-step d-none" id="onboardingStep4">
+                        <hr class="my-4">
+
                         <h6 class="mb-3"><i class="bi bi-flag text-primary"></i> Import Milestones <span class="text-muted fw-normal">(~3 min)</span></h6>
-                        <p>Now let's pull in your milestone data from MSX. This syncs milestone status for all your accounts.</p>
-                        
+                        <p>Syncs milestone status for all of your accounts.</p>
+
+                        <div class="alert alert-secondary py-2 small mb-3" id="milestonesGateNote">
+                            <i class="bi bi-lock"></i> Unlocks once your accounts finish importing.
+                        </div>
+
                         <p class="small text-muted mb-3"><i class="bi bi-shield-lock me-1"></i>Requires VPN. If you get disconnected, just reconnect and retry.</p>
                         
                         <div class="card mb-3">
@@ -1261,7 +1259,7 @@
                                     <div id="milestonesIncompleteWarning" class="alert alert-warning py-2 mb-3 d-none">
                                         <i class="bi bi-exclamation-triangle"></i> Your last milestone sync didn't finish. Run it again to get complete data.
                                     </div>
-                                    <button class="btn btn-primary btn-lg" id="onboardImportMilestones">
+                                    <button class="btn btn-primary btn-lg" id="onboardImportMilestones" disabled>
                                         <i class="bi bi-cloud-download"></i> Import Milestones
                                     </button>
                                 </div>
@@ -1295,13 +1293,15 @@
                                 </div>
                             </div>
                         </div>
-                        
-                    </div>
 
-                    <!-- STEP 5: Revenue & Finish -->
-                    <div class="onboarding-step d-none" id="onboardingStep5">
-                        <h6 class="mb-3"><i class="bi bi-graph-up text-primary"></i> One More Thing: Revenue Data <span class="text-muted fw-normal">(~1 min)</span></h6>
+                        <hr class="my-4">
+
+                        <h6 class="mb-3"><i class="bi bi-graph-up text-primary"></i> Revenue Data <span class="text-muted fw-normal">(~1 min)</span></h6>
                         <p>Revenue data powers the Revenue Analyzer - trend charts, service breakdowns, and growth tracking for your accounts.</p>
+
+                        <div class="alert alert-secondary py-2 small mb-3" id="revenueGateNote">
+                            <i class="bi bi-lock"></i> Unlocks once your accounts finish importing.
+                        </div>
 
                         <div class="card mb-3 border-primary">
                             <div class="card-body" id="importRevenueCard">
@@ -1321,7 +1321,7 @@
                                     <div id="revenueIncompleteWarning" class="alert alert-warning py-2 mb-3 d-none">
                                         <i class="bi bi-exclamation-triangle"></i> Your last revenue sync didn't finish. Run it again to get complete data.
                                     </div>
-                                    <button class="btn btn-primary btn-lg" id="onboardImportRevenue">
+                                    <button class="btn btn-primary btn-lg" id="onboardImportRevenue" disabled>
                                         <i class="bi bi-cloud-download"></i> Sync Revenue from MSXI
                                     </button>
                                 </div>
@@ -1383,9 +1383,6 @@
                     <div>
                         <button type="button" class="btn btn-secondary d-none" id="onboardBackBtn">
                             <i class="bi bi-arrow-left"></i> Back
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary d-none" id="onboardSkipStepBtn">
-                            Skip <i class="bi bi-arrow-right"></i>
                         </button>
                         <button type="button" class="btn btn-primary" id="onboardNextBtn">
                             Next <i class="bi bi-arrow-right"></i>
@@ -1769,15 +1766,14 @@
 
                 // --- Onboarding Wizard State ---
                 let currentStep = 1;
-                const totalSteps = 5;
+                const totalSteps = 2;
                 let authCompleted = false;
                 let vpnVerified = false;
                 // Pre-set import state from server-side data
                 let accountsImported = {{ 'true' if accounts_synced else 'false' }};
                 let milestonesImported = {{ 'true' if has_milestones else 'false' }};
                 let revenueImported = {{ 'true' if has_revenue else 'false' }};
-                let roleSelected = true;  // No role selection in Step 1 - auto-detected in Step 3
-                let selectedRole = '{{ user_role }}';  // Updated after Step 3 auto-detect
+                let selectedRole = '{{ user_role }}';  // Updated after the account import auto-detect
                 const milestonesSyncState = '{{ milestones_sync_state }}';
                 const revenueSyncState = '{{ revenue_sync_state }}';
 
@@ -1794,10 +1790,8 @@
                     // Show current
                     const el = document.getElementById('onboardingStep' + step);
                     if (el) el.classList.remove('d-none');
-                    // Update badge and progress (weighted: 5%, 15%, 40%, 25%, 15%)
                     stepBadge.textContent = 'Step ' + step + ' of ' + totalSteps;
-                    const stepProgress = {1: 0, 2: 5, 3: 20, 4: 55, 5: 80};
-                    progressBar.style.width = stepProgress[step] + '%';
+                    progressBar.style.width = (step === 1 ? 0 : 20) + '%';
 
                     // Back button visibility
                     if (step > 1) backBtn.classList.remove('d-none');
@@ -1808,21 +1802,35 @@
                     } else {
                         nextBtn.innerHTML = 'Next <i class="bi bi-arrow-right"></i>';
                     }
-                    // Show "already completed" state if navigating to a previously-done step
-                    if (step === 3 && accountsImported) {
-                        showImportAlreadyDone('importAccounts', 'Accounts already imported');
-                        setWizardProgress(55);
-                    }
-                    if (step === 4 && milestonesImported) {
-                        showImportAlreadyDone('importMilestones', 'Milestones already synced');
-                        setWizardProgress(90);
-                    }
-                    if (step === 5 && revenueImported) {
-                        showRevenueAlreadyDone();
-                        setWizardProgress(100);
+                    // Surface anything already finished on an earlier run
+                    if (step === 2) {
+                        if (accountsImported) showImportAlreadyDone('importAccounts', 'Accounts already imported');
+                        if (milestonesImported) showImportAlreadyDone('importMilestones', 'Milestones already synced');
+                        if (revenueImported) showRevenueAlreadyDone();
+                        setWizardProgress(importProgressPct());
+                        updateImportGates();
                     }
                     // Disable next if step requires completion
                     updateNextButton();
+                }
+
+                // Step 2 carries three imports, so the bar tracks how many have landed.
+                function importProgressPct() {
+                    if (accountsImported && milestonesImported && revenueImported) return 100;
+                    if (accountsImported && milestonesImported) return 85;
+                    if (accountsImported) return 50;
+                    return 20;
+                }
+
+                // Milestones and revenue both need accounts first, but once that's
+                // done they're independent and can run at the same time.
+                function updateImportGates() {
+                    ['Milestones', 'Revenue'].forEach(name => {
+                        const btn = document.getElementById('onboardImport' + name);
+                        if (btn) btn.disabled = !accountsImported;
+                        const note = document.getElementById(name.toLowerCase() + 'GateNote');
+                        if (note) note.classList.toggle('d-none', accountsImported);
+                    });
                 }
 
                 function setWizardProgress(pct) {
@@ -1858,41 +1866,16 @@
                 }
 
                 function updateNextButton() {
-                    const skipStepBtn = document.getElementById('onboardSkipStepBtn');
-                    if (currentStep === 2 && !(authCompleted && vpnVerified)) {
-                        nextBtn.disabled = true;
-                    } else if (currentStep === 3 && !accountsImported) {
-                        nextBtn.disabled = true;
-                    } else if (currentStep === 4 && !milestonesImported) {
-                        nextBtn.disabled = true;
-                    } else if (currentStep === 5 && !revenueImported) {
-                        nextBtn.disabled = true;
+                    if (currentStep === 1) {
+                        nextBtn.disabled = !(authCompleted && vpnVerified);
                     } else {
-                        nextBtn.disabled = false;
+                        // Revenue stays optional; milestones are required to finish.
+                        nextBtn.disabled = !milestonesImported;
                     }
-                    // Show Skip button on step 5 (revenue) only when not yet done
-                    if (currentStep === 5 && !revenueImported) {
-                        skipStepBtn.classList.remove('d-none');
-                    } else {
-                        skipStepBtn.classList.add('d-none');
-                    }
-                }
-
-                // Determine the next step that still needs action
-                function nextIncompleteStep() {
-                    if (!accountsImported) return 3;
-                    if (!milestonesImported) return 4;
-                    if (!revenueImported) return 5;
-                    return 5;  // Revenue is the last step
                 }
 
                 nextBtn.addEventListener('click', async () => {
                     if (currentStep < totalSteps) {
-                        // After Step 3: reload so navbar/UI reflects detected role
-                        if (currentStep === 3) {
-                            window.location.href = window.location.pathname + '?onboarding_step=4';
-                            return;
-                        }
                         showStep(currentStep + 1);
                     } else {
                         // Finish — dismiss modal
@@ -1924,7 +1907,7 @@
                 }
 
                 // --- Step 1: Dark Mode Toggle ---
-                // Role is now auto-detected in Step 3 (no manual selection)
+                // Role is auto-detected once accounts are imported (no manual selection)
 
                 const onboardDarkToggle = document.getElementById('onboardDarkModeToggle');
                 if (onboardDarkToggle) {
@@ -2084,12 +2067,12 @@
 
                     showSignInState('signInSuccess');
                     nextBtn.innerHTML = 'Next <i class="bi bi-arrow-right"></i>';
-                    nextBtn.disabled = false;
+                    updateNextButton();
 
                     // Auto-advance for returning users who already have data
                     if (accountsImported || milestonesImported || revenueImported) {
                         setTimeout(() => {
-                            if (currentStep === 2) showStep(nextIncompleteStep());
+                            if (currentStep === 1) showStep(2);
                         }, 2000);
                     }
                 }
@@ -2164,7 +2147,7 @@
                     btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> I\'m on VPN -- Try Again';
                 });
 
-                // --- Step 3: Import Accounts ---
+                // --- Import Accounts ---
                 function showImportState(prefix, stateId) {
                     ['Initial', 'Progress', 'Success', 'Error'].forEach(s => {
                         document.getElementById(prefix + s).classList.add('d-none');
@@ -2303,7 +2286,8 @@
                                 '</ul>';
                         }
                         showImportState('importAccounts', 'Success');
-                        setWizardProgress(55);
+                        setWizardProgress(importProgressPct());
+                        updateImportGates();
                         updateNextButton();
                     } catch (err) {
                         const msg = err.message || 'Connection error during import';
@@ -2324,7 +2308,7 @@
                 document.getElementById('onboardImportAccounts').addEventListener('click', importAccounts);
                 document.getElementById('importAccountsRetry').addEventListener('click', importAccounts);
 
-                // --- Step 4: Import Milestones ---
+                // --- Import Milestones ---
                 // The milestone sync endpoint uses named SSE events:
                 //   event: start\ndata: {"total": N}
                 //   event: progress\ndata: {"current":1, "total":N, "customer":"...", "status":"ok"}
@@ -2445,7 +2429,7 @@
                                 '</ul>';
                         }
                         showImportState('importMilestones', 'Success');
-                        setWizardProgress(90);
+                        setWizardProgress(importProgressPct());
                         updateNextButton();
                         // Kick off background marketing insights sync (fire-and-forget)
                         fetch('/api/msx/sync-marketing', { method: 'POST' }).catch(() => {});
@@ -2460,18 +2444,8 @@
 
                 document.getElementById('onboardImportMilestones').addEventListener('click', importMilestones);
                 document.getElementById('importMilestonesRetry').addEventListener('click', importMilestones);
-                document.getElementById('onboardSkipStepBtn').addEventListener('click', async () => {
-                    if (currentStep >= totalSteps) {
-                        // Last step — dismiss the wizard
-                        await dismissOnboarding();
-                        modal.hide();
-                        window.location.reload();
-                    } else {
-                        showStep(currentStep + 1);
-                    }
-                });
 
-                // --- Step 5: Import Revenue ---
+                // --- Revenue Sync ---
                 function showRevenueState(stateId) {
                     ['Initial', 'Progress', 'Success', 'Error'].forEach(s => {
                         document.getElementById('importRevenue' + s).classList.add('d-none');
@@ -2557,7 +2531,7 @@
                                 renderOnboardBucketPicker(buckets);
                             }
                         } catch (e) { /* best effort */ }
-                        setWizardProgress(90);
+                        setWizardProgress(importProgressPct());
                         updateNextButton();
                     } catch (err) {
                         const msg = err.message || 'Connection error during sync';
@@ -2668,36 +2642,21 @@
 
                     let startStep = 1;
 
-                    // Check for step override from URL (used after Step 1 role selection reload)
-                    const urlParams = new URLSearchParams(window.location.search);
-                    const stepOverride = parseInt(urlParams.get('onboarding_step'));
-                    if (stepOverride >= 1 && stepOverride <= totalSteps) {
-                        // Clean the URL so refreshing doesn't re-trigger
-                        history.replaceState(null, '', window.location.pathname);
-                        startStep = stepOverride;
-                    }
-
-                    // If user already has data, check auth and skip completed steps
+                    // Returning user with data: if they're still signed in, skip the auth step.
                     if (startStep === 1 && (accountsImported || milestonesImported || revenueImported)) {
                         try {
                             const resp = await fetch('/api/msx/status');
                             const data = await resp.json();
                             if (data.authenticated) {
+                                // They reached MSX before, so treat VPN as proven too -
+                                // otherwise stepping Back would strand them on a dead Next.
                                 authCompleted = true;
+                                vpnVerified = true;
+                                showSignInState('signInSuccess');
+                                startStep = 2;
                             }
                         } catch (err) {
-                            // Auth check failed — fall through to step 1 or 2
-                        }
-
-                        if (authCompleted && accountsImported && milestonesImported && revenueImported) {
-                            startStep = 5;
-                        } else if (authCompleted && accountsImported && milestonesImported) {
-                            startStep = 5;
-                        } else if (authCompleted && accountsImported) {
-                            startStep = 4;
-                        } else if (accountsImported) {
-                            // Data exists but auth expired — re-auth first
-                            startStep = 2;
+                            // Auth check failed — start at step 1 and sign in again
                         }
                     }
 
