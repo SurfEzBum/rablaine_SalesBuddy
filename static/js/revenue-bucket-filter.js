@@ -26,14 +26,16 @@ var RevenueBucketFilter = (function() {
     function loadSelection() {
         try {
             var saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-            if (saved && Array.isArray(saved) && saved.length > 0) {
+            if (saved && Array.isArray(saved)) {
                 selectedBuckets = new Set(saved);
-                _usedFallback = false;
+                // An empty selection is valid: it means "no filter yet", so we
+                // still consult the DB in case another device picked buckets.
+                _usedFallback = saved.length === 0;
                 return;
             }
         } catch(e) {}
-        // Default: all buckets selected (may be overridden by DB fallback)
-        selectedBuckets = new Set(allBuckets);
+        // No selection at all - show everything until the user narrows it.
+        selectedBuckets = new Set();
         _usedFallback = true;
     }
 
@@ -85,9 +87,11 @@ var RevenueBucketFilter = (function() {
     }
 
     function applyFilter() {
+        // No buckets picked means no filter, not "hide everything".
+        var noFilter = selectedBuckets.size === 0;
         var visibleCount = 0;
         document.querySelectorAll('[data-bucket]').forEach(function(el) {
-            var show = selectedBuckets.has(el.dataset.bucket);
+            var show = noFilter || selectedBuckets.has(el.dataset.bucket);
             el.style.display = show ? '' : 'none';
             if (show) visibleCount++;
         });
@@ -99,7 +103,7 @@ var RevenueBucketFilter = (function() {
         var countEl = document.getElementById('bucketFilterCount');
         if (countEl) {
             var total = allBuckets.length;
-            if (selectedBuckets.size < total) {
+            if (selectedBuckets.size > 0 && selectedBuckets.size < total) {
                 countEl.textContent = selectedBuckets.size + '/' + total;
                 countEl.classList.remove('d-none');
             } else {

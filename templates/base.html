@@ -1363,7 +1363,7 @@
                                 <h6 class="mb-0"><i class="bi bi-funnel"></i> Select Your Buckets</h6>
                             </div>
                             <div class="card-body">
-                                <p class="text-muted small mb-2">Check the service comp groupings you're compensated on. This filters your revenue views across the app. You can change it later from Revenue Import.</p>
+                                <p class="text-muted small mb-2">Check the service comp groupings you're compensated on to filter your revenue views across the app. Leave them all unchecked to see every bucket. You can change this later from Revenue Import.</p>
                                 <div id="onboardBucketList">
                                     <div class="text-center text-muted py-2">
                                         <div class="spinner-border spinner-border-sm"></div> Loading buckets...
@@ -2548,18 +2548,12 @@
                                 '</ul>';
                         }
                         showRevenueState('Success');
-                        // Seed the bucket filter from whatever the sync actually returned,
-                        // then let the user narrow it to the buckets they're paid on.
+                        // Offer the bucket picker. Nothing is pre-selected - an empty
+                        // selection means "show everything", and the user narrows it.
                         try {
                             const bucketsResp = await fetch('/api/revenue/buckets');
                             const buckets = await bucketsResp.json();
                             if (buckets && buckets.length > 0) {
-                                localStorage.setItem('salesbuddy_revenue_bucket_filter', JSON.stringify(buckets));
-                                await fetch('/api/revenue/compensated-buckets', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify(buckets),
-                                });
                                 renderOnboardBucketPicker(buckets);
                             }
                         } catch (e) { /* best effort */ }
@@ -2586,10 +2580,10 @@
                     card.classList.remove('d-none');
                     listEl.innerHTML = '';
 
-                    let selected = new Set(buckets);
+                    let selected = new Set();
                     try {
                         const saved = JSON.parse(localStorage.getItem('salesbuddy_revenue_bucket_filter'));
-                        if (saved && Array.isArray(saved) && saved.length) selected = new Set(saved);
+                        if (saved && Array.isArray(saved)) selected = new Set(saved);
                     } catch (e) {}
 
                     const search = document.createElement('input');

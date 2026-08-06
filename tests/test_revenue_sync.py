@@ -94,6 +94,18 @@ class TestBucketReconciliation:
         tax.apply_bucket_notice(tax.reconcile_buckets({"Databases", "Fabric"}))
         assert json.loads(UserPreference.query.first().compensated_buckets) == ["Databases"]
 
+    def test_empty_selection_is_never_a_reset(self, app):
+        """No selection means 'show everything', so there is nothing to lose."""
+        self._seed_stored(["Core DBs", "Analytics"])
+        pref = UserPreference.query.first() or UserPreference()
+        pref.compensated_buckets = json.dumps([])
+        db.session.add(pref)
+        db.session.commit()
+
+        notice = tax.reconcile_buckets({"Databases", "Fabric"})
+        assert notice["status"] == "review"
+        assert notice["missing_selected"] == []
+
 
 # ---------------------------------------------------------------------------
 # Review-note preservation

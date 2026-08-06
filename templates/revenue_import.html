@@ -133,7 +133,7 @@
                     <h5 class="mb-0"><i class="bi bi-funnel"></i> Select Your Buckets</h5>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted small mb-3">Check the service comp groupings you're compensated on. This filters your revenue views across the app.</p>
+                    <p class="text-muted small mb-3">Check the service comp groupings you're compensated on to filter your revenue views across the app. Leave them all unchecked to see every bucket.</p>
                     <div id="bucketPickerList">
                         <div class="text-center text-muted py-3">
                             <div class="spinner-border spinner-border-sm"></div> Loading buckets...
@@ -483,13 +483,13 @@ fileInput.addEventListener('change', async function() {
                     listEl.textContent = 'No buckets found. Import revenue data first.';
                     return;
                 }
-                // Load saved selection
+                // Load saved selection. Nothing checked is the default: the user
+                // ticks the buckets they're paid on, and an empty selection shows all.
                 var selected = new Set();
                 try {
                     var saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
                     if (saved && Array.isArray(saved)) selected = new Set(saved);
                 } catch(e) {}
-                if (selected.size === 0) selected = new Set(buckets);
 
                 listEl.innerHTML = '';
 
