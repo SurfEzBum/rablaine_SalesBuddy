@@ -13,9 +13,8 @@ Auth flow (no browser, no manual token):
 3. POST the semantic query to the capacity's QES ``public/query`` endpoint with
    that MWCToken. Row-level security scopes results to our MSX-assigned accounts.
 
-Results are read-only. Nothing here writes to the database - the beta test page
-renders and audits the findings so coverage can be validated before this feeds
-the import pipeline.
+Results are read-only. Nothing here writes to the database - ``revenue_sync``
+owns the write side.
 """
 from __future__ import annotations
 
@@ -475,62 +474,3 @@ def get_customer_tpids(limit: Optional[int] = None) -> list[tuple[int, str]]:
             if limit and len(seen) >= limit:
                 break
     return seen
-
-
-# ---------------------------------------------------------------------------
-# Audit summary for the beta test page
-# ---------------------------------------------------------------------------
-def build_audit(rows: list[dict], customers: list[tuple[int, str]]) -> dict:
-    """Summarize a pull: coverage stats + a per-customer breakdown to eyeball."""
-    names = {t: n for t, n in customers}
-    total = len(customers)
-
-    per: dict[int, dict] = {}
-    months: set[str] = set()
-    buckets: set[str] = set()
-    grand_total = 0.0
-    for r in rows:
-        try:
-            tpid = int(r.get("tpid"))
-        except (TypeError, ValueError):
-            continue
-        acr = float(r.get("acr") or 0.0)
-        bucket = (r.get("bucket") or "").strip()
-        fm = str(r.get("fm") or "").strip()
-        if fm:
-            months.add(fm)
-        if bucket:
-            buckets.add(bucket)
-        grand_total += acr
-        c = per.setdefault(tpid, {"tpid": tpid, "name": r.get("name") or names.get(tpid),
-                                  "total_acr": 0.0, "buckets": set(), "months": set()})
-        c["total_acr"] += acr
-        if bucket:
-            c["buckets"].add(bucket)
-        if fm:
-            c["months"].add(fm)
-
-    with_data = [c for c in per.values() if abs(c["total_acr"]) > 0.005]
-    with_data_ids = {c["tpid"] for c in with_data}
-    without = [{"tpid": t, "name": n} for t, n in customers if t not in with_data_ids]
-
-    per_customer = sorted(
-        ({"tpid": c["tpid"], "name": c["name"], "total_acr": round(c["total_acr"], 2),
-          "bucket_count": len(c["buckets"]), "month_count": len(c["months"])}
-         for c in with_data),
-        key=lambda x: x["total_acr"], reverse=True,
-    )
-
-    return {
-        "total_customers": total,
-        "customers_with_data": len(with_data),
-        "customers_without_data": total - len(with_data),
-        "coverage_pct": round(100 * len(with_data) / total, 1) if total else 0.0,
-        "total_acr": round(grand_total, 2),
-        "row_count": len(rows),
-        "distinct_months": sorted(months),
-        "distinct_buckets": sorted(buckets),
-        "per_customer": per_customer,
-        "without_data": without[:200],
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-    }

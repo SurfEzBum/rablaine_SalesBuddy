@@ -1,9 +1,8 @@
 """
 Revenue sync from the MSXI API.
 
-Replaces the manual CSV import: pulls ACR straight from the Power BI dataset
-using the caller's ``az login``, then upserts it into the same tables the CSV
-importer writes to.
+Pulls ACR straight from the Power BI dataset using the caller's ``az login``
+and upserts it into the revenue tables.
 
 Two entry points share one implementation, mirroring ``milestone_sync``:
 
@@ -14,8 +13,8 @@ Two things make this more than a data load:
 
 - The MSXI bucket taxonomy changes at the fiscal-year boundary, which strands
   previously imported rows and forces a purge (see ``revenue_taxonomy``).
-- Because we query *by* TPID, every row can be linked to a customer exactly,
-  replacing the CSV path's fuzzy name matching.
+- Because we query *by* TPID, every row links to a customer exactly, with no
+  name matching involved.
 """
 from __future__ import annotations
 
@@ -41,10 +40,11 @@ def _sse(event_type: str, data: dict[str, Any]) -> str:
 
 
 def has_revenue_data() -> bool:
-    """True once revenue has loaded by either path.
+    """True once revenue has loaded.
 
-    The API sync and the legacy CSV import record different sync types, so
-    callers that gate UI on "do we have revenue yet" must accept either.
+    Installs that predate the API sync recorded a ``revenue_import`` status
+    instead. That row still describes real data sitting in their tables, so
+    keep honouring it or those users get re-prompted to onboard.
     """
     return SyncStatus.is_complete(SYNC_TYPE) or SyncStatus.is_complete("revenue_import")
 

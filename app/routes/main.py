@@ -1975,7 +1975,7 @@ def inject_preferences():
     has_revenue = has_revenue_data()
     accounts_sync_state = SyncStatus.get_status('accounts')['state']
     milestones_sync_state = SyncStatus.get_status('milestones')['state']
-    revenue_sync_state = SyncStatus.get_status('revenue_import')['state']
+    revenue_sync_state = SyncStatus.get_status('revenue_sync')['state']
     
     # Check for available updates (lightweight -- reads cached state, no git calls)
     update_available = False

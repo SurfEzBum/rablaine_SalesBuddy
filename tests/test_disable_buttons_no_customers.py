@@ -51,12 +51,12 @@ class TestRevenueDashboardButtons:
 class TestRevenueImportButtons:
     """Test revenue import page buttons are always enabled (wizard enforces import)."""
 
-    def test_import_button_always_enabled(self, client, app):
-        """Import CSV button should always be active."""
+    def test_sync_button_always_enabled(self, client, app):
+        """Sync revenue button should always be active."""
         response = client.get('/revenue/import')
         assert response.status_code == 200
         html = response.data.decode()
-        assert 'type="file"' in html
+        assert 'id="syncBtn"' in html
         assert 'Import accounts</a> first' not in html
 
 
@@ -70,17 +70,9 @@ class TestBackendGuardsNoCustomers:
         data = response.get_json()
         assert data['error'] == 'Import accounts first'
 
-    def test_revenue_import_rejected_no_customers(self, client, app):
-        """POST to revenue import should return 400 when no customers."""
-        from io import BytesIO
-        data = {
-            'file': (BytesIO(b'col1,col2\nval1,val2'), 'test.csv'),
-        }
-        response = client.post(
-            '/api/revenue/import',
-            data=data,
-            content_type='multipart/form-data',
-        )
+    def test_revenue_sync_rejected_no_customers(self, client, app):
+        """POST to revenue sync should return 400 when no customers."""
+        response = client.post('/api/revenue/sync', json={})
         assert response.status_code == 400
         resp_data = response.get_json()
         assert resp_data['error'] == 'Import accounts first'

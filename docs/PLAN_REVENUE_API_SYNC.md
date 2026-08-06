@@ -1,7 +1,9 @@
 # Plan: Revenue Sync from the MSXI API
 
 **Branch:** `feature/revenue-api-sync`
-**Status:** Awaiting review. Nothing built yet.
+**Status:** Built and validated. The CSV import, its fuzzy name matching, and the
+hidden `/revenue/pull-test` beta page have since been deleted, so the
+"keep CSV upload as a fallback" step below no longer reflects the code.
 **Date:** August 6, 2026
 
 Replace the manual CSV revenue import with a direct, headless pull from the MSXI

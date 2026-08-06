@@ -10,11 +10,12 @@ Format: `## M/D/YYYY - <merge-short-sha>`. See
 
 ## 8/6/2026
 
-- Revenue can now sync straight from MSXI - no CSV export. Open Import Revenue Data and click "Sync revenue now" to pull your accounts' ACR using your `az login`, with live progress. It also runs automatically alongside the milestone sync.
+- 🎉 **Revenue can now sync straight from MSXI - no CSV export.** 🎉 Open Import Revenue Data and click "Sync revenue now" to pull your accounts' ACR using your `az login`, with live progress. It also refreshes on its own in the background: the automatic milestone sync runs Monday, Wednesday, and Friday, and revenue rides along with it at most once every 7 days.
 - The sync pulls 25 months of history (two full fiscal years plus the current one) and every bucket, rather than only the ones you picked in the export.
 - Revenue rows now link to your customer records by TPID instead of guessing from the account name, so revenue lands on the right customer far more reliably.
 - Sales Buddy now notices when MSXI renames or retires revenue buckets at the fiscal year boundary. If buckets you had selected disappear, it clears the selection, tells you which ones went away, and shows the new list to pick from. Review notes on surviving buckets are kept; the rest are saved to a JSON archive in your data folder before being removed.
 - The setup wizard is down to two steps. Sign-in now sits on the welcome screen, and a single "Start Import" button pulls your accounts, milestones, and revenue in turn, each with its own progress bar, result summary, and retry.
+- Removed the CSV revenue import. Everything now comes from the MSXI sync, so the upload form, the export instructions, and the hidden "Revenue Pull" beta page are gone. Revenue you imported previously is untouched.
 
 ## 8/5/2026 - 5055be1
 

@@ -1498,7 +1498,7 @@ class PartnerRecommendation(db.Model):
 # =============================================================================
 
 class RevenueImport(db.Model):
-    """Tracks each revenue data import from MSXI CSV."""
+    """Tracks each revenue data sync from MSXI."""
     __tablename__ = 'revenue_imports'
     
     id = db.Column(db.Integer, primary_key=True)
