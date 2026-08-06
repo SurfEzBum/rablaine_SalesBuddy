@@ -179,6 +179,83 @@ def revenue_pull_test_run():
     return jsonify(audit)
 
 
+@revenue_bp.route('/api/revenue/sync', methods=['POST'])
+def revenue_sync():
+    """Sync revenue straight from MSXI (no CSV).
+
+    Streams SSE progress when the caller asks for it, otherwise starts the sync
+    in a background thread and returns 202 so the scheduler never times out.
+    """
+    from app.services.revenue_sync import sync_revenue, sync_revenue_stream
+
+    if Customer.query.first() is None:
+        return jsonify({'success': False, 'error': 'Import accounts first'}), 400
+
+    payload = request.get_json(silent=True) or {}
+    fiscal_years = payload.get('fiscal_years') or None
+    if fiscal_years and not isinstance(fiscal_years, list):
+        fiscal_years = None
+    run_analysis = payload.get('run_analysis', True)
+
+    if 'text/event-stream' in request.headers.get('Accept', ''):
+        def generate():
+            yield from sync_revenue_stream(fiscal_years, run_analysis)
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype='text/event-stream',
+            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+        )
+
+    import threading
+    from flask import current_app
+
+    def _run(app):
+        with app.app_context():
+            try:
+                sync_revenue(fiscal_years, run_analysis)
+            except Exception:
+                app.logger.exception("Background revenue sync failed")
+
+    threading.Thread(target=_run, args=(current_app._get_current_object(),),
+                     daemon=True).start()
+    return jsonify({'success': True, 'message': 'Revenue sync started in background.',
+                    'async': True}), 202
+
+
+@revenue_bp.route('/api/revenue/sync/status', methods=['GET'])
+def revenue_sync_status():
+    """Current state of the revenue sync plus any pending bucket-change notice."""
+    from app.services.revenue_sync import SYNC_TYPE
+    from app.models import UserPreference
+
+    status = SyncStatus.get_status(SYNC_TYPE)
+    pref = UserPreference.query.first()
+    notice = None
+    if pref and pref.bucket_taxonomy_notice:
+        try:
+            notice = json.loads(pref.bucket_taxonomy_notice)
+        except (ValueError, TypeError):
+            notice = None
+    return jsonify({
+        'status': status,
+        'bucket_notice': notice,
+        'bucket_taxonomy_version': (pref.bucket_taxonomy_version if pref else 0),
+    })
+
+
+@revenue_bp.route('/api/revenue/bucket-notice', methods=['DELETE'])
+def revenue_dismiss_bucket_notice():
+    """Clear the bucket-change banner once the user has acknowledged it."""
+    from app.models import UserPreference
+
+    pref = UserPreference.query.first()
+    if pref:
+        pref.bucket_taxonomy_notice = None
+        db.session.commit()
+    return jsonify({'success': True})
+
+
 @revenue_bp.route('/api/revenue/import', methods=['POST'])
 def revenue_import_stream():
     """Import revenue CSV with streaming progress updates."""

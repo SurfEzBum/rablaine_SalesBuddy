@@ -15,6 +15,7 @@
  */
 var RevenueBucketFilter = (function() {
     var STORAGE_KEY = 'salesbuddy_revenue_bucket_filter';
+    var VERSION_KEY = 'salesbuddy_revenue_bucket_taxonomy_version';
     var allBuckets = [];
     var selectedBuckets = new Set();
     var onFilterChange = null;
@@ -50,6 +51,24 @@ var RevenueBucketFilter = (function() {
                 }
             })
             .catch(function() {});
+    }
+
+    // MSXI renames and retires buckets at the fiscal-year boundary. When that
+    // happens the server clears the stored selection and bumps a version; without
+    // this check a stale localStorage copy would silently win on the next load.
+    function invalidateStaleCache(done) {
+        fetch('/api/revenue/sync/status')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var serverVersion = String(d.bucket_taxonomy_version || 0);
+                var seen = localStorage.getItem(VERSION_KEY);
+                if (seen !== serverVersion) {
+                    localStorage.removeItem(STORAGE_KEY);
+                    localStorage.setItem(VERSION_KEY, serverVersion);
+                }
+            })
+            .catch(function() {})
+            .then(function() { if (done) done(); });
     }
 
     function saveSelection() {
@@ -211,15 +230,17 @@ var RevenueBucketFilter = (function() {
         init: function(opts) {
             opts = opts || {};
             onFilterChange = opts.onFilterChange || null;
-            discoverBuckets();
-            loadSelection();
-            // Remove buckets from selection that no longer exist in data
-            selectedBuckets.forEach(function(b) {
-                if (allBuckets.indexOf(b) === -1) selectedBuckets.delete(b);
+            invalidateStaleCache(function() {
+                discoverBuckets();
+                loadSelection();
+                // Remove buckets from selection that no longer exist in data
+                selectedBuckets.forEach(function(b) {
+                    if (allBuckets.indexOf(b) === -1) selectedBuckets.delete(b);
+                });
+                if (opts.containerId) renderFilterUI(opts.containerId);
+                applyFilter();
+                loadFallbackFromDB();
             });
-            if (opts.containerId) renderFilterUI(opts.containerId);
-            applyFilter();
-            loadFallbackFromDB();
         },
         toggle: function(bucket) {
             if (selectedBuckets.has(bucket)) {

@@ -160,12 +160,34 @@ def _run_sync(app):
             # Run marketing insights sync after milestone sync completes
             _run_marketing_sync(app)
 
+            # Refresh revenue from MSXI (ACR only moves monthly, so this is cheap
+            # to chain here rather than run on its own schedule)
+            _run_revenue_sync()
+
             # Check if a U2C snapshot is due (5th of FQ start month)
             _check_u2c_snapshot()
     except Exception:
         logger.exception("Error during milestone sync")
     finally:
         _sync_lock.release()
+
+
+def _run_revenue_sync():
+    """Pull revenue from MSXI in the current thread (already in app context)."""
+    try:
+        from app.services.revenue_sync import sync_revenue
+        logger.info("Starting revenue sync (post-milestone)")
+        result = sync_revenue()
+        if result.get('success'):
+            logger.info(
+                "Revenue sync complete: %d bucket rows, %d product rows, %d customers with data",
+                result.get('bucket_rows', 0), result.get('product_rows', 0),
+                result.get('customers_with_data', 0),
+            )
+        else:
+            logger.error("Revenue sync failed: %s", result.get('error', 'Unknown'))
+    except Exception:
+        logger.exception("Error during revenue sync")
 
 
 def _run_marketing_sync(app):

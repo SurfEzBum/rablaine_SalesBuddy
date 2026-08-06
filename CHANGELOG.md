@@ -8,6 +8,13 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/6/2026
+
+- Revenue can now sync straight from MSXI - no CSV export. Open Import Revenue Data and click "Sync revenue now" to pull your accounts' ACR using your `az login`, with live progress. It also runs automatically alongside the milestone sync.
+- The sync pulls 25 months of history (two full fiscal years plus the current one) and every bucket, rather than only the ones you picked in the export.
+- Revenue rows now link to your customer records by TPID instead of guessing from the account name, so revenue lands on the right customer far more reliably.
+- Sales Buddy now notices when MSXI renames or retires revenue buckets at the fiscal year boundary. If buckets you had selected disappear, it clears the selection, tells you which ones went away, and shows the new list to pick from. Review notes on surviving buckets are kept; the rest are saved to a JSON archive in your data folder before being removed.
+
 ## 8/5/2026 - 5055be1
 
 - *Electron Shell Update* - Added Find in Page to the desktop app. Press Ctrl+F (or Edit > Find in Page) to search the current page, cycle matches with Enter and Shift+Enter, and close with Esc. Matches are highlighted with the current one in orange, and a counter shows your position.

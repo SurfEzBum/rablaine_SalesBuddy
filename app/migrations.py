@@ -336,6 +336,12 @@ def run_migrations(db):
     _add_column_if_not_exists(db, inspector, 'user_preferences',
                               'start_minimized', "BOOLEAN NOT NULL DEFAULT 0")
 
+    # Migration: Add revenue bucket taxonomy tracking to user_preferences
+    _add_column_if_not_exists(db, inspector, 'user_preferences',
+                              'bucket_taxonomy_version', "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_not_exists(db, inspector, 'user_preferences',
+                              'bucket_taxonomy_notice', "TEXT")
+
     # =========================================================================
     # End migrations
     # =========================================================================

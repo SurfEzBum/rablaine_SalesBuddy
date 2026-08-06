@@ -14,8 +14,37 @@
         </div>
     </div>
 
+    <div id="bucketNotice"></div>
+
     <div class="row">
         <div class="col-lg-6">
+            <!-- Sync from MSXI (no CSV) -->
+            <div class="card mb-4">
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <h5 class="mb-0"><i class="bi bi-cloud-download"></i> Sync from MSXI</h5>
+                    <span class="badge bg-warning text-dark">Beta</span>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small">
+                        Pulls revenue straight from MSXI using your <code>az login</code> - no export needed.
+                        Requires the corporate VPN.
+                    </p>
+                    <button type="button" class="btn btn-primary" id="syncBtn">
+                        <i class="bi bi-arrow-repeat"></i> Sync revenue now
+                    </button>
+                    <p class="text-muted small mb-0 mt-1" id="syncLastRun"></p>
+
+                    <div id="syncProgress" class="mt-3 d-none">
+                        <div class="progress mb-2" style="height: 20px;">
+                            <div id="syncBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <p id="syncText" class="text-muted mb-0"><i class="bi bi-hourglass-split"></i> Starting...</p>
+                    </div>
+                    <div id="syncResults" class="mt-3 d-none"></div>
+                </div>
+            </div>
+
             <!-- Import Form -->
             <div class="card mb-4" id="revenueImportCard" style="position: relative;">
                 <div id="revImportBrainrotToggle" class="brainrot-card-toggle brainrot-pos-top-right d-none">
@@ -135,6 +164,143 @@
         </div>
     </div>
 </div>
+
+<script>
+// --- Sync from MSXI (SSE) + bucket taxonomy notice --------------------------
+(function () {
+    const syncBtn = document.getElementById('syncBtn');
+    const wrap = document.getElementById('syncProgress');
+    const bar = document.getElementById('syncBar');
+    const text = document.getElementById('syncText');
+    const results = document.getElementById('syncResults');
+    const noticeEl = document.getElementById('bucketNotice');
+    const lastRun = document.getElementById('syncLastRun');
+
+    const esc = (s) => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const num = (n) => Number(n || 0).toLocaleString();
+
+    function renderNotice(notice) {
+        if (!notice || !noticeEl) return;
+        const reset = notice.status === 'reset';
+        const missing = notice.missing_selected || [];
+        let html = '<div class="alert ' + (reset ? 'alert-warning' : 'alert-info') +
+            ' alert-dismissible fade show" role="alert">';
+        html += '<h6 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> ' +
+            'MSXI changed its revenue buckets</h6>';
+        if (reset) {
+            html += '<p class="mb-2">These buckets you had selected no longer exist: <strong>' +
+                missing.map(esc).join(', ') + '</strong>. Your selection has been cleared - ' +
+                'please pick your buckets again below.</p>';
+        } else {
+            html += '<p class="mb-2">The bucket list changed this fiscal year. Your selections ' +
+                'still exist, but you may want to revisit them.</p>';
+        }
+        if ((notice.added || []).length) {
+            html += '<p class="mb-1 small"><strong>New:</strong> ' +
+                notice.added.map(esc).join(', ') + '</p>';
+        }
+        if ((notice.removed || []).length) {
+            html += '<p class="mb-0 small"><strong>Retired:</strong> ' +
+                notice.removed.map(esc).join(', ') + '</p>';
+        }
+        html += '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+        noticeEl.innerHTML = html;
+        noticeEl.querySelector('.btn-close').addEventListener('click', () => {
+            fetch('{{ url_for("revenue.revenue_dismiss_bucket_notice") }}', { method: 'DELETE' });
+        });
+    }
+
+    // Show any notice left behind by a scheduled (headless) sync.
+    fetch('{{ url_for("revenue.revenue_sync_status") }}')
+        .then(r => r.json())
+        .then(d => {
+            renderNotice(d.bucket_notice);
+            const st = d.status || {};
+            if (st.completed_at) {
+                // Flask serialises datetimes as RFC-822 ("Wed, 06 Aug 2026 17:49:53 GMT").
+                const when = new Date(st.completed_at);
+                if (!isNaN(when)) {
+                    lastRun.textContent = 'Last synced ' + when.toLocaleString();
+                }
+            }
+        })
+        .catch(() => {});
+
+    syncBtn.addEventListener('click', async function () {
+        syncBtn.disabled = true;
+        results.classList.add('d-none');
+        results.innerHTML = '';
+        wrap.classList.remove('d-none');
+        bar.style.width = '0%';
+        text.innerHTML = '<i class="bi bi-hourglass-split"></i> Starting...';
+
+        try {
+            const resp = await fetch('{{ url_for("revenue.revenue_sync") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+                body: JSON.stringify({})
+            });
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let event = null;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) { event = line.slice(7).trim(); continue; }
+                    if (!line.startsWith('data: ')) continue;
+                    let d;
+                    try { d = JSON.parse(line.slice(6)); } catch (e) { continue; }
+
+                    if (event === 'error' || d.error) {
+                        wrap.classList.add('d-none');
+                        results.classList.remove('d-none');
+                        results.innerHTML = '<div class="alert alert-danger mb-0">' +
+                            '<strong>Sync failed.</strong><pre class="mb-0 mt-2" ' +
+                            'style="white-space:pre-wrap;">' + esc(d.error) + '</pre></div>';
+                    } else if (event === 'complete') {
+                        bar.style.width = '100%';
+                        wrap.classList.add('d-none');
+                        results.classList.remove('d-none');
+                        let h = '<div class="alert alert-success mb-0">' +
+                            '<h6 class="alert-heading"><i class="bi bi-check-circle"></i> Revenue synced</h6>' +
+                            '<ul class="mb-0 small">' +
+                            '<li>' + num(d.bucket_rows) + ' bucket rows, ' + num(d.product_rows) +
+                            ' product rows across ' + d.months + ' months</li>' +
+                            '<li>' + d.customers_with_data + ' of ' + d.customers +
+                            ' accounts returned revenue</li>' +
+                            '<li>' + d.linked_pct + '% of rows linked to a customer record</li>';
+                        if (d.review_kept || d.review_retired) {
+                            h += '<li>' + d.review_kept + ' review note(s) kept, ' +
+                                 d.review_retired + ' retired with their buckets</li>';
+                        }
+                        h += '<li>Completed in ' + d.duration_s + 's</li></ul></div>';
+                        results.innerHTML = h;
+                        renderNotice(d.taxonomy);
+                        if (window.showBucketPicker) window.showBucketPicker();
+                    } else {
+                        if (typeof d.progress === 'number') bar.style.width = d.progress + '%';
+                        if (d.message) text.innerHTML = '<i class="bi bi-hourglass-split"></i> ' + esc(d.message);
+                    }
+                }
+            }
+        } catch (err) {
+            wrap.classList.add('d-none');
+            results.classList.remove('d-none');
+            results.innerHTML = '<div class="alert alert-danger mb-0">Request failed: ' +
+                esc(err) + '</div>';
+        } finally {
+            syncBtn.disabled = false;
+        }
+    });
+})();
+</script>
 
 <script>
 const importBtn = document.getElementById('importBtn');
