@@ -5,7 +5,7 @@ Focus is on the behaviour that can silently corrupt data: truncated pulls,
 bucket-taxonomy transitions, and review-note preservation.
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -252,3 +252,34 @@ class TestPullSafety:
         fys = default_fiscal_years()
         assert len(fys) == 3, "two prior fiscal years plus the current one"
         assert all(f.startswith("FY") for f in fys)
+
+
+# ---------------------------------------------------------------------------
+# Scheduling
+# ---------------------------------------------------------------------------
+class TestWeeklyCadence:
+    """Revenue rides along with the milestone sync but only runs weekly."""
+
+    def test_due_when_never_run(self, app):
+        from app.services.scheduled_sync import _revenue_sync_due
+        assert _revenue_sync_due() is True
+
+    def test_not_due_the_next_day(self, app):
+        from app.models import SyncStatus
+        from app.services.scheduled_sync import _revenue_sync_due
+
+        SyncStatus.mark_started('revenue_sync')
+        SyncStatus.mark_completed('revenue_sync', success=True)
+        assert _revenue_sync_due() is False
+
+    def test_due_again_after_a_week(self, app):
+        from app.models import SyncStatus
+        from app.services.scheduled_sync import _revenue_sync_due
+
+        SyncStatus.mark_started('revenue_sync')
+        SyncStatus.mark_completed('revenue_sync', success=True)
+        row = SyncStatus.query.filter_by(sync_type='revenue_sync').first()
+        row.completed_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=8)
+        db.session.commit()
+
+        assert _revenue_sync_due() is True
