@@ -318,7 +318,9 @@
                 var selAllCb = document.createElement('input');
                 selAllCb.type = 'checkbox';
                 selAllCb.className = 'form-check-input mt-0';
-                selAllCb.checked = buckets.every(function(b) { return selected.has(b); });
+                // every() is true for an empty list, which would tick "Select all"
+                // with nothing to select.
+                selAllCb.checked = buckets.length > 0 && buckets.every(function(b) { return selected.has(b); });
                 var selAllText = document.createElement('span');
                 selAllText.className = 'small fw-semibold';
                 selAllText.textContent = 'Select all';

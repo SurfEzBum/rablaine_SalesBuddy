@@ -113,7 +113,10 @@ var RevenueBucketFilter = (function() {
     }
 
     function buildContent() {
-        var allSelected = allBuckets.every(function(b) { return selectedBuckets.has(b); });
+        // every() is true for an empty list, which would render "Select all"
+        // ticked when nothing is selectable at all.
+        var allSelected = allBuckets.length > 0 &&
+            allBuckets.every(function(b) { return selectedBuckets.has(b); });
         var c = '<div class="bucket-filter-panel" style="min-width:220px;">';
         // Search box
         c += '<div class="px-2 pt-2 pb-1">';
@@ -186,7 +189,8 @@ var RevenueBucketFilter = (function() {
                 // Sync "Select all" checkbox
                 var allCb = popover.querySelector('#bucketSelectAll');
                 if (allCb) {
-                    allCb.checked = allBuckets.every(function(b) { return selectedBuckets.has(b); });
+                    allCb.checked = allBuckets.length > 0 &&
+                        allBuckets.every(function(b) { return selectedBuckets.has(b); });
                 }
             });
         });
