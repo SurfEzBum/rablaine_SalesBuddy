@@ -810,13 +810,15 @@ class TestWizardImportStep:
         html = response.data.decode('utf-8')
         assert 'const ready = accountsImported || await runAccounts();' in html
 
-    def test_milestones_and_revenue_run_in_parallel(self, client, app):
-        """They hit different back ends, so they should overlap."""
+    def test_milestones_and_revenue_run_one_at_a_time(self, client, app):
+        """Concurrent SQLite writers risk 'database is locked' on slower disks."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        assert 'await Promise.allSettled(jobs);' in html
-        assert 'if (!milestonesImported) jobs.push(runMilestones());' in html
-        assert 'if (!revenueImported) jobs.push(runRevenue());' in html
+        assert 'if (!milestonesImported) await runMilestones();' in html
+        assert 'if (!revenueImported) await runRevenue();' in html
+        # No fan-out - the two heavy writes must never overlap
+        assert 'Promise.allSettled' not in html
+        assert 'Promise.all(' not in html
 
     def test_wizard_has_no_skip_button(self, client, app):
         """Skip is gone - Finish itself is the 'skip revenue' path."""

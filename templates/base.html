@@ -1194,9 +1194,9 @@
 
                     <!-- STEP 2: One-shot import. Accounts run first, then milestones and revenue together. -->
                     <div class="onboarding-step d-none" id="onboardingStep2">
-                        <p class="mb-2">Sales Buddy will pull everything it needs from MSX and MSXI - your accounts, milestones, and revenue. Accounts import first, then milestones and revenue run at the same time.</p>
+                        <p class="mb-2">Sales Buddy will pull everything it needs from MSX and MSXI - your accounts, milestones, and revenue. Each one runs in turn; you don't need to do anything else.</p>
                         <p class="small text-muted mb-3">
-                            <i class="bi bi-shield-lock me-1"></i>Requires VPN and takes about 5 minutes. If you get disconnected, reconnect and retry whichever step failed.
+                            <i class="bi bi-shield-lock me-1"></i>Requires VPN and takes about 8 minutes. If you get disconnected, reconnect and retry whichever step failed.
                         </p>
 
                         <div class="text-center mb-3" id="importAllInitial">
@@ -2376,8 +2376,10 @@
                     }
                 }
 
-                // Accounts must land before the other two have anything to hang data on,
-                // but milestones and revenue hit different back ends so they overlap.
+                // Accounts must land first so the other two have something to attach to.
+                // Milestones and revenue then run one at a time on purpose: both write
+                // heavily to SQLite, and on a slower disk the revenue bulk write can hold
+                // the lock past busy_timeout and fail the other with "database is locked".
                 async function startImport() {
                     if (importRunning) return;
                     importRunning = true;
@@ -2389,10 +2391,10 @@
                     try {
                         const ready = accountsImported || await runAccounts();
                         if (ready) {
-                            const jobs = [];
-                            if (!milestonesImported) jobs.push(runMilestones());
-                            if (!revenueImported) jobs.push(runRevenue());
-                            await Promise.allSettled(jobs);
+                            // A failed phase returns false rather than throwing, so a bad
+                            // milestone sync still lets revenue have its turn.
+                            if (!milestonesImported) await runMilestones();
+                            if (!revenueImported) await runRevenue();
                         }
                     } finally {
                         window.removeEventListener('beforeunload', warnOnLeave);
