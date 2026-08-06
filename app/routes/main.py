@@ -1971,7 +1971,8 @@ def inject_preferences():
     guided_tour_completed = pref.guided_tour_completed if pref else False
     accounts_synced = SyncStatus.is_complete('accounts')
     has_milestones = Milestone.query.first() is not None
-    has_revenue = SyncStatus.is_complete('revenue_import')
+    from app.services.revenue_sync import has_revenue_data
+    has_revenue = has_revenue_data()
     accounts_sync_state = SyncStatus.get_status('accounts')['state']
     milestones_sync_state = SyncStatus.get_status('milestones')['state']
     revenue_sync_state = SyncStatus.get_status('revenue_import')['state']

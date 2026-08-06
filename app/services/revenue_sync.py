@@ -40,6 +40,15 @@ def _sse(event_type: str, data: dict[str, Any]) -> str:
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
 
+def has_revenue_data() -> bool:
+    """True once revenue has loaded by either path.
+
+    The API sync and the legacy CSV import record different sync types, so
+    callers that gate UI on "do we have revenue yet" must accept either.
+    """
+    return SyncStatus.is_complete(SYNC_TYPE) or SyncStatus.is_complete("revenue_import")
+
+
 # ---------------------------------------------------------------------------
 # Core
 # ---------------------------------------------------------------------------

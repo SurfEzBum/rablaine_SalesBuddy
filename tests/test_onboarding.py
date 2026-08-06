@@ -75,10 +75,9 @@ class TestOnboardingWizardDisplay:
         assert 'onboardImportMilestones' in html
         assert 'importMilestonesProgressBar' in html
 
-        # Step 5: Revenue & Finish (inline upload)
+        # Step 5: Revenue & Finish (inline MSXI sync)
         assert 'One More Thing: Revenue Data' in html
         assert 'onboardImportRevenue' in html
-        assert 'revenueFileInput' in html
         assert 'importRevenueProgress' in html
 
     def test_onboarding_has_no_skip_button(self, client, app):
@@ -856,16 +855,15 @@ class TestWizardOptionalSteps:
         assert 'currentStep === 4 && !milestonesImported' not in html.split('skipStepBtn')[0] or \
                'currentStep === 5 && !revenueImported' in html
 
-    def test_step5_inline_revenue_upload(self, client, app):
-        """Step 5 should have inline revenue CSV upload (not a link to another page)."""
+    def test_step5_inline_revenue_sync(self, client, app):
+        """Step 5 syncs revenue from MSXI inline (no CSV, no link to another page)."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        # Should have inline upload button (btn-primary btn-lg)
+        # Inline sync button
         assert 'btn btn-primary btn-lg' in html
-        assert 'Import Revenue CSV' in html
-        # Hidden file input for CSV
-        assert 'revenueFileInput' in html
-        assert 'accept=".csv"' in html
+        assert 'Sync Revenue from MSXI' in html
+        # The CSV upload path is gone from the wizard
+        assert 'revenueFileInput' not in html
         # Progress, success, and error states
         assert 'importRevenueProgress' in html
         assert 'importRevenueSuccess' in html
@@ -886,11 +884,12 @@ class TestWizardOptionalSteps:
         # There should be VPN warnings (step 3 and step 4)
         assert html.count('Requires VPN.') >= 2
 
-    def test_step4_has_revenue_tip(self, client, app):
-        """Step 4 should have the revenue export tip."""
+    def test_step4_revenue_tip_no_longer_asks_for_an_export(self, client, app):
+        """The step-4 tip used to walk through a CSV export; the sync needs no prep."""
         response = client.get('/')
         html = response.data.decode('utf-8')
-        assert 'id="revenueTipInstructionsStep4"' in html
+        assert 'id="revenueTipInstructionsStep4"' not in html
+        assert 'export your revenue CSV' not in html
 
     def test_step5_skip_button_visible_in_js(self, client, app):
         """Skip step button should appear on step 5 when revenue not imported (JS logic)."""

@@ -1141,7 +1141,8 @@ def report_synapse_customers():
         mode = 'new'
 
     product_name = 'Azure Synapse Analytics'
-    has_revenue_data = SyncStatus.is_complete('revenue_import')
+    from app.services.revenue_sync import has_revenue_data as _has_revenue
+    has_revenue_data = _has_revenue()
 
     if not has_revenue_data:
         return render_template(

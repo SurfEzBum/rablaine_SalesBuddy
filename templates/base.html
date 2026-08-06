@@ -1300,26 +1300,8 @@
                             <div class="d-flex align-items-start">
                                 <i class="bi bi-lightbulb me-2 mt-1"></i>
                                 <div>
-                                    <strong>Tip:</strong> While you wait, you can export your revenue CSV from MSXi — you'll upload it in the next step.
-                                    <br>
-                                    <a class="text-decoration-none" data-bs-toggle="collapse" href="#revenueTipInstructionsStep4" role="button" aria-expanded="false">
-                                        Show me how <i class="bi bi-chevron-down small"></i>
-                                    </a>
-                                    <div class="collapse mt-2" id="revenueTipInstructionsStep4">
-                                        <ol class="mb-2 small">
-                                            <li>Go to <a href="https://msxi.microsoft.com/User/report/4ab7af21-7148-47de-9e65-0acfae0a3ff4?reportTab=f116f870cd6e113e0da6" target="_blank">Azure Service Level Subscription Details SL4 - WW</a>
-                                                <br><span class="text-muted">Or go to <a href="https://aka.ms/msxi" target="_blank">aka.ms/msxi</a> and search for the report name</span></li>
-                                            <li>(If bookmarked/customized) Click <strong>"My Report Bookmarks"</strong> in the top right corner and <strong>"Clear current view"</strong></li>
-                                            <li>Scroll to <strong>"ACR Details by Quarter / Month"</strong></li>
-                                            <li>Under Choose Fields (left), check <strong>"ServiceLevel2"</strong> and <strong>"ServiceLevel4"</strong>. Leave <strong>ServiceCompGrouping</strong> checked.</li>
-                                            {% if user_role == 'se' %}<li>Expand <strong>Filters</strong> on the right and under <strong>ServiceCompGrouping</strong>, check the buckets on which you're compensated</li>{% endif %}
-                                            <li>Right-click the <strong>"ACR Details by Quarter / Month"</strong> header text → <strong>Expand to next level</strong></li>
-                                            <li>Repeat step {% if user_role == 'se' %}6{% else %}5{% endif %}</li>
-                                            <li>Click <strong>'...'</strong> → <strong>Export Data</strong> → <strong>Data with current layout</strong></li>
-                                            <li>Open in Excel → <strong>Enable Editing</strong> → <strong>Save As</strong> → <strong>CSV (Comma delimited)</strong></li>
-                                        </ol>
-                                        <p class="mb-0 small text-muted"><i class="bi bi-info-circle"></i> No rush, these instructions are also shown in Step 5.</p>
-                                    </div>
+                                    <strong>Tip:</strong> Nothing to prepare for the next step - Sales Buddy pulls your
+                                    revenue straight from MSXI. Just make sure the corporate VPN stays connected.
                                 </div>
                             </div>
                         </div>
@@ -1327,35 +1309,29 @@
 
                     <!-- STEP 5: Revenue & Finish -->
                     <div class="onboarding-step d-none" id="onboardingStep5">
-                        <h6 class="mb-3"><i class="bi bi-graph-up text-primary"></i> One More Thing: Revenue Data <span class="text-muted fw-normal">(~10 sec)</span></h6>
-                        <p>Importing revenue data powers the Revenue Analyzer - trend charts, service breakdowns, and growth tracking for your accounts.</p>
-                        
+                        <h6 class="mb-3"><i class="bi bi-graph-up text-primary"></i> One More Thing: Revenue Data <span class="text-muted fw-normal">(~1 min)</span></h6>
+                        <p>Revenue data powers the Revenue Analyzer - trend charts, service breakdowns, and growth tracking for your accounts.</p>
+
                         <div class="card mb-3 border-primary">
                             <div class="card-body" id="importRevenueCard">
                                 <div id="revenueInstructions">
-                                    <h6 class="card-title"><i class="bi bi-file-earmark-spreadsheet text-success"></i> How to get your revenue CSV:</h6>
-                                    <ol class="mb-3">
-                                        <li>Go to <a href="https://msxi.microsoft.com/User/report/4ab7af21-7148-47de-9e65-0acfae0a3ff4?reportTab=f116f870cd6e113e0da6" target="_blank">Azure Service Level Subscription Details SL4 - WW</a>
-                                            <br><span class="text-muted small">Or go to <a href="https://aka.ms/msxi" target="_blank">aka.ms/msxi</a> and search for the report name</span></li>
-                                        <li>(If bookmarked/customized) Click <strong>"My Report Bookmarks"</strong> in the top right corner and <strong>"Clear current view"</strong></li>
-                                        <li>Scroll to <strong>"ACR Details by Quarter / Month"</strong></li>
-                                        <li>Under Choose Fields (left), check <strong>"ServiceLevel2"</strong> and <strong>"ServiceLevel4"</strong>. Leave <strong>ServiceCompGrouping</strong> checked.</li>
-                                        {% if user_role == 'se' %}<li>Expand <strong>Filters</strong> on the right and under <strong>ServiceCompGrouping</strong>, check the buckets on which you're compensated</li>{% endif %}
-                                        <li>Right-click the <strong>"ACR Details by Quarter / Month"</strong> header text → <strong>Expand to next level</strong></li>
-                                        <li>Repeat step {% if user_role == 'se' %}6{% else %}5{% endif %}</li>
-                                        <li>Click <strong>'...'</strong> → <strong>Export Data</strong> → <strong>Data with current layout</strong></li>
-                                        <li>Open in Excel → <strong>Enable Editing</strong> → <strong>Save As</strong> → <strong>CSV (Comma delimited)</strong></li>
-                                    </ol>
+                                    <p class="mb-2">
+                                        Sales Buddy pulls your Azure consumed revenue straight from MSXI using the
+                                        Azure sign-in you set up earlier. No export, no spreadsheet.
+                                    </p>
+                                    <p class="small text-muted mb-3">
+                                        <i class="bi bi-shield-check"></i> You'll need the corporate VPN connected.
+                                        It fetches two years of history for every account, so give it about a minute.
+                                    </p>
                                 </div>
 
-                                <!-- Initial state: Upload button -->
+                                <!-- Initial state: sync button -->
                                 <div id="importRevenueInitial" class="text-center">
                                     <div id="revenueIncompleteWarning" class="alert alert-warning py-2 mb-3 d-none">
-                                        <i class="bi bi-exclamation-triangle"></i> Your last revenue import didn't finish. Re-import to get complete data.
+                                        <i class="bi bi-exclamation-triangle"></i> Your last revenue sync didn't finish. Run it again to get complete data.
                                     </div>
-                                    <input type="file" id="revenueFileInput" accept=".csv" class="d-none">
                                     <button class="btn btn-primary btn-lg" id="onboardImportRevenue">
-                                        <i class="bi bi-upload"></i> Import Revenue CSV
+                                        <i class="bi bi-cloud-download"></i> Sync Revenue from MSXI
                                     </button>
                                 </div>
 
@@ -2507,23 +2483,12 @@
                     }
                 }
 
-                async function importRevenue(file) {
-                    // Check for truncation warning in last line of CSV
-                    try {
-                        const text = await file.text();
-                        const lastLine = text.trimEnd().split('\n').pop().trim();
-                        if (lastLine.toLowerCase().includes('exported data exceeded') || lastLine.toLowerCase().includes('some data may have been omitted')) {
-                            if (!confirm('Warning: This export appears to be incomplete. The last line says:\n\n"' + lastLine + '"\n\nYou may be missing data. Continue importing anyway?')) {
-                                return;
-                            }
-                        }
-                    } catch (e) { /* proceed if read fails */ }
-
+                async function importRevenue() {
                     showRevenueState('Progress');
                     const statusText = document.getElementById('importRevenueStatusText');
                     const progressBar = document.getElementById('importRevenueProgressBar');
                     const progressPercent = document.getElementById('importRevenueProgressPercent');
-                    statusText.textContent = 'Starting import...';
+                    statusText.textContent = 'Starting sync...';
                     progressBar.style.width = '0%';
                     progressPercent.textContent = '0%';
 
@@ -2531,19 +2496,17 @@
                     window.addEventListener('beforeunload', warnOnLeave);
 
                     try {
-                        const formData = new FormData();
-                        formData.append('file', file);
-                        formData.append('run_analysis', 'on');
-
-                        const resp = await fetch('/api/revenue/import', {
+                        const resp = await fetch('/api/revenue/sync', {
                             method: 'POST',
-                            body: formData
+                            headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+                            body: JSON.stringify({})
                         });
                         if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
                         const reader = resp.body.getReader();
                         const decoder = new TextDecoder();
                         let buffer = '';
                         let finalResult = null;
+                        let evt = null;
 
                         while (true) {
                             const { done, value } = await reader.read();
@@ -2552,20 +2515,16 @@
                             const lines = buffer.split('\n');
                             buffer = lines.pop();
                             for (const line of lines) {
+                                if (line.startsWith('event: ')) { evt = line.slice(7).trim(); continue; }
                                 if (!line.startsWith('data: ')) continue;
-                                try {
-                                    const data = JSON.parse(line.slice(6));
-                                    if (data.error) throw new Error(data.error);
-                                    if (data.message) {
-                                        statusText.textContent = data.message;
-                                    }
-                                    if (data.progress !== undefined) {
-                                        progressBar.style.width = data.progress + '%';
-                                        progressPercent.textContent = data.progress + '%';
-                                    }
-                                    if (data.result) finalResult = data.result;
-                                } catch (parseErr) {
-                                    if (parseErr.message && !parseErr.message.includes('JSON')) throw parseErr;
+                                let data;
+                                try { data = JSON.parse(line.slice(6)); } catch (e) { continue; }
+                                if (evt === 'error' || data.error) throw new Error(data.error || 'Sync failed');
+                                if (evt === 'complete') { finalResult = data; continue; }
+                                if (data.message) statusText.textContent = data.message;
+                                if (typeof data.progress === 'number') {
+                                    progressBar.style.width = data.progress + '%';
+                                    progressPercent.textContent = data.progress + '%';
                                 }
                             }
                         }
@@ -2575,14 +2534,14 @@
                         if (finalResult) {
                             summaryDiv.innerHTML =
                                 '<ul class="list-unstyled mb-0">' +
-                                '<li>' + (finalResult.records_created || 0) + ' records created</li>' +
-                                '<li>' + (finalResult.records_updated || 0) + ' records updated</li>' +
-                                '<li>' + (finalResult.new_months || 0) + ' new months added</li>' +
-                                (finalResult.duration ? '<li>Completed in ' + finalResult.duration + 's</li>' : '') +
+                                '<li>' + (finalResult.customers_with_data || 0) + ' of ' +
+                                    (finalResult.customers || 0) + ' accounts with revenue</li>' +
+                                '<li>' + (finalResult.months || 0) + ' months of history</li>' +
+                                (finalResult.duration_s ? '<li>Completed in ' + finalResult.duration_s + 's</li>' : '') +
                                 '</ul>';
                         }
                         showRevenueState('Success');
-                        // Auto-set compensated buckets from imported data
+                        // Seed the bucket filter from whatever the sync actually returned.
                         try {
                             const bucketsResp = await fetch('/api/revenue/buckets');
                             const buckets = await bucketsResp.json();
@@ -2598,7 +2557,7 @@
                         setWizardProgress(90);
                         updateNextButton();
                     } catch (err) {
-                        const msg = err.message || 'Connection error during import';
+                        const msg = err.message || 'Connection error during sync';
                         document.getElementById('importRevenueErrorMsg').textContent = msg.charAt(0).toUpperCase() + msg.slice(1);
                         showRevenueState('Error');
                     } finally {
@@ -2606,13 +2565,8 @@
                     }
                 }
 
-                const revenueFileInput = document.getElementById('revenueFileInput');
-                document.getElementById('onboardImportRevenue').addEventListener('click', () => revenueFileInput.click());
-                revenueFileInput.addEventListener('change', function() {
-                    if (this.files[0]) importRevenue(this.files[0]);
-                    this.value = '';
-                });
-                document.getElementById('importRevenueRetry').addEventListener('click', () => revenueFileInput.click());
+                document.getElementById('onboardImportRevenue').addEventListener('click', () => importRevenue());
+                document.getElementById('importRevenueRetry').addEventListener('click', () => importRevenue());
 
 
 
