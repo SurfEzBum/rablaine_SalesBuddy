@@ -16,6 +16,7 @@ Format: `## M/D/YYYY - <merge-short-sha>`. See
 - Sales Buddy now notices when MSXI renames or retires revenue buckets at the fiscal year boundary. If buckets you had selected disappear, it clears the selection, tells you which ones went away, and shows the new list to pick from. Review notes on surviving buckets are kept; the rest are saved to a JSON archive in your data folder before being removed.
 - The setup wizard is down to two steps. Sign-in now sits on the welcome screen, and a single "Start Import" button pulls your accounts, milestones, and revenue in turn, each with its own progress bar, result summary, and retry.
 - Removed the CSV revenue import. Everything now comes from the MSXI sync, so the upload form, the export instructions, and the hidden "Revenue Pull" beta page are gone. Revenue you imported previously is untouched.
+- Removed the monthly "last month's revenue is finalized, go import it" banner. Sales Buddy pulls that for you now, so there is nothing to go do.
 
 ## 8/5/2026 - 5055be1
 

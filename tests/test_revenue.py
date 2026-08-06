@@ -476,6 +476,57 @@ class TestDatabaseAnalysis:
             assert len(analyses) >= 1
 
 
+class TestPartialMonthExclusion:
+    """Don't include the most recent month in the analysis.
+
+    MSXI keeps reporting into it, so its number is still climbing.
+    """
+
+    def _seed(self, months, revenues):
+        imp = RevenueImport(filename='sync', record_count=len(months))
+        db.session.add(imp)
+        db.session.flush()
+        for fm, revenue in zip(months, revenues):
+            db.session.add(CustomerRevenueData(
+                customer_name='Partial Month Co',
+                bucket='Core DBs',
+                fiscal_month=fm,
+                month_date=fiscal_month_to_date(fm),
+                revenue=revenue,
+                last_import_id=imp.id,
+            ))
+        db.session.commit()
+
+    def test_newest_month_is_excluded(self, app, test_user):
+        """Oct is mid-month and has only trickled in, so it must not be analyzed."""
+        with app.app_context():
+            self._seed(
+                ["FY26-Jul", "FY26-Aug", "FY26-Sep", "FY26-Oct"],
+                [50000, 51000, 52000, 4000],
+            )
+            run_analysis_for_all()
+
+            a = RevenueAnalysis.query.filter_by(customer_name='Partial Month Co').first()
+            assert a is not None
+            assert a.months_analyzed == 3
+            # Sep, not the partial Oct that would read as a collapse
+            assert a.latest_revenue == 52000
+
+    def test_month_becomes_analyzable_once_the_next_one_appears(self, app, test_user):
+        """Oct finished reporting and Nov started, so Oct is now fair game."""
+        with app.app_context():
+            self._seed(
+                ["FY26-Jul", "FY26-Aug", "FY26-Sep", "FY26-Oct", "FY26-Nov"],
+                [50000, 51000, 52000, 53000, 3000],
+            )
+            run_analysis_for_all()
+
+            a = RevenueAnalysis.query.filter_by(customer_name='Partial Month Co').first()
+            assert a is not None
+            assert a.months_analyzed == 4
+            assert a.latest_revenue == 53000
+
+
 class TestReviewAPI:
     """Test the PATCH /api/revenue/analysis/<id>/review endpoint."""
 
