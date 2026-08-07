@@ -882,3 +882,21 @@ class TestCompensatedBucketsAPI:
                            data=json.dumps({'not': 'an array'}),
                            content_type='application/json')
         assert resp.status_code == 400
+
+    def test_saving_buckets_clears_the_taxonomy_notice(self, client, app):
+        """Picking buckets is what the notice asks for, so it shouldn't linger."""
+        import json
+        with app.app_context():
+            from app.models import UserPreference
+            pref = UserPreference.query.first()
+            pref.bucket_taxonomy_notice = json.dumps({'status': 'reset', 'removed': ['Core DBs']})
+            db.session.commit()
+
+        resp = client.post('/api/revenue/compensated-buckets',
+                           data=json.dumps(['Databases']),
+                           content_type='application/json')
+        assert resp.status_code == 200
+
+        with app.app_context():
+            from app.models import UserPreference
+            assert UserPreference.query.first().bucket_taxonomy_notice is None

@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable, Generator, Optional
 
@@ -52,6 +54,41 @@ def has_revenue_data() -> bool:
 # ---------------------------------------------------------------------------
 # Core
 # ---------------------------------------------------------------------------
+def _pull_with_progress(fn, tpids, fys, phase, lo, hi, label, heartbeat):
+    """Run a pull on a worker thread, yielding progress as its batches land.
+
+    The pull splits TPIDs into batches and reports each one, but its callback
+    fires on a worker thread and so cannot yield. It hands events to a queue
+    that this generator drains instead. Returns the pulled rows, so callers use
+    ``rows = yield from _pull_with_progress(...)``.
+
+    Blocking on the queue with a timeout (rather than polling ``done()`` behind
+    a sleep) keeps event latency at the speed of the batches while still exiting
+    if a worker dies without reporting.
+    """
+    events: queue.Queue = queue.Queue()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            fn, tpids, fiscal_years=fys,
+            progress=lambda done, total, rows: events.put((done, total, rows)),
+        )
+        while True:
+            try:
+                done, total, rows = events.get(timeout=0.4)
+            except queue.Empty:
+                if future.done():
+                    break
+                continue
+            heartbeat()
+            yield {
+                "phase": phase,
+                "progress": lo + int((hi - lo) * done / max(total, 1)),
+                "message": f"{label}: {rows:,} rows from {done}/{total} batches...",
+            }
+    # Re-raises anything the pull threw, so the caller's handler sees it.
+    return future.result()
+
+
 def _sync_generator(fiscal_years: Optional[list[str]] = None,
                     run_analysis: bool = True) -> Generator[dict[str, Any], None, None]:
     """Run the sync, yielding progress dicts and finally a ``complete`` dict.
@@ -85,7 +122,9 @@ def _sync_generator(fiscal_years: Optional[list[str]] = None,
         # --- 2. pull bucket grain ------------------------------------------
         yield {"phase": "pull_buckets", "progress": 8,
                "message": "Pulling revenue by bucket from MSXI..."}
-        bucket_rows = revenue_pull.pull_acr_for_customers(tpids, fiscal_years=fys)
+        bucket_rows = yield from _pull_with_progress(
+            revenue_pull.pull_acr_for_customers, tpids, fys,
+            "pull_buckets", 8, 30, "Pulling revenue by bucket", heartbeat)
         heartbeat()
         yield {"phase": "pull_buckets", "progress": 30,
                "message": f"Retrieved {len(bucket_rows):,} bucket rows."}
@@ -93,12 +132,9 @@ def _sync_generator(fiscal_years: Optional[list[str]] = None,
         # --- 3. pull product grain -----------------------------------------
         yield {"phase": "pull_products", "progress": 32,
                "message": "Pulling revenue by product..."}
-
-        def on_chunk(done: int, total: int, rows: int):
-            heartbeat()
-
-        product_rows = revenue_pull.pull_products_for_customers(
-            tpids, fiscal_years=fys, progress=on_chunk)
+        product_rows = yield from _pull_with_progress(
+            revenue_pull.pull_products_for_customers, tpids, fys,
+            "pull_products", 32, 55, "Pulling revenue by product", heartbeat)
         heartbeat()
         yield {"phase": "pull_products", "progress": 55,
                "message": f"Retrieved {len(product_rows):,} product rows."}
@@ -149,8 +185,20 @@ def _sync_generator(fiscal_years: Optional[list[str]] = None,
         analysis_stats = None
         if run_analysis:
             yield {"phase": "analysis", "progress": 88, "message": "Analyzing revenue trends..."}
-            from app.services.revenue_analysis import run_analysis_for_all
-            analysis_stats = run_analysis_for_all()
+            from app.services.revenue_analysis import run_analysis_streaming
+            last_pct = 88
+            for update in run_analysis_streaming():
+                if update.get("complete"):
+                    analysis_stats = update["stats"]
+                    continue
+                current, total = update["current"], update["total"]
+                pct = 88 + int(8 * current / max(total, 1))
+                if pct == last_pct:
+                    continue  # ~1650 accounts, so only emit when the bar moves
+                last_pct = pct
+                heartbeat()
+                yield {"phase": "analysis", "progress": pct,
+                       "message": f"Analyzing account {current:,} of {total:,}..."}
             heartbeat()
 
         if snapshot:

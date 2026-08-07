@@ -410,12 +410,13 @@ def _product_query(tpids: list[int], fiscal_years: list[str]) -> dict:
 
 
 def pull_acr_for_customers(tpids: list[int], fiscal_years: Optional[list[str]] = None,
-                           chunk: int = 40, max_workers: int = 4) -> list[dict]:
+                           chunk: int = 40, max_workers: int = 4,
+                           progress=None) -> list[dict]:
     """Pull ACR (customer x bucket x fiscal-month) for the given customer TPIDs.
 
     Returns rows with keys: tpid, name, fm, bucket, acr.
     """
-    return _pull(_acr_query, tpids, fiscal_years, chunk, max_workers)
+    return _pull(_acr_query, tpids, fiscal_years, chunk, max_workers, progress)
 
 
 def pull_products_for_customers(tpids: list[int], fiscal_years: Optional[list[str]] = None,

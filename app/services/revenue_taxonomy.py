@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 from app.models import (
     db, Customer, CustomerRevenueData, ProductRevenueData, RevenueAnalysis,
-    RevenueImport, RevenueReviewNote, UserPreference,
+    RevenueReviewNote, UserPreference,
 )
 
 logger = logging.getLogger(__name__)
@@ -259,7 +259,8 @@ def purge_revenue_data(keep_analysis_ids: Optional[set[int]] = None) -> dict[str
     in place, which is why re-attaching afterwards is unnecessary.
 
     Deliberately narrower than the admin "clear revenue" action: ``RevenueConfig``
-    holds the user's own thresholds and is left alone, as are Customer rows.
+    holds the user's own thresholds and is left alone, as are Customer rows and
+    the ``RevenueImport`` log, which is the user's visible import history.
     """
     keep = keep_analysis_ids or set()
 
@@ -274,7 +275,6 @@ def purge_revenue_data(keep_analysis_ids: Optional[set[int]] = None) -> dict[str
         "analyses": analysis_q.delete(synchronize_session=False),
         "product_rows": ProductRevenueData.query.delete(synchronize_session=False),
         "customer_rows": CustomerRevenueData.query.delete(synchronize_session=False),
-        "imports": RevenueImport.query.delete(synchronize_session=False),
         "analyses_kept": len(keep),
     }
     db.session.commit()

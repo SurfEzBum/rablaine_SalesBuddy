@@ -219,6 +219,8 @@ class TestPurge:
         assert RevenueReviewNote.query.count() == 1, "kept analysis keeps its history"
         assert RevenueConfig.query.first().min_revenue_for_outreach == 4242, \
             "purge must not touch the user's thresholds"
+        assert RevenueImport.query.count() == 1, \
+            "the import log is the user's visible history and must survive a re-sync"
 
     def test_purge_without_keeps_removes_everything(self, app):
         a = RevenueAnalysis(
@@ -264,6 +266,51 @@ class TestPullSafety:
         fys = default_fiscal_years()
         assert len(fys) == 3, "two prior fiscal years plus the current one"
         assert all(f.startswith("FY") for f in fys)
+
+
+# ---------------------------------------------------------------------------
+# Progress reporting
+# ---------------------------------------------------------------------------
+class TestPullProgress:
+    """The pulls are the longest phases, so they must report as batches land."""
+
+    def test_batch_events_are_forwarded_as_progress(self):
+        from app.services.revenue_sync import _pull_with_progress
+
+        def fake_pull(tpids, fiscal_years=None, progress=None):
+            for i in range(1, 5):
+                progress(i, 4, i * 100)
+            return ["row"] * 400
+
+        gen = _pull_with_progress(fake_pull, [1, 2], ["FY27"],
+                                  "pull_buckets", 8, 30, "Pulling", lambda: None)
+        events = []
+        try:
+            while True:
+                events.append(next(gen))
+        except StopIteration as stop:
+            rows = stop.value
+
+        assert len(rows) == 400, "the pulled rows still come back to the caller"
+        assert len(events) == 4, "one event per batch"
+        assert [e["progress"] for e in events] == [13, 19, 24, 30], \
+            "batches map across the phase's span"
+        assert all(e["phase"] == "pull_buckets" for e in events)
+        assert "4/4 batches" in events[-1]["message"]
+
+    def test_a_failing_pull_raises_instead_of_hanging(self):
+        """A worker that dies must surface, not block the stream forever."""
+        from app.services.revenue_sync import _pull_with_progress
+
+        def boom(tpids, fiscal_years=None, progress=None):
+            progress(1, 2, 10)
+            raise RuntimeError("MSXI said no")
+
+        gen = _pull_with_progress(boom, [1], ["FY27"],
+                                  "pull_buckets", 8, 30, "Pulling", lambda: None)
+        with pytest.raises(RuntimeError, match="MSXI said no"):
+            while True:
+                next(gen)
 
 
 # ---------------------------------------------------------------------------

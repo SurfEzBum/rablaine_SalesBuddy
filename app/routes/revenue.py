@@ -759,6 +759,9 @@ def save_compensated_buckets():
         return jsonify(success=False, error='No preferences found'), 400
 
     pref.compensated_buckets = _json.dumps(data)
+    # Picking buckets is the action the taxonomy notice asks for, so retire it
+    # here rather than making the user find the X.
+    pref.bucket_taxonomy_notice = None
     db.session.commit()
     return jsonify(success=True)
 
