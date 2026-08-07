@@ -80,10 +80,14 @@ def _pull_with_progress(fn, tpids, fys, phase, lo, hi, label, heartbeat):
                     break
                 continue
             heartbeat()
+            if done == 0:
+                message = f"{label}: connected to MSXI, running {total} batches..."
+            else:
+                message = f"{label}: {rows:,} rows from {done}/{total} batches..."
             yield {
                 "phase": phase,
                 "progress": lo + int((hi - lo) * done / max(total, 1)),
-                "message": f"{label}: {rows:,} rows from {done}/{total} batches...",
+                "message": message,
             }
     # Re-raises anything the pull threw, so the caller's handler sees it.
     return future.result()

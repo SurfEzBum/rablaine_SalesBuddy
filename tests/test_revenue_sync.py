@@ -278,6 +278,7 @@ class TestPullProgress:
         from app.services.revenue_sync import _pull_with_progress
 
         def fake_pull(tpids, fiscal_years=None, progress=None):
+            progress(0, 4, 0)  # emitted once the MWC handshake lands
             for i in range(1, 5):
                 progress(i, 4, i * 100)
             return ["row"] * 400
@@ -292,10 +293,11 @@ class TestPullProgress:
             rows = stop.value
 
         assert len(rows) == 400, "the pulled rows still come back to the caller"
-        assert len(events) == 4, "one event per batch"
-        assert [e["progress"] for e in events] == [13, 19, 24, 30], \
+        assert len(events) == 5, "the handshake tick plus one per batch"
+        assert [e["progress"] for e in events] == [8, 13, 19, 24, 30], \
             "batches map across the phase's span"
         assert all(e["phase"] == "pull_buckets" for e in events)
+        assert "running 4 batches" in events[0]["message"]
         assert "4/4 batches" in events[-1]["message"]
 
     def test_a_failing_pull_raises_instead_of_hanging(self):

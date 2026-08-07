@@ -24,7 +24,7 @@ import logging
 import re
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from typing import Any, Optional
 
@@ -442,6 +442,9 @@ def _pull(query_builder, tpids: list[int], fiscal_years: Optional[list[str]],
     _mint_mwc(session)  # mint once up front so chunks reuse it
 
     parts = [tpids[i:i + chunk] for i in range(0, len(tpids), chunk)]
+    if progress:
+        # The MWC handshake above is silent and slow; say the batches exist.
+        progress(0, len(parts), 0)
 
     def run(part: list[int]) -> list[dict]:
         return _qes_post(session, query_builder(part, fys))
@@ -449,8 +452,10 @@ def _pull(query_builder, tpids: list[int], fiscal_years: Optional[list[str]],
     out: list[dict] = []
     done = 0
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        for rows in ex.map(run, parts):
-            out.extend(rows)
+        # as_completed, not map: map yields in submission order, so a slow first
+        # batch hides every batch that finished behind it.
+        for future in as_completed([ex.submit(run, part) for part in parts]):
+            out.extend(future.result())
             done += 1
             if progress:
                 progress(done, len(parts), len(out))
