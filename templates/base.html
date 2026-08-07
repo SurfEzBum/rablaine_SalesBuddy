@@ -807,7 +807,7 @@
                             <li><a class="dropdown-item" href="{{ url_for('revenue.revenue_products_list') }}"><i class="bi bi-boxes"></i> Products</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <!-- Tools -->
-                            <li><a class="dropdown-item" href="{{ url_for('revenue.revenue_import') }}"><i class="bi bi-upload"></i> Revenue Import</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('revenue.revenue_import') }}"><i class="bi bi-cloud-download"></i> Revenue Import</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('connect_export.connect_export_page') }}"><i class="bi bi-file-earmark-text"></i> Connect Export</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <!-- Explore -->
@@ -1075,14 +1075,15 @@
         }
     </style>
     <div class="modal fade" id="welcomeModal" tabindex="-1" aria-labelledby="welcomeModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+        <!-- Scrollable: step 2 stacks three imports, so the footer must stay reachable. -->
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="welcomeModalLabel">
                         <i class="bi bi-rocket-takeoff"></i> Welcome to Sales Buddy!
                     </h5>
                     <!-- Step indicator -->
-                    <span class="badge bg-secondary ms-auto me-2" id="onboardingStepBadge">Step 1 of 5</span>
+                    <span class="badge bg-secondary ms-auto me-2" id="onboardingStepBadge">Step 1 of 2</span>
                 </div>
                 <div class="modal-body">
                     <!-- Progress bar -->
@@ -1090,7 +1091,7 @@
                         <div class="progress-bar" id="onboardingProgress" role="progressbar" style="width: 20%"></div>
                     </div>
 
-                    <!-- STEP 1: Welcome + Dark Mode -->
+                    <!-- STEP 1: Welcome + Theme + Sign In -->
                     <div class="onboarding-step" id="onboardingStep1">
                         <p class="lead mb-3">Let's get you set up! This wizard will walk you through connecting to MSX, enabling AI-powered features, and importing your data.</p>
                         <div class="card mb-3">
@@ -1111,15 +1112,8 @@
                             </div>
                         </div>
 
-                        <div class="alert alert-info mb-0">
-                            <i class="bi bi-info-circle"></i> <strong>What's next:</strong> We'll sign you in to Azure (which also enables AI features like topic suggestions and engagement summaries), then import your accounts, milestones, and revenue data.
-                        </div>
-                    </div>
-
-                    <!-- STEP 2: Connect to MSX -->
-                    <div class="onboarding-step d-none" id="onboardingStep2">
-                        <h6 class="mb-3"><i class="bi bi-shield-lock text-primary"></i> Connect to MSX</h6>
-                        <p>Sign in to Azure to access MSX data and enable AI features.</p>
+                        <h6 class="mb-2"><i class="bi bi-shield-lock text-primary"></i> Connect to MSX</h6>
+                        <p>Sign in to Azure to access MSX data and enable AI features like topic suggestions and engagement summaries.</p>
 
                         <div class="card mb-3">
                             <div class="card-body" id="authCard">
@@ -1198,199 +1192,89 @@
                         </div>
                     </div>
 
-                    <!-- STEP 3: Import Accounts -->
-                    <div class="onboarding-step d-none" id="onboardingStep3">
-                        <h6 class="mb-3"><i class="bi bi-building text-primary"></i> Import Your Accounts <span class="text-muted fw-normal">(~1-3 min)</span></h6>
-                        <p>We'll import your customer accounts, territories, sellers, and POD members from MSX.</p>
-                        
-                        <p class="small text-muted mb-3"><i class="bi bi-shield-lock me-1"></i>Requires VPN. If you get disconnected, just reconnect and retry.</p>
-                        
-                        <div class="card mb-3">
-                            <div class="card-body" id="importAccountsCard">
-                                <!-- Initial state -->
-                                <div id="importAccountsInitial" class="text-center">
-                                    <button class="btn btn-primary btn-lg" id="onboardImportAccounts">
-                                        <i class="bi bi-cloud-download"></i> Import My Accounts
+                    <!-- STEP 2: One-shot import. Accounts run first, then milestones and revenue together. -->
+                    <div class="onboarding-step d-none" id="onboardingStep2">
+                        <p class="mb-2">Sales Buddy will pull everything it needs from MSX and MSXI - your accounts, milestones, and revenue. Each one runs in turn; you don't need to do anything else.</p>
+                        <p class="small text-muted mb-3">
+                            <i class="bi bi-shield-lock me-1"></i>Requires VPN and takes about 8 minutes. If you get disconnected, reconnect and retry whichever step failed.
+                        </p>
+
+                        <div class="text-center mb-3" id="importAllInitial">
+                            <div id="importIncompleteWarning" class="alert alert-warning py-2 mb-3 d-none text-start">
+                                <i class="bi bi-exclamation-triangle"></i> <span id="importIncompleteText"></span>
+                            </div>
+                            <button class="btn btn-primary btn-lg" id="onboardStartImport">
+                                <i class="bi bi-cloud-download"></i> Start Import
+                            </button>
+                        </div>
+
+                        <div class="card mb-3 d-none" id="importAllCard">
+                            <div class="list-group list-group-flush">
+                                <div class="list-group-item px-3 py-2" id="phaseAccounts">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="d-inline-flex" id="phaseAccountsIcon"><i class="bi bi-circle text-muted"></i></span>
+                                        <strong class="small"><i class="bi bi-building"></i> Accounts</strong>
+                                        <span class="text-muted small">(~1-3 min)</span>
+                                        <span class="small text-muted ms-auto text-truncate" id="phaseAccountsStatus" style="max-width: 55%;">Waiting</span>
+                                    </div>
+                                    <div class="progress mt-2 d-none" id="phaseAccountsBarWrap" style="height: 6px;">
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="phaseAccountsBar" style="width: 0%"></div>
+                                    </div>
+                                    <div class="small text-muted mt-2 d-none" id="phaseAccountsSummary"></div>
+                                    <button class="btn btn-outline-primary btn-sm mt-2 d-none" id="phaseAccountsRetry">
+                                        <i class="bi bi-arrow-clockwise"></i> Retry
                                     </button>
                                 </div>
-                                <!-- Progress state -->
-                                <div id="importAccountsProgress" class="d-none">
-                                    <div class="d-flex align-items-center mb-2">
-                                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                                        <strong id="importAccountsStatusText">Starting import...</strong>
-                                    </div>
-                                    <div class="progress mb-2" style="height: 20px;">
-                                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="importAccountsProgressBar" role="progressbar" style="width: 0%">
-                                            <span id="importAccountsProgressPercent">0%</span>
-                                        </div>
-                                    </div>
-                                    <div class="small text-muted" id="importAccountsLog" style="max-height: 150px; overflow-y: auto; font-family: monospace;"></div>
 
+                                <div class="list-group-item px-3 py-2" id="phaseMilestones">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="d-inline-flex" id="phaseMilestonesIcon"><i class="bi bi-circle text-muted"></i></span>
+                                        <strong class="small"><i class="bi bi-flag"></i> Milestones</strong>
+                                        <span class="text-muted small">(~3 min)</span>
+                                        <span class="small text-muted ms-auto text-truncate" id="phaseMilestonesStatus" style="max-width: 55%;">Waiting</span>
+                                    </div>
+                                    <div class="progress mt-2 d-none" id="phaseMilestonesBarWrap" style="height: 6px;">
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="phaseMilestonesBar" style="width: 0%"></div>
+                                    </div>
+                                    <div class="small text-muted mt-2 d-none" id="phaseMilestonesSummary"></div>
+                                    <button class="btn btn-outline-primary btn-sm mt-2 d-none" id="phaseMilestonesRetry">
+                                        <i class="bi bi-arrow-clockwise"></i> Retry
+                                    </button>
                                 </div>
-                                <!-- Success state -->
-                                <div id="importAccountsSuccess" class="d-none text-center">
-                                    <i class="bi bi-check-circle-fill text-success fs-1"></i>
-                                    <p class="mt-2 mb-1 fw-bold text-success">Accounts imported!</p>
-                                    <div id="importAccountsSummary" class="text-muted small"></div>
-                                    <p class="mt-2 mb-0 small text-muted">Review the results above, then click <strong>Next</strong> when you're ready.</p>
-                                </div>
-                                <!-- Error state -->
-                                <div id="importAccountsError" class="d-none text-center">
-                                    <i class="bi bi-exclamation-triangle-fill text-warning fs-1"></i>
-                                    <p class="mt-2 mb-1 fw-bold text-warning" id="importAccountsErrorMsg">Import failed</p>
-                                    <button class="btn btn-outline-primary btn-sm" id="importAccountsRetry">
-                                        <i class="bi bi-arrow-clockwise"></i> Try Again
+
+                                <div class="list-group-item px-3 py-2" id="phaseRevenue">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="d-inline-flex" id="phaseRevenueIcon"><i class="bi bi-circle text-muted"></i></span>
+                                        <strong class="small"><i class="bi bi-graph-up"></i> Revenue</strong>
+                                        <span class="text-muted small">(~2-3 min)</span>
+                                        <span class="small text-muted ms-auto text-truncate" id="phaseRevenueStatus" style="max-width: 55%;">Waiting</span>
+                                    </div>
+                                    <div class="progress mt-2 d-none" id="phaseRevenueBarWrap" style="height: 6px;">
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="phaseRevenueBar" style="width: 0%"></div>
+                                    </div>
+                                    <div class="small text-muted mt-2 d-none" id="phaseRevenueSummary"></div>
+                                    <button class="btn btn-outline-primary btn-sm mt-2 d-none" id="phaseRevenueRetry">
+                                        <i class="bi bi-arrow-clockwise"></i> Retry
                                     </button>
                                 </div>
                             </div>
                         </div>
-                        
-                    </div>
 
-                    <!-- STEP 4: Import Milestones -->
-                    <div class="onboarding-step d-none" id="onboardingStep4">
-                        <h6 class="mb-3"><i class="bi bi-flag text-primary"></i> Import Milestones <span class="text-muted fw-normal">(~3 min)</span></h6>
-                        <p>Now let's pull in your milestone data from MSX. This syncs milestone status for all your accounts.</p>
-                        
-                        <p class="small text-muted mb-3"><i class="bi bi-shield-lock me-1"></i>Requires VPN. If you get disconnected, just reconnect and retry.</p>
-                        
-                        <div class="card mb-3">
-                            <div class="card-body" id="importMilestonesCard">
-                                <!-- Initial state -->
-                                <div id="importMilestonesInitial" class="text-center">
-                                    <div id="milestonesIncompleteWarning" class="alert alert-warning py-2 mb-3 d-none">
-                                        <i class="bi bi-exclamation-triangle"></i> Your last milestone sync didn't finish. Run it again to get complete data.
-                                    </div>
-                                    <button class="btn btn-primary btn-lg" id="onboardImportMilestones">
-                                        <i class="bi bi-cloud-download"></i> Import Milestones
-                                    </button>
-                                </div>
-                                <!-- Progress state -->
-                                <div id="importMilestonesProgress" class="d-none">
-                                    <div class="d-flex align-items-center mb-2">
-                                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                                        <strong id="importMilestonesStatusText">Starting sync...</strong>
-                                    </div>
-                                    <div class="progress mb-2" style="height: 20px;">
-                                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="importMilestonesProgressBar" role="progressbar" style="width: 0%">
-                                            <span id="importMilestonesProgressPercent">0%</span>
-                                        </div>
-                                    </div>
-                                    <div class="small text-muted" id="importMilestonesLog" style="max-height: 150px; overflow-y: auto; font-family: monospace;"></div>
-
-                                </div>
-                                <!-- Success state -->
-                                <div id="importMilestonesSuccess" class="d-none text-center">
-                                    <i class="bi bi-check-circle-fill text-success fs-1"></i>
-                                    <p class="mt-2 mb-1 fw-bold text-success">Milestones synced!</p>
-                                    <div id="importMilestonesSummary" class="text-muted small"></div>
-                                </div>
-                                <!-- Error state -->
-                                <div id="importMilestonesError" class="d-none text-center">
-                                    <i class="bi bi-exclamation-triangle-fill text-warning fs-1"></i>
-                                    <p class="mt-2 mb-1 fw-bold text-warning" id="importMilestonesErrorMsg">Sync failed</p>
-                                    <button class="btn btn-outline-primary btn-sm" id="importMilestonesRetry">
-                                        <i class="bi bi-arrow-clockwise"></i> Try Again
-                                    </button>
-                                </div>
+                        {% if user_role != 'dss' %}
+                        <div class="card mb-3 d-none" id="onboardBucketPickerCard">
+                            <div class="card-header py-2">
+                                <h6 class="mb-0"><i class="bi bi-funnel"></i> Select Your Buckets</h6>
                             </div>
-                        </div>
-                        
-                        <div class="alert alert-info mb-0">
-                            <div class="d-flex align-items-start">
-                                <i class="bi bi-lightbulb me-2 mt-1"></i>
-                                <div>
-                                    <strong>Tip:</strong> While you wait, you can export your revenue CSV from MSXi — you'll upload it in the next step.
-                                    <br>
-                                    <a class="text-decoration-none" data-bs-toggle="collapse" href="#revenueTipInstructionsStep4" role="button" aria-expanded="false">
-                                        Show me how <i class="bi bi-chevron-down small"></i>
-                                    </a>
-                                    <div class="collapse mt-2" id="revenueTipInstructionsStep4">
-                                        <ol class="mb-2 small">
-                                            <li>Go to <a href="https://msxi.microsoft.com/User/report/4ab7af21-7148-47de-9e65-0acfae0a3ff4?reportTab=f116f870cd6e113e0da6" target="_blank">Azure Service Level Subscription Details SL4 - WW</a>
-                                                <br><span class="text-muted">Or go to <a href="https://aka.ms/msxi" target="_blank">aka.ms/msxi</a> and search for the report name</span></li>
-                                            <li>(If bookmarked/customized) Click <strong>"My Report Bookmarks"</strong> in the top right corner and <strong>"Clear current view"</strong></li>
-                                            <li>Scroll to <strong>"ACR Details by Quarter / Month"</strong></li>
-                                            <li>Under Choose Fields (left), check <strong>"ServiceLevel2"</strong> and <strong>"ServiceLevel4"</strong>. Leave <strong>ServiceCompGrouping</strong> checked.</li>
-                                            {% if user_role == 'se' %}<li>Expand <strong>Filters</strong> on the right and under <strong>ServiceCompGrouping</strong>, check the buckets on which you're compensated</li>{% endif %}
-                                            <li>Right-click the <strong>"ACR Details by Quarter / Month"</strong> header text → <strong>Expand to next level</strong></li>
-                                            <li>Repeat step {% if user_role == 'se' %}6{% else %}5{% endif %}</li>
-                                            <li>Click <strong>'...'</strong> → <strong>Export Data</strong> → <strong>Data with current layout</strong></li>
-                                            <li>Open in Excel → <strong>Enable Editing</strong> → <strong>Save As</strong> → <strong>CSV (Comma delimited)</strong></li>
-                                        </ol>
-                                        <p class="mb-0 small text-muted"><i class="bi bi-info-circle"></i> No rush, these instructions are also shown in Step 5.</p>
+                            <div class="card-body">
+                                <p class="text-muted small mb-2">Check the service comp groupings you're compensated on to filter your revenue views across the app. Leave them all unchecked to see every bucket. You can change this later from Revenue Import.</p>
+                                <div id="onboardBucketList">
+                                    <div class="text-center text-muted py-2">
+                                        <div class="spinner-border spinner-border-sm"></div> Loading buckets...
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- STEP 5: Revenue & Finish -->
-                    <div class="onboarding-step d-none" id="onboardingStep5">
-                        <h6 class="mb-3"><i class="bi bi-graph-up text-primary"></i> One More Thing: Revenue Data <span class="text-muted fw-normal">(~10 sec)</span></h6>
-                        <p>Importing revenue data powers the Revenue Analyzer - trend charts, service breakdowns, and growth tracking for your accounts.</p>
-                        
-                        <div class="card mb-3 border-primary">
-                            <div class="card-body" id="importRevenueCard">
-                                <div id="revenueInstructions">
-                                    <h6 class="card-title"><i class="bi bi-file-earmark-spreadsheet text-success"></i> How to get your revenue CSV:</h6>
-                                    <ol class="mb-3">
-                                        <li>Go to <a href="https://msxi.microsoft.com/User/report/4ab7af21-7148-47de-9e65-0acfae0a3ff4?reportTab=f116f870cd6e113e0da6" target="_blank">Azure Service Level Subscription Details SL4 - WW</a>
-                                            <br><span class="text-muted small">Or go to <a href="https://aka.ms/msxi" target="_blank">aka.ms/msxi</a> and search for the report name</span></li>
-                                        <li>(If bookmarked/customized) Click <strong>"My Report Bookmarks"</strong> in the top right corner and <strong>"Clear current view"</strong></li>
-                                        <li>Scroll to <strong>"ACR Details by Quarter / Month"</strong></li>
-                                        <li>Under Choose Fields (left), check <strong>"ServiceLevel2"</strong> and <strong>"ServiceLevel4"</strong>. Leave <strong>ServiceCompGrouping</strong> checked.</li>
-                                        {% if user_role == 'se' %}<li>Expand <strong>Filters</strong> on the right and under <strong>ServiceCompGrouping</strong>, check the buckets on which you're compensated</li>{% endif %}
-                                        <li>Right-click the <strong>"ACR Details by Quarter / Month"</strong> header text → <strong>Expand to next level</strong></li>
-                                        <li>Repeat step {% if user_role == 'se' %}6{% else %}5{% endif %}</li>
-                                        <li>Click <strong>'...'</strong> → <strong>Export Data</strong> → <strong>Data with current layout</strong></li>
-                                        <li>Open in Excel → <strong>Enable Editing</strong> → <strong>Save As</strong> → <strong>CSV (Comma delimited)</strong></li>
-                                    </ol>
-                                </div>
-
-                                <!-- Initial state: Upload button -->
-                                <div id="importRevenueInitial" class="text-center">
-                                    <div id="revenueIncompleteWarning" class="alert alert-warning py-2 mb-3 d-none">
-                                        <i class="bi bi-exclamation-triangle"></i> Your last revenue import didn't finish. Re-import to get complete data.
-                                    </div>
-                                    <input type="file" id="revenueFileInput" accept=".csv" class="d-none">
-                                    <button class="btn btn-primary btn-lg" id="onboardImportRevenue">
-                                        <i class="bi bi-upload"></i> Import Revenue CSV
-                                    </button>
-                                </div>
-
-                                <!-- Progress state -->
-                                <div id="importRevenueProgress" class="d-none">
-                                    <div class="d-flex align-items-center mb-2">
-                                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
-                                        <span id="importRevenueStatusText">Starting import...</span>
-                                    </div>
-                                    <div class="progress mb-2" style="height: 20px;">
-                                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="importRevenueProgressBar" role="progressbar" style="width: 0%"></div>
-                                    </div>
-                                    <div class="text-end small text-muted" id="importRevenueProgressPercent">0%</div>
-
-                                </div>
-
-                                <!-- Success state -->
-                                <div id="importRevenueSuccess" class="d-none text-center">
-                                    <i class="bi bi-check-circle-fill text-success fs-3"></i>
-                                    <p class="mt-2 mb-1 fw-bold text-success">Revenue imported!</p>
-                                    <div id="importRevenueSummary" class="small text-muted"></div>
-                                </div>
-
-                                <!-- Error state -->
-                                <div id="importRevenueError" class="d-none text-center">
-                                    <i class="bi bi-x-circle-fill text-danger fs-3"></i>
-                                    <p class="mt-2 mb-1 fw-bold text-danger" id="importRevenueErrorMsg">Import failed</p>
-                                    <button class="btn btn-outline-primary btn-sm mt-2" id="importRevenueRetry">
-                                        <i class="bi bi-arrow-clockwise"></i> Try Again
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <p class="small text-muted mb-0"><i class="bi bi-info-circle"></i> Optional — you can do this anytime from the Revenue Analyzer.</p>
+                        {% endif %}
                     </div>
 
 
@@ -1400,9 +1284,6 @@
                     <div>
                         <button type="button" class="btn btn-secondary d-none" id="onboardBackBtn">
                             <i class="bi bi-arrow-left"></i> Back
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary d-none" id="onboardSkipStepBtn">
-                            Skip <i class="bi bi-arrow-right"></i>
                         </button>
                         <button type="button" class="btn btn-primary" id="onboardNextBtn">
                             Next <i class="bi bi-arrow-right"></i>
@@ -1786,15 +1667,16 @@
 
                 // --- Onboarding Wizard State ---
                 let currentStep = 1;
-                const totalSteps = 5;
+                const totalSteps = 2;
                 let authCompleted = false;
                 let vpnVerified = false;
                 // Pre-set import state from server-side data
                 let accountsImported = {{ 'true' if accounts_synced else 'false' }};
                 let milestonesImported = {{ 'true' if has_milestones else 'false' }};
                 let revenueImported = {{ 'true' if has_revenue else 'false' }};
-                let roleSelected = true;  // No role selection in Step 1 - auto-detected in Step 3
-                let selectedRole = '{{ user_role }}';  // Updated after Step 3 auto-detect
+                let importRunning = false;
+                let importFailed = false;
+                let selectedRole = '{{ user_role }}';  // Updated after the account import auto-detect
                 const milestonesSyncState = '{{ milestones_sync_state }}';
                 const revenueSyncState = '{{ revenue_sync_state }}';
 
@@ -1811,10 +1693,8 @@
                     // Show current
                     const el = document.getElementById('onboardingStep' + step);
                     if (el) el.classList.remove('d-none');
-                    // Update badge and progress (weighted: 5%, 15%, 40%, 25%, 15%)
                     stepBadge.textContent = 'Step ' + step + ' of ' + totalSteps;
-                    const stepProgress = {1: 0, 2: 5, 3: 20, 4: 55, 5: 80};
-                    progressBar.style.width = stepProgress[step] + '%';
+                    progressBar.style.width = (step === 1 ? 0 : 20) + '%';
 
                     // Back button visibility
                     if (step > 1) backBtn.classList.remove('d-none');
@@ -1825,91 +1705,65 @@
                     } else {
                         nextBtn.innerHTML = 'Next <i class="bi bi-arrow-right"></i>';
                     }
-                    // Show "already completed" state if navigating to a previously-done step
-                    if (step === 3 && accountsImported) {
-                        showImportAlreadyDone('importAccounts', 'Accounts already imported');
-                        setWizardProgress(55);
-                    }
-                    if (step === 4 && milestonesImported) {
-                        showImportAlreadyDone('importMilestones', 'Milestones already synced');
-                        setWizardProgress(90);
-                    }
-                    if (step === 5 && revenueImported) {
-                        showRevenueAlreadyDone();
-                        setWizardProgress(100);
+                    // Surface anything already finished on an earlier run
+                    if (step === 2) {
+                        hydrateImportState();
+                        setWizardProgress(importProgressPct());
                     }
                     // Disable next if step requires completion
                     updateNextButton();
+                }
+
+                // Step 2 carries three imports, so the bar tracks how many have landed.
+                function importProgressPct() {
+                    if (accountsImported && milestonesImported && revenueImported) return 100;
+                    if (accountsImported && milestonesImported) return 85;
+                    if (accountsImported) return 50;
+                    return 20;
+                }
+
+                // A returning user may have some phases done already. Show those as
+                // complete and offer to run only what's left.
+                function hydrateImportState() {
+                    const flags = {
+                        accounts: accountsImported,
+                        milestones: milestonesImported,
+                        revenue: revenueImported,
+                    };
+                    const names = Object.keys(flags);
+                    const anyDone = names.some(n => flags[n]);
+                    if (!anyDone) return;
+                    document.getElementById('importAllCard').classList.remove('d-none');
+                    names.forEach(n => {
+                        if (flags[n]) setPhaseState(n, 'done', 'Already imported');
+                    });
+                    const allDone = names.every(n => flags[n]);
+                    document.getElementById('importAllInitial').classList.toggle('d-none', allDone);
+                    if (!allDone) {
+                        document.getElementById('onboardStartImport').innerHTML =
+                            '<i class="bi bi-cloud-download"></i> Import What\'s Missing';
+                    }
                 }
 
                 function setWizardProgress(pct) {
                     progressBar.style.width = pct + '%';
                 }
 
-                function showImportAlreadyDone(prefix, message) {
-                    showImportState(prefix, 'Success');
-                    const summaryDiv = document.getElementById(prefix + 'Summary');
-                    if (summaryDiv && !summaryDiv.innerHTML.trim()) {
-                        summaryDiv.innerHTML = '<span class="text-muted">Previously imported — no action needed.</span>';
-                    }
-                    // Update the success heading
-                    const successDiv = document.getElementById(prefix + 'Success');
-                    const heading = successDiv ? successDiv.querySelector('.fw-bold') : null;
-                    if (heading && !heading.dataset.originalSet) {
-                        heading.textContent = message;
-                        heading.dataset.originalSet = '1';
-                    }
-                }
-
-                function showRevenueAlreadyDone() {
-                    showRevenueState('Success');
-                    const summaryDiv = document.getElementById('importRevenueSummary');
-                    if (summaryDiv && !summaryDiv.innerHTML.trim()) {
-                        summaryDiv.innerHTML = '<span class="text-muted">Previously imported — no action needed.</span>';
-                    }
-                    const heading = document.querySelector('#importRevenueSuccess .fw-bold');
-                    if (heading && !heading.dataset.originalSet) {
-                        heading.textContent = 'Revenue already imported';
-                        heading.dataset.originalSet = '1';
-                    }
-                }
-
                 function updateNextButton() {
-                    const skipStepBtn = document.getElementById('onboardSkipStepBtn');
-                    if (currentStep === 2 && !(authCompleted && vpnVerified)) {
-                        nextBtn.disabled = true;
-                    } else if (currentStep === 3 && !accountsImported) {
-                        nextBtn.disabled = true;
-                    } else if (currentStep === 4 && !milestonesImported) {
-                        nextBtn.disabled = true;
-                    } else if (currentStep === 5 && !revenueImported) {
-                        nextBtn.disabled = true;
-                    } else {
-                        nextBtn.disabled = false;
+                    if (currentStep === 1) {
+                        nextBtn.disabled = !(authCompleted && vpnVerified);
+                        return;
                     }
-                    // Show Skip button on step 5 (revenue) only when not yet done
-                    if (currentStep === 5 && !revenueImported) {
-                        skipStepBtn.classList.remove('d-none');
-                    } else {
-                        skipStepBtn.classList.add('d-none');
-                    }
-                }
-
-                // Determine the next step that still needs action
-                function nextIncompleteStep() {
-                    if (!accountsImported) return 3;
-                    if (!milestonesImported) return 4;
-                    if (!revenueImported) return 5;
-                    return 5;  // Revenue is the last step
+                    const allDone = accountsImported && milestonesImported && revenueImported;
+                    // Everything is automatic now, so hold them here until it all lands.
+                    // The exception is a failure: accounts alone make the app usable, so
+                    // don't trap someone whose milestone or revenue sync keeps dying.
+                    const escapeHatch = accountsImported && importFailed && !importRunning;
+                    nextBtn.disabled = !(allDone || escapeHatch);
                 }
 
                 nextBtn.addEventListener('click', async () => {
                     if (currentStep < totalSteps) {
-                        // After Step 3: reload so navbar/UI reflects detected role
-                        if (currentStep === 3) {
-                            window.location.href = window.location.pathname + '?onboarding_step=4';
-                            return;
-                        }
                         showStep(currentStep + 1);
                     } else {
                         // Finish — dismiss modal
@@ -1941,7 +1795,7 @@
                 }
 
                 // --- Step 1: Dark Mode Toggle ---
-                // Role is now auto-detected in Step 3 (no manual selection)
+                // Role is auto-detected once accounts are imported (no manual selection)
 
                 const onboardDarkToggle = document.getElementById('onboardDarkModeToggle');
                 if (onboardDarkToggle) {
@@ -2101,12 +1955,12 @@
 
                     showSignInState('signInSuccess');
                     nextBtn.innerHTML = 'Next <i class="bi bi-arrow-right"></i>';
-                    nextBtn.disabled = false;
+                    updateNextButton();
 
                     // Auto-advance for returning users who already have data
                     if (accountsImported || milestonesImported || revenueImported) {
                         setTimeout(() => {
-                            if (currentStep === 2) showStep(nextIncompleteStep());
+                            if (currentStep === 1) showStep(2);
                         }, 2000);
                     }
                 }
@@ -2181,52 +2035,74 @@
                     btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> I\'m on VPN -- Try Again';
                 });
 
-                // --- Step 3: Import Accounts ---
-                function showImportState(prefix, stateId) {
-                    ['Initial', 'Progress', 'Success', 'Error'].forEach(s => {
-                        document.getElementById(prefix + s).classList.add('d-none');
-                    });
-                    document.getElementById(prefix + stateId).classList.remove('d-none');
-                    // Show brainrot toggle in card during progress, hide otherwise
-                    if (stateId === 'Progress') {
-                        if (window.showBrainrotInCard) window.showBrainrotInCard(prefix + 'Card');
-                    } else {
-                        if (window.hideBrainrotToggle) window.hideBrainrotToggle();
+                // --- Import: one button runs accounts, then milestones + revenue together ---
+                const PHASE_ICONS = {
+                    waiting: '<i class="bi bi-circle text-muted"></i>',
+                    running: '<div class="spinner-border spinner-border-sm text-primary" role="status"></div>',
+                    done: '<i class="bi bi-check-circle-fill text-success"></i>',
+                    error: '<i class="bi bi-exclamation-triangle-fill text-warning"></i>',
+                };
+
+                function phaseEl(name, suffix) {
+                    return document.getElementById('phase' + name.charAt(0).toUpperCase() + name.slice(1) + suffix);
+                }
+
+                function setPhaseState(name, state, statusText) {
+                    const icon = phaseEl(name, 'Icon');
+                    if (icon) icon.innerHTML = PHASE_ICONS[state] || PHASE_ICONS.waiting;
+                    const status = phaseEl(name, 'Status');
+                    if (status) {
+                        status.textContent = statusText || '';
+                        status.classList.toggle('text-danger', state === 'error');
+                    }
+                    const barWrap = phaseEl(name, 'BarWrap');
+                    if (barWrap) barWrap.classList.toggle('d-none', state !== 'running');
+                    const retry = phaseEl(name, 'Retry');
+                    if (retry) retry.classList.toggle('d-none', state !== 'error');
+                }
+
+                function setPhaseProgress(name, pct, statusText) {
+                    if (typeof pct === 'number') {
+                        const bar = phaseEl(name, 'Bar');
+                        if (bar) bar.style.width = pct + '%';
+                    }
+                    if (statusText) {
+                        const status = phaseEl(name, 'Status');
+                        if (status) status.textContent = statusText;
                     }
                 }
 
-                async function importAccounts() {
-                    // Show progress immediately so the UI doesn't look frozen during VPN check
-                    showImportState('importAccounts', 'Progress');
-                    const logDiv = document.getElementById('importAccountsLog');
-                    const statusText = document.getElementById('importAccountsStatusText');
-                    const progressBar = document.getElementById('importAccountsProgressBar');
-                    const progressPercent = document.getElementById('importAccountsProgressPercent');
-                    logDiv.innerHTML = '';
-                    statusText.textContent = 'Connecting...';
-                    progressBar.style.width = '0%';
-                    progressPercent.textContent = '0%';
+                function setPhaseSummary(name, html) {
+                    const el = phaseEl(name, 'Summary');
+                    if (!el) return;
+                    el.innerHTML = html || '';
+                    el.classList.toggle('d-none', !html);
+                }
 
-                    // Pre-flight VPN check — tests connection and clears block if reachable
+                function warnOnLeave(e) { e.preventDefault(); e.returnValue = ''; }
+
+                // Checks corpnet before a phase burns minutes on a doomed sync.
+                async function phaseVpnOk(name) {
                     try {
                         const vpnResp = await fetch('/api/msx/vpn-check', { method: 'POST' });
                         const vpnData = await vpnResp.json();
                         if (!vpnData.success) {
                             if (window.showVpnBanner) window.showVpnBanner();
-                            document.getElementById('importAccountsErrorMsg').textContent = 'Not on VPN - connect to corpnet and try again.';
-                            showImportState('importAccounts', 'Error');
-                            return;
+                            setPhaseState(name, 'error', 'Not on VPN - connect to corpnet and retry.');
+                            return false;
                         }
                         // VPN is good — clear any lingering banner
                         if (window.hideVpnBanner) window.hideVpnBanner();
                     } catch (e) { /* proceed anyway */ }
-                    statusText.textContent = 'Starting import...';
-                    progressBar.style.width = '0%';
-                    progressPercent.textContent = '0%';
+                    return true;
+                }
 
-                    // Warn user if they try to leave during import
-                    function warnOnLeave(e) { e.preventDefault(); e.returnValue = ''; }
-                    window.addEventListener('beforeunload', warnOnLeave);
+                async function runAccounts() {
+                    setPhaseState('accounts', 'running', 'Connecting...');
+                    setPhaseProgress('accounts', 0);
+                    setPhaseSummary('accounts', '');
+                    if (!await phaseVpnOk('accounts')) return false;
+                    setPhaseProgress('accounts', 0, 'Starting import...');
 
                     try {
                         const resp = await fetch('/api/msx/import-stream');
@@ -2270,14 +2146,11 @@
                                         if (window.isVpnBlocked && window.isVpnBlocked(data.message)) {
                                             window.showVpnBanner();
                                         }
-                                        statusText.textContent = data.message;
-                                        logDiv.innerHTML += '<div>' + data.message + '</div>';
-                                        logDiv.scrollTop = logDiv.scrollHeight;
+                                        setPhaseProgress('accounts', null, data.message);
                                     }
 
                                     if (data.progress !== undefined) {
-                                        progressBar.style.width = data.progress + '%';
-                                        progressPercent.textContent = data.progress + '%';
+                                        setPhaseProgress('accounts', data.progress);
                                     }
 
                                     if (data.complete && data.summary) {
@@ -2306,7 +2179,7 @@
                             selectedRole = 'se';
                         }
 
-                        const summaryDiv = document.getElementById('importAccountsSummary');
+                        const summaryDiv = document.getElementById('phaseAccountsSummary');
                         if (finalSummary) {
                             const s = finalSummary;
                             summaryDiv.innerHTML =
@@ -2316,68 +2189,33 @@
                                 (selectedRole !== 'dss' ? '<li><i class="bi bi-person text-primary"></i> Sellers: ' + (s.sellers_created || 0) + ' created' + (s.sellers_updated ? ', ' + s.sellers_updated + ' updated' : '') + '</li>' : '') +
                                 '<li><i class="bi bi-person-gear text-secondary"></i> Solution Engineers: ' + (s.solution_engineers_created || 0) + ' created</li>' +
                                 '<li><i class="bi bi-building text-success"></i> Customers: ' + (s.customers_created || 0) + ' created' + (s.customers_updated ? ', ' + s.customers_updated + ' updated' : '') + (s.customers_unchanged ? ', ' + s.customers_unchanged + ' unchanged' : '') + (s.customers_skipped ? ', ' + s.customers_skipped + ' skipped' : '') + '</li>' +
-                                (s.duration ? '<li>Completed in ' + s.duration + 's</li>' : '') +
                                 '</ul>';
+                            summaryDiv.classList.remove('d-none');
                         }
-                        showImportState('importAccounts', 'Success');
-                        setWizardProgress(55);
+                        setPhaseState('accounts', 'done', finalSummary && finalSummary.duration ? 'Done in ' + finalSummary.duration + 's' : 'Done');
+                        setWizardProgress(importProgressPct());
                         updateNextButton();
+                        return true;
                     } catch (err) {
                         const msg = err.message || 'Connection error during import';
-                        const errorEl = document.getElementById('importAccountsErrorMsg');
-                        errorEl.textContent = msg.charAt(0).toUpperCase() + msg.slice(1);
-                        // Show the log div in error state too (contains last progress messages)
-                        const logDiv = document.getElementById('importAccountsLog');
-                        if (logDiv && logDiv.innerHTML) {
-                            logDiv.style.maxHeight = '80px';
-                            document.getElementById('importAccountsError').appendChild(logDiv);
-                        }
-                        showImportState('importAccounts', 'Error');
-                    } finally {
-                        window.removeEventListener('beforeunload', warnOnLeave);
+                        setPhaseState('accounts', 'error', msg.charAt(0).toUpperCase() + msg.slice(1));
+                        importFailed = true;
+                        return false;
                     }
                 }
 
-                document.getElementById('onboardImportAccounts').addEventListener('click', importAccounts);
-                document.getElementById('importAccountsRetry').addEventListener('click', importAccounts);
-
-                // --- Step 4: Import Milestones ---
+                // --- Import Milestones ---
                 // The milestone sync endpoint uses named SSE events:
                 //   event: start\ndata: {"total": N}
                 //   event: progress\ndata: {"current":1, "total":N, "customer":"...", "status":"ok"}
                 //   event: complete\ndata: {"synced":N, "created":N, ...}
                 // We need to parse both the 'event:' and 'data:' lines.
-                async function importMilestones() {
-                    // Show progress immediately so the UI doesn't look frozen during VPN check
-                    showImportState('importMilestones', 'Progress');
-                    const logDiv = document.getElementById('importMilestonesLog');
-                    const statusText = document.getElementById('importMilestonesStatusText');
-                    const progressBar = document.getElementById('importMilestonesProgressBar');
-                    const progressPercent = document.getElementById('importMilestonesProgressPercent');
-                    logDiv.innerHTML = '';
-                    statusText.textContent = 'Connecting...';
-                    progressBar.style.width = '0%';
-                    progressPercent.textContent = '0%';
-
-                    // Pre-flight VPN check — tests connection and clears block if reachable
-                    try {
-                        const vpnResp = await fetch('/api/msx/vpn-check', { method: 'POST' });
-                        const vpnData = await vpnResp.json();
-                        if (!vpnData.success) {
-                            if (window.showVpnBanner) window.showVpnBanner();
-                            document.getElementById('importMilestonesErrorMsg').textContent = 'Not on VPN - connect to corpnet and try again.';
-                            showImportState('importMilestones', 'Error');
-                            return;
-                        }
-                        // VPN is good — clear any lingering banner
-                        if (window.hideVpnBanner) window.hideVpnBanner();
-                    } catch (e) { /* proceed anyway */ }
-                    statusText.textContent = 'Starting sync...';
-                    progressBar.style.width = '0%';
-                    progressPercent.textContent = '0%';
-
-                    function warnOnLeave(e) { e.preventDefault(); e.returnValue = ''; }
-                    window.addEventListener('beforeunload', warnOnLeave);
+                async function runMilestones() {
+                    setPhaseState('milestones', 'running', 'Connecting...');
+                    setPhaseProgress('milestones', 0);
+                    setPhaseSummary('milestones', '');
+                    if (!await phaseVpnOk('milestones')) return false;
+                    setPhaseProgress('milestones', 0, 'Starting sync...');
 
                     try {
                         const resp = await fetch('/api/milestone-tracker/sync', {
@@ -2412,25 +2250,18 @@
                                 if (!eventData) continue;
 
                                 if (eventType === 'start') {
-                                    statusText.textContent = 'Syncing ' + (eventData.total || 0) + ' customers...';
+                                    setPhaseProgress('milestones', null, 'Syncing ' + (eventData.total || 0) + ' customers...');
                                 } else if (eventType === 'progress') {
                                     const pct = eventData.progress != null
                                         ? eventData.progress
                                         : (eventData.total > 0 ? Math.round(eventData.current / eventData.total * 100) : 0);
-                                    progressBar.style.width = pct + '%';
-                                    progressPercent.textContent = pct + '%';
+                                    let label;
                                     if (eventData.status === 'retrying') {
-                                        statusText.textContent = eventData.customer || 'Timeout, retrying...';
+                                        label = eventData.customer || 'Timeout, retrying...';
                                     } else {
-                                        statusText.textContent = eventData.customer || ('Customer ' + eventData.current);
+                                        label = eventData.customer || ('Customer ' + eventData.current);
                                     }
-                                    // Only log errors to the detail pane
-                                    if (eventData.status === 'error') {
-                                        logDiv.innerHTML += '<div><i class="bi bi-x-circle text-danger"></i> ' +
-                                            (eventData.customer || '') +
-                                            (eventData.error ? ' — ' + eventData.error : '') + '</div>';
-                                        logDiv.scrollTop = logDiv.scrollHeight;
-                                    }
+                                    setPhaseProgress('milestones', pct, label);
                                     // Show VPN banner if a progress error indicates IP block
                                     if (eventData.error && window.isVpnBlocked && window.isVpnBlocked(eventData.error)) {
                                         window.showVpnBanner();
@@ -2448,7 +2279,7 @@
                         }
 
                         milestonesImported = true;
-                        const summaryDiv = document.getElementById('importMilestonesSummary');
+                        const summaryDiv = document.getElementById('phaseMilestonesSummary');
                         if (completeSummary) {
                             const cs = completeSummary;
                             summaryDiv.innerHTML =
@@ -2458,92 +2289,40 @@
                                     (cs.deactivated ? ', ' + cs.deactivated + ' deactivated' : '') + '</li>' +
                                 (cs.opportunities_created ? '<li>' + cs.opportunities_created + ' opportunities created</li>' : '') +
                                 ((cs.tasks_created || cs.tasks_updated) ? '<li>' + (cs.tasks_created || 0) + ' tasks created' + (cs.tasks_updated ? ', ' + cs.tasks_updated + ' updated' : '') + '</li>' : '') +
-                                (cs.duration ? '<li>Completed in ' + cs.duration + 's</li>' : '') +
                                 '</ul>';
+                            summaryDiv.classList.remove('d-none');
                         }
-                        showImportState('importMilestones', 'Success');
-                        setWizardProgress(90);
+                        setPhaseState('milestones', 'done', completeSummary && completeSummary.duration ? 'Done in ' + completeSummary.duration + 's' : 'Done');
+                        setWizardProgress(importProgressPct());
                         updateNextButton();
                         // Kick off background marketing insights sync (fire-and-forget)
                         fetch('/api/msx/sync-marketing', { method: 'POST' }).catch(() => {});
+                        return true;
                     } catch (err) {
                         const mMsg = err.message || 'Connection error during sync';
-                        document.getElementById('importMilestonesErrorMsg').textContent = mMsg.charAt(0).toUpperCase() + mMsg.slice(1);
-                        showImportState('importMilestones', 'Error');
-                    } finally {
-                        window.removeEventListener('beforeunload', warnOnLeave);
+                        setPhaseState('milestones', 'error', mMsg.charAt(0).toUpperCase() + mMsg.slice(1));
+                        importFailed = true;
+                        return false;
                     }
                 }
 
-                document.getElementById('onboardImportMilestones').addEventListener('click', importMilestones);
-                document.getElementById('importMilestonesRetry').addEventListener('click', importMilestones);
-                document.getElementById('onboardSkipStepBtn').addEventListener('click', async () => {
-                    if (currentStep >= totalSteps) {
-                        // Last step — dismiss the wizard
-                        await dismissOnboarding();
-                        modal.hide();
-                        window.location.reload();
-                    } else {
-                        showStep(currentStep + 1);
-                    }
-                });
-
-                // --- Step 5: Import Revenue ---
-                function showRevenueState(stateId) {
-                    ['Initial', 'Progress', 'Success', 'Error'].forEach(s => {
-                        document.getElementById('importRevenue' + s).classList.add('d-none');
-                    });
-                    document.getElementById('importRevenue' + stateId).classList.remove('d-none');
-                    // Hide CSV instructions during progress/success/error, show only for initial
-                    const instructions = document.getElementById('revenueInstructions');
-                    if (instructions) {
-                        instructions.classList.toggle('d-none', stateId !== 'Initial');
-                    }
-                    // Show brainrot toggle in card during progress, hide otherwise
-                    if (stateId === 'Progress') {
-                        if (window.showBrainrotInCard) window.showBrainrotInCard('importRevenueCard');
-                    } else {
-                        if (window.hideBrainrotToggle) window.hideBrainrotToggle();
-                    }
-                }
-
-                async function importRevenue(file) {
-                    // Check for truncation warning in last line of CSV
-                    try {
-                        const text = await file.text();
-                        const lastLine = text.trimEnd().split('\n').pop().trim();
-                        if (lastLine.toLowerCase().includes('exported data exceeded') || lastLine.toLowerCase().includes('some data may have been omitted')) {
-                            if (!confirm('Warning: This export appears to be incomplete. The last line says:\n\n"' + lastLine + '"\n\nYou may be missing data. Continue importing anyway?')) {
-                                return;
-                            }
-                        }
-                    } catch (e) { /* proceed if read fails */ }
-
-                    showRevenueState('Progress');
-                    const statusText = document.getElementById('importRevenueStatusText');
-                    const progressBar = document.getElementById('importRevenueProgressBar');
-                    const progressPercent = document.getElementById('importRevenueProgressPercent');
-                    statusText.textContent = 'Starting import...';
-                    progressBar.style.width = '0%';
-                    progressPercent.textContent = '0%';
-
-                    function warnOnLeave(e) { e.preventDefault(); e.returnValue = ''; }
-                    window.addEventListener('beforeunload', warnOnLeave);
+                async function runRevenue() {
+                    setPhaseState('revenue', 'running', 'Starting sync...');
+                    setPhaseProgress('revenue', 0);
+                    setPhaseSummary('revenue', '');
 
                     try {
-                        const formData = new FormData();
-                        formData.append('file', file);
-                        formData.append('run_analysis', 'on');
-
-                        const resp = await fetch('/api/revenue/import', {
+                        const resp = await fetch('/api/revenue/sync', {
                             method: 'POST',
-                            body: formData
+                            headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+                            body: JSON.stringify({})
                         });
                         if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
                         const reader = resp.body.getReader();
                         const decoder = new TextDecoder();
                         let buffer = '';
                         let finalResult = null;
+                        let evt = null;
 
                         while (true) {
                             const { done, value } = await reader.read();
@@ -2552,67 +2331,189 @@
                             const lines = buffer.split('\n');
                             buffer = lines.pop();
                             for (const line of lines) {
+                                if (line.startsWith('event: ')) { evt = line.slice(7).trim(); continue; }
                                 if (!line.startsWith('data: ')) continue;
-                                try {
-                                    const data = JSON.parse(line.slice(6));
-                                    if (data.error) throw new Error(data.error);
-                                    if (data.message) {
-                                        statusText.textContent = data.message;
-                                    }
-                                    if (data.progress !== undefined) {
-                                        progressBar.style.width = data.progress + '%';
-                                        progressPercent.textContent = data.progress + '%';
-                                    }
-                                    if (data.result) finalResult = data.result;
-                                } catch (parseErr) {
-                                    if (parseErr.message && !parseErr.message.includes('JSON')) throw parseErr;
+                                let data;
+                                try { data = JSON.parse(line.slice(6)); } catch (e) { continue; }
+                                if (evt === 'error' || data.error) throw new Error(data.error || 'Sync failed');
+                                if (evt === 'complete') { finalResult = data; continue; }
+                                if (data.message) setPhaseProgress('revenue', null, data.message);
+                                if (typeof data.progress === 'number') {
+                                    setPhaseProgress('revenue', data.progress);
                                 }
                             }
                         }
 
                         revenueImported = true;
-                        const summaryDiv = document.getElementById('importRevenueSummary');
+                        const summaryDiv = document.getElementById('phaseRevenueSummary');
                         if (finalResult) {
                             summaryDiv.innerHTML =
                                 '<ul class="list-unstyled mb-0">' +
-                                '<li>' + (finalResult.records_created || 0) + ' records created</li>' +
-                                '<li>' + (finalResult.records_updated || 0) + ' records updated</li>' +
-                                '<li>' + (finalResult.new_months || 0) + ' new months added</li>' +
-                                (finalResult.duration ? '<li>Completed in ' + finalResult.duration + 's</li>' : '') +
+                                '<li>' + (finalResult.customers_with_data || 0) + ' of ' +
+                                    (finalResult.customers || 0) + ' accounts with revenue</li>' +
+                                '<li>' + (finalResult.months || 0) + ' months of history</li>' +
                                 '</ul>';
+                            summaryDiv.classList.remove('d-none');
                         }
-                        showRevenueState('Success');
-                        // Auto-set compensated buckets from imported data
+                        setPhaseState('revenue', 'done', finalResult && finalResult.duration_s ? 'Done in ' + finalResult.duration_s + 's' : 'Done');
+                        // Offer the bucket picker. Nothing is pre-selected - an empty
+                        // selection means "show everything", and the user narrows it.
                         try {
                             const bucketsResp = await fetch('/api/revenue/buckets');
                             const buckets = await bucketsResp.json();
                             if (buckets && buckets.length > 0) {
-                                localStorage.setItem('salesbuddy_revenue_bucket_filter', JSON.stringify(buckets));
-                                await fetch('/api/revenue/compensated-buckets', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify(buckets),
-                                });
+                                renderOnboardBucketPicker(buckets);
                             }
                         } catch (e) { /* best effort */ }
-                        setWizardProgress(90);
+                        setWizardProgress(importProgressPct());
                         updateNextButton();
+                        return true;
                     } catch (err) {
-                        const msg = err.message || 'Connection error during import';
-                        document.getElementById('importRevenueErrorMsg').textContent = msg.charAt(0).toUpperCase() + msg.slice(1);
-                        showRevenueState('Error');
-                    } finally {
-                        window.removeEventListener('beforeunload', warnOnLeave);
+                        const msg = err.message || 'Connection error during sync';
+                        setPhaseState('revenue', 'error', msg.charAt(0).toUpperCase() + msg.slice(1));
+                        importFailed = true;
+                        return false;
                     }
                 }
 
-                const revenueFileInput = document.getElementById('revenueFileInput');
-                document.getElementById('onboardImportRevenue').addEventListener('click', () => revenueFileInput.click());
-                revenueFileInput.addEventListener('change', function() {
-                    if (this.files[0]) importRevenue(this.files[0]);
-                    this.value = '';
-                });
-                document.getElementById('importRevenueRetry').addEventListener('click', () => revenueFileInput.click());
+                // Accounts must land first so the other two have something to attach to.
+                // Milestones and revenue then run one at a time on purpose: both write
+                // heavily to SQLite, and on a slower disk the revenue bulk write can hold
+                // the lock past busy_timeout and fail the other with "database is locked".
+                async function startImport() {
+                    if (importRunning) return;
+                    importRunning = true;
+                    importFailed = false;
+                    document.getElementById('importAllInitial').classList.add('d-none');
+                    document.getElementById('importAllCard').classList.remove('d-none');
+                    if (window.showBrainrotInCard) window.showBrainrotInCard('importAllCard');
+                    window.addEventListener('beforeunload', warnOnLeave);
+                    try {
+                        const ready = accountsImported || await runAccounts();
+                        if (ready) {
+                            // A failed phase returns false rather than throwing, so a bad
+                            // milestone sync still lets revenue have its turn.
+                            if (!milestonesImported) await runMilestones();
+                            if (!revenueImported) await runRevenue();
+                        }
+                    } finally {
+                        window.removeEventListener('beforeunload', warnOnLeave);
+                        if (window.hideBrainrotToggle) window.hideBrainrotToggle();
+                        importRunning = false;
+                        setWizardProgress(importProgressPct());
+                        updateNextButton();
+                    }
+                }
+
+                // Retrying one failed phase shouldn't re-run the ones that succeeded.
+                async function retryPhase(fn) {
+                    if (importRunning) return;
+                    importRunning = true;
+                    importFailed = false;
+                    window.addEventListener('beforeunload', warnOnLeave);
+                    try {
+                        await fn();
+                    } finally {
+                        window.removeEventListener('beforeunload', warnOnLeave);
+                        importRunning = false;
+                        setWizardProgress(importProgressPct());
+                        updateNextButton();
+                    }
+                }
+
+                document.getElementById('onboardStartImport').addEventListener('click', startImport);
+                document.getElementById('phaseAccountsRetry').addEventListener('click', startImport);
+                document.getElementById('phaseMilestonesRetry').addEventListener('click', () => retryPhase(runMilestones));
+                document.getElementById('phaseRevenueRetry').addEventListener('click', () => retryPhase(runRevenue));
+
+                // Bucket picker shown once revenue lands, mirroring the import page.
+                // Built with DOM calls rather than innerHTML since bucket names are data.
+                function renderOnboardBucketPicker(buckets) {
+                    const card = document.getElementById('onboardBucketPickerCard');
+                    const listEl = document.getElementById('onboardBucketList');
+                    if (!card || !listEl) return;
+                    card.classList.remove('d-none');
+                    listEl.innerHTML = '';
+
+                    let selected = new Set();
+                    try {
+                        const saved = JSON.parse(localStorage.getItem('salesbuddy_revenue_bucket_filter'));
+                        if (saved && Array.isArray(saved)) selected = new Set(saved);
+                    } catch (e) {}
+
+                    const search = document.createElement('input');
+                    search.type = 'text';
+                    search.className = 'form-control form-control-sm mb-2';
+                    search.placeholder = 'Search';
+                    search.autocomplete = 'off';
+                    listEl.appendChild(search);
+
+                    const selAllLabel = document.createElement('label');
+                    selAllLabel.className = 'form-check d-flex align-items-center gap-2 mb-1 border-bottom pb-1';
+                    selAllLabel.style.cursor = 'pointer';
+                    const selAllCb = document.createElement('input');
+                    selAllCb.type = 'checkbox';
+                    selAllCb.className = 'form-check-input mt-0';
+                    // every() is true for an empty list, which would tick "Select all"
+                    // with nothing to select.
+                    selAllCb.checked = buckets.length > 0 && buckets.every(b => selected.has(b));
+                    const selAllText = document.createElement('span');
+                    selAllText.className = 'small fw-semibold';
+                    selAllText.textContent = 'Select all';
+                    selAllLabel.appendChild(selAllCb);
+                    selAllLabel.appendChild(selAllText);
+                    listEl.appendChild(selAllLabel);
+
+                    const itemsDiv = document.createElement('div');
+                    itemsDiv.style.maxHeight = '220px';
+                    itemsDiv.style.overflowY = 'auto';
+                    const rows = [];
+
+                    function save() {
+                        const sel = rows.filter(r => r.cb.checked).map(r => r.cb.value);
+                        localStorage.setItem('salesbuddy_revenue_bucket_filter', JSON.stringify(sel));
+                        fetch('/api/revenue/compensated-buckets', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(sel),
+                        }).catch(() => {});
+                    }
+
+                    buckets.forEach(b => {
+                        const label = document.createElement('label');
+                        label.className = 'form-check d-flex align-items-center gap-2 mb-0 py-1';
+                        label.style.cursor = 'pointer';
+                        label.dataset.name = b.toLowerCase();
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.className = 'form-check-input mt-0';
+                        cb.value = b;
+                        cb.checked = selected.has(b);
+                        const span = document.createElement('span');
+                        span.className = 'small';
+                        span.textContent = b;
+                        label.appendChild(cb);
+                        label.appendChild(span);
+                        itemsDiv.appendChild(label);
+                        rows.push({ label, cb });
+                        cb.addEventListener('change', function () {
+                            save();
+                            selAllCb.checked = rows.every(r => r.cb.checked);
+                        });
+                    });
+                    listEl.appendChild(itemsDiv);
+
+                    selAllCb.addEventListener('change', function () {
+                        rows.forEach(r => { r.cb.checked = this.checked; });
+                        save();
+                    });
+                    search.addEventListener('input', function () {
+                        const term = this.value.toLowerCase().trim();
+                        rows.forEach(r => {
+                            r.label.classList.toggle('d-none', term && !r.label.dataset.name.includes(term));
+                        });
+                    });
+                }
 
 
 
@@ -2624,48 +2525,45 @@
 
                     let startStep = 1;
 
-                    // Check for step override from URL (used after Step 1 role selection reload)
-                    const urlParams = new URLSearchParams(window.location.search);
-                    const stepOverride = parseInt(urlParams.get('onboarding_step'));
-                    if (stepOverride >= 1 && stepOverride <= totalSteps) {
-                        // Clean the URL so refreshing doesn't re-trigger
-                        history.replaceState(null, '', window.location.pathname);
-                        startStep = stepOverride;
-                    }
-
-                    // If user already has data, check auth and skip completed steps
+                    // Returning user with data: if they're still signed in, skip the auth step.
                     if (startStep === 1 && (accountsImported || milestonesImported || revenueImported)) {
                         try {
                             const resp = await fetch('/api/msx/status');
                             const data = await resp.json();
                             if (data.authenticated) {
+                                // They reached MSX before, so treat VPN as proven too -
+                                // otherwise stepping Back would strand them on a dead Next.
                                 authCompleted = true;
+                                vpnVerified = true;
+                                showSignInState('signInSuccess');
+                                startStep = 2;
                             }
                         } catch (err) {
-                            // Auth check failed — fall through to step 1 or 2
-                        }
-
-                        if (authCompleted && accountsImported && milestonesImported && revenueImported) {
-                            startStep = 5;
-                        } else if (authCompleted && accountsImported && milestonesImported) {
-                            startStep = 5;
-                        } else if (authCompleted && accountsImported) {
-                            startStep = 4;
-                        } else if (accountsImported) {
-                            // Data exists but auth expired — re-auth first
-                            startStep = 2;
+                            // Auth check failed — start at step 1 and sign in again
                         }
                     }
 
                     // Show the correct step, then reveal the modal
                     showStep(startStep);
 
-                    // Show warnings for incomplete syncs
-                    if (milestonesSyncState === 'incomplete' || milestonesSyncState === 'failed') {
-                        document.getElementById('milestonesIncompleteWarning').classList.remove('d-none');
+                    // Warn about anything that died mid-sync last time
+                    const stalled = [];
+                    if (milestonesSyncState === 'incomplete' || milestonesSyncState === 'failed') stalled.push('milestone');
+                    if (revenueSyncState === 'incomplete' || revenueSyncState === 'failed') stalled.push('revenue');
+                    if (stalled.length) {
+                        document.getElementById('importIncompleteText').textContent =
+                            'Your last ' + stalled.join(' and ') + ' sync didn\'t finish. Run the import again for complete data.';
+                        document.getElementById('importIncompleteWarning').classList.remove('d-none');
                     }
-                    if (revenueSyncState === 'incomplete' || revenueSyncState === 'failed') {
-                        document.getElementById('revenueIncompleteWarning').classList.remove('d-none');
+
+                    // Resuming with revenue already loaded: offer the picker straight away.
+                    if (revenueImported) {
+                        fetch('/api/revenue/buckets')
+                            .then(r => r.json())
+                            .then(buckets => {
+                                if (buckets && buckets.length) renderOnboardBucketPicker(buckets);
+                            })
+                            .catch(() => {});
                     }
 
                     modal.show();

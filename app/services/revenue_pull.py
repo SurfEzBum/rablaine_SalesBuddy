@@ -13,9 +13,8 @@ Auth flow (no browser, no manual token):
 3. POST the semantic query to the capacity's QES ``public/query`` endpoint with
    that MWCToken. Row-level security scopes results to our MSX-assigned accounts.
 
-Results are read-only. Nothing here writes to the database - the beta test page
-renders and audits the findings so coverage can be validated before this feeds
-the import pipeline.
+Results are read-only. Nothing here writes to the database - ``revenue_sync``
+owns the write side.
 """
 from __future__ import annotations
 
@@ -25,7 +24,7 @@ import logging
 import re
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from typing import Any, Optional
 
@@ -244,8 +243,21 @@ def _decode(data: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 # QES query execution
 # ---------------------------------------------------------------------------
-def _qes_post(session: requests.Session, query: dict, retries: int = 2) -> list[dict]:
+# The capacity caps every response at 30,000 rows regardless of the window we
+# ask for. Truncation is signalled by IC=false plus an RT restart token, which
+# we replay to fetch the next page.
+_MAX_WINDOW = 30000
+_MAX_PAGES = 200
+
+
+def _qes_post_page(session: requests.Session, query: dict,
+                   restart: Optional[list] = None,
+                   retries: int = 2) -> tuple[list[dict], Optional[list]]:
+    """POST one page. Returns (rows, restart_token_for_next_page_or_None)."""
     mwc = _mint_mwc(session)
+    window: dict[str, Any] = {"Count": _MAX_WINDOW}
+    if restart:
+        window["RestartTokens"] = restart
     body = {
         "version": "1.0.0",
         "queries": [{
@@ -253,7 +265,7 @@ def _qes_post(session: requests.Session, query: dict, retries: int = 2) -> list[
                 "Query": query,
                 "Binding": {
                     "Primary": {"Groupings": [{"Projections": list(range(len(query["Select"])))}]},
-                    "DataReduction": {"DataVolume": 3, "Primary": {"Window": {"Count": 30000}}},
+                    "DataReduction": {"DataVolume": 3, "Primary": {"Window": window}},
                     "Version": 1,
                 },
                 "ExecutionMetricsKind": 1,
@@ -277,7 +289,7 @@ def _qes_post(session: requests.Session, query: dict, retries: int = 2) -> list[
     last: Optional[Exception] = None
     for attempt in range(retries + 1):
         try:
-            resp = session.post(_qes_url, headers=headers, data=json.dumps(body), timeout=(15, 240))
+            resp = session.post(_qes_url, headers=headers, data=json.dumps(body), timeout=(15, 300))
             if resp.status_code == 401:
                 clear_token_cache()  # token expired mid-run - re-mint and retry
                 headers["authorization"] = f"MWCToken {_mint_mwc(session)}"
@@ -287,11 +299,39 @@ def _qes_post(session: requests.Session, query: dict, retries: int = 2) -> list[
             res = json.loads(resp.text.lstrip("\ufeff"))["results"][0]["result"]
             if res.get("error"):
                 raise RevenuePullError("QES error: " + json.dumps(res["error"])[:200])
-            return _decode(res.get("data") or {})
+            data = res.get("data") or {}
+            ds = ((data.get("dsr") or {}).get("DS") or [{}])[0]
+            rows = _decode(data)
+            # IC (IsComplete) false means more rows exist; RT is the cursor.
+            next_rt = ds.get("RT") if ds.get("IC") is False else None
+            if ds.get("IC") is False and not next_rt:
+                raise RevenuePullError(
+                    "QES truncated the result but returned no restart token; "
+                    "refusing to use a partial dataset."
+                )
+            return rows, next_rt
         except Exception as exc:  # noqa: BLE001 - retry with backoff
             last = exc
             time.sleep(1.5 * (attempt + 1))
     raise last  # type: ignore[misc]
+
+
+def _qes_post(session: requests.Session, query: dict, retries: int = 2) -> list[dict]:
+    """Run a query to completion, following restart tokens across pages.
+
+    Never returns a partial dataset: a truncated response either paginates or
+    raises, so callers can trust that what they get back is everything.
+    """
+    out: list[dict] = []
+    restart: Optional[list] = None
+    for _ in range(_MAX_PAGES):
+        rows, restart = _qes_post_page(session, query, restart=restart, retries=retries)
+        out.extend(rows)
+        if not restart:
+            return out
+    raise RevenuePullError(
+        f"QES pagination exceeded {_MAX_PAGES} pages ({len(out)} rows); aborting."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -303,51 +343,97 @@ def _current_fy() -> int:
 
 
 def default_fiscal_years() -> list[str]:
-    """Current fiscal year plus the prior one (Microsoft FY starts July)."""
+    """The fiscal years worth pulling: current plus the two prior.
+
+    Measured against the live model, this yields 25 months (two full fiscal years
+    plus the current partial one). Reaching further back returns nothing, so this
+    is the practical retention floor.
+    """
     fy = _current_fy()
-    return [f"FY{(fy - 1) % 100:02d}", f"FY{fy % 100:02d}"]
+    return [f"FY{(fy - n) % 100:02d}" for n in (2, 1, 0)]
+
+
+# Filter context the report applies. The parameter selections are what make the
+# `$ ACR` measure resolve at all, so they are not optional.
+#
+# Note there is deliberately no FYRel filter: it is a report-level convenience
+# that clamps results to FY-1..FY+1 and would cut our history from 25 months to 13.
+def _acr_from() -> list[dict]:
+    return [
+        {"Name": "d", "Entity": "DimDate", "Type": 0},
+        {"Name": "d1", "Entity": "DimCustomer", "Type": 0},
+        {"Name": "f", "Entity": "Fact ACR Subscription", "Type": 0},
+        {"Name": "m", "Entity": "Measures | ACR", "Type": 0},
+        {"Name": "p", "Entity": "Parameter | ACR Attributes", "Type": 0},
+        {"Name": "p1", "Entity": "Parameter | ACR Measures", "Type": 0},
+    ]
+
+
+def _acr_where(tpids: list[int], fiscal_years: list[str], attribute: str) -> list[dict]:
+    return [
+        _in("d", "FiscalYear", [f"'{fy}'" for fy in fiscal_years]),
+        _in("f", "AdjustmentFlag", ["'N/A'"]),
+        _in("p", "Parameter | ACR Attributes", [f"'{attribute}'"]),
+        _in("p1", "Parameter | ACR Measures Fields", ["'''Measures | ACR''[$ ACR]'"]),
+        _not_in("d1", "HQDS", ["'DS'"]),
+        _gt("d1", "TPID", "0L"),
+        _in("d1", "TPID", [f"{t}L" for t in tpids]),
+    ]
 
 
 def _acr_query(tpids: list[int], fiscal_years: list[str]) -> dict:
-    """Customer x bucket x fiscal-month ACR, scoped to the given TPIDs.
-
-    Mirrors the report's required filter context so the parameter-driven
-    ``$ ACR`` measure resolves.
-    """
+    """Customer x bucket x fiscal-month ACR, scoped to the given TPIDs."""
     return {
         "Version": 2,
-        "From": [
-            {"Name": "d", "Entity": "DimDate", "Type": 0},
-            {"Name": "d1", "Entity": "DimCustomer", "Type": 0},
-            {"Name": "f", "Entity": "Fact ACR Subscription", "Type": 0},
-            {"Name": "m", "Entity": "Measures | ACR", "Type": 0},
-            {"Name": "p", "Entity": "Parameter | ACR Attributes", "Type": 0},
-            {"Name": "p1", "Entity": "Parameter | ACR Measures", "Type": 0},
-        ],
+        "From": _acr_from(),
         "Select": [
             _col("d1", "TPID", "tpid"), _col("d1", "TPAccountName", "name"),
             _col("d", "FiscalMonth", "fm"), _col("f", "ServiceCompGrouping", "bucket"),
             _mea("m", "$ ACR", "acr"),
         ],
-        "Where": [
-            _in("d", "FiscalYear", [f"'{fy}'" for fy in fiscal_years]),
-            _in("f", "AdjustmentFlag", ["'N/A'"]),
-            _in("p", "Parameter | ACR Attributes", ["'ServiceCompGrouping'"]),
-            _in("p1", "Parameter | ACR Measures Fields", ["'''Measures | ACR''[$ ACR]'"]),
-            _not_in("d1", "HQDS", ["'DS'"]),
-            _in("d", "FYRel", ["'FY'", "'FY+1'", "'FY-1'"]),
-            _gt("d1", "TPID", "0L"),
-            _in("d1", "TPID", [f"{t}L" for t in tpids]),
+        "Where": _acr_where(tpids, fiscal_years, "ServiceCompGrouping"),
+    }
+
+
+def _product_query(tpids: list[int], fiscal_years: list[str]) -> dict:
+    """Customer x bucket x product x fiscal-month ACR (the ServiceLevel4 grain)."""
+    return {
+        "Version": 2,
+        "From": _acr_from(),
+        "Select": [
+            _col("d1", "TPID", "tpid"), _col("d1", "TPAccountName", "name"),
+            _col("d", "FiscalMonth", "fm"), _col("f", "ServiceCompGrouping", "bucket"),
+            _col("f", "ServiceLevel4", "product"), _mea("m", "$ ACR", "acr"),
         ],
+        "Where": _acr_where(tpids, fiscal_years, "ServiceLevel4"),
     }
 
 
 def pull_acr_for_customers(tpids: list[int], fiscal_years: Optional[list[str]] = None,
-                           chunk: int = 40, max_workers: int = 4) -> list[dict]:
+                           chunk: int = 40, max_workers: int = 4,
+                           progress=None) -> list[dict]:
     """Pull ACR (customer x bucket x fiscal-month) for the given customer TPIDs.
 
     Returns rows with keys: tpid, name, fm, bucket, acr.
     """
+    return _pull(_acr_query, tpids, fiscal_years, chunk, max_workers, progress)
+
+
+def pull_products_for_customers(tpids: list[int], fiscal_years: Optional[list[str]] = None,
+                                chunk: int = 25, max_workers: int = 4,
+                                progress=None) -> list[dict]:
+    """Pull ACR at product grain (customer x bucket x product x fiscal-month).
+
+    Chunks smaller than the bucket-grain pull because this grain is roughly
+    seven times denser and would otherwise page repeatedly against the 30k cap.
+
+    Returns rows with keys: tpid, name, fm, bucket, product, acr.
+    """
+    return _pull(_product_query, tpids, fiscal_years, chunk, max_workers, progress)
+
+
+def _pull(query_builder, tpids: list[int], fiscal_years: Optional[list[str]],
+          chunk: int, max_workers: int, progress=None) -> list[dict]:
     if not tpids:
         return []
     fys = fiscal_years or default_fiscal_years()
@@ -356,14 +442,23 @@ def pull_acr_for_customers(tpids: list[int], fiscal_years: Optional[list[str]] =
     _mint_mwc(session)  # mint once up front so chunks reuse it
 
     parts = [tpids[i:i + chunk] for i in range(0, len(tpids), chunk)]
+    if progress:
+        # The MWC handshake above is silent and slow; say the batches exist.
+        progress(0, len(parts), 0)
 
     def run(part: list[int]) -> list[dict]:
-        return _qes_post(session, _acr_query(part, fys))
+        return _qes_post(session, query_builder(part, fys))
 
     out: list[dict] = []
+    done = 0
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        for rows in ex.map(run, parts):
-            out.extend(rows)
+        # as_completed, not map: map yields in submission order, so a slow first
+        # batch hides every batch that finished behind it.
+        for future in as_completed([ex.submit(run, part) for part in parts]):
+            out.extend(future.result())
+            done += 1
+            if progress:
+                progress(done, len(parts), len(out))
     return out
 
 
@@ -385,62 +480,3 @@ def get_customer_tpids(limit: Optional[int] = None) -> list[tuple[int, str]]:
             if limit and len(seen) >= limit:
                 break
     return seen
-
-
-# ---------------------------------------------------------------------------
-# Audit summary for the beta test page
-# ---------------------------------------------------------------------------
-def build_audit(rows: list[dict], customers: list[tuple[int, str]]) -> dict:
-    """Summarize a pull: coverage stats + a per-customer breakdown to eyeball."""
-    names = {t: n for t, n in customers}
-    total = len(customers)
-
-    per: dict[int, dict] = {}
-    months: set[str] = set()
-    buckets: set[str] = set()
-    grand_total = 0.0
-    for r in rows:
-        try:
-            tpid = int(r.get("tpid"))
-        except (TypeError, ValueError):
-            continue
-        acr = float(r.get("acr") or 0.0)
-        bucket = (r.get("bucket") or "").strip()
-        fm = str(r.get("fm") or "").strip()
-        if fm:
-            months.add(fm)
-        if bucket:
-            buckets.add(bucket)
-        grand_total += acr
-        c = per.setdefault(tpid, {"tpid": tpid, "name": r.get("name") or names.get(tpid),
-                                  "total_acr": 0.0, "buckets": set(), "months": set()})
-        c["total_acr"] += acr
-        if bucket:
-            c["buckets"].add(bucket)
-        if fm:
-            c["months"].add(fm)
-
-    with_data = [c for c in per.values() if abs(c["total_acr"]) > 0.005]
-    with_data_ids = {c["tpid"] for c in with_data}
-    without = [{"tpid": t, "name": n} for t, n in customers if t not in with_data_ids]
-
-    per_customer = sorted(
-        ({"tpid": c["tpid"], "name": c["name"], "total_acr": round(c["total_acr"], 2),
-          "bucket_count": len(c["buckets"]), "month_count": len(c["months"])}
-         for c in with_data),
-        key=lambda x: x["total_acr"], reverse=True,
-    )
-
-    return {
-        "total_customers": total,
-        "customers_with_data": len(with_data),
-        "customers_without_data": total - len(with_data),
-        "coverage_pct": round(100 * len(with_data) / total, 1) if total else 0.0,
-        "total_acr": round(grand_total, 2),
-        "row_count": len(rows),
-        "distinct_months": sorted(months),
-        "distinct_buckets": sorted(buckets),
-        "per_customer": per_customer,
-        "without_data": without[:200],
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-    }

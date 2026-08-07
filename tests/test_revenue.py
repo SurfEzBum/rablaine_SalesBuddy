@@ -1,5 +1,5 @@
 """
-Tests for revenue import and analysis functionality.
+Tests for revenue queries and analysis functionality.
 """
 import pytest
 from datetime import date, datetime
@@ -9,39 +9,12 @@ from app.models import (
     db, RevenueImport, CustomerRevenueData, RevenueAnalysis, 
     RevenueConfig, Customer, User
 )
-from app.services.revenue_import import (
-    parse_currency, fiscal_month_to_date, date_to_fiscal_month,
-    import_revenue_csv, process_csv, RevenueImportError
-)
+from app.services.revenue_import import fiscal_month_to_date
 from app.services.revenue_analysis import (
     compute_signals, categorize_customer, determine_action,
     run_analysis_for_all, get_actionable_analyses, AnalysisConfig,
     _normalize_revenues
 )
-
-
-class TestParseCurrency:
-    """Test currency string parsing."""
-    
-    def test_parse_regular_currency(self):
-        assert parse_currency("$1,234.56") == 1234.56
-        assert parse_currency("$1234") == 1234.0
-        assert parse_currency("$0") == 0.0
-    
-    def test_parse_without_dollar_sign(self):
-        assert parse_currency("1234.56") == 1234.56
-        assert parse_currency("1,234") == 1234.0
-    
-    def test_parse_negative(self):
-        assert parse_currency("($1,234)") == -1234.0
-    
-    def test_parse_empty_or_none(self):
-        assert parse_currency(None) == 0.0
-        assert parse_currency("") == 0.0
-    
-    def test_parse_float_passthrough(self):
-        assert parse_currency(1234.56) == 1234.56
-        assert parse_currency(0) == 0.0
 
 
 class TestFiscalMonthConversion:
@@ -62,110 +35,6 @@ class TestFiscalMonthConversion:
         assert fiscal_month_to_date("invalid") is None
         assert fiscal_month_to_date("FY26-Xyz") is None
         assert fiscal_month_to_date("") is None
-    
-    def test_date_to_fiscal_month(self):
-        assert date_to_fiscal_month(date(2025, 7, 1)) == "FY26-Jul"
-        assert date_to_fiscal_month(date(2026, 1, 15)) == "FY26-Jan"
-        assert date_to_fiscal_month(date(2026, 6, 30)) == "FY26-Jun"
-
-
-class TestCSVImport:
-    """Test CSV import functionality."""
-    
-    def test_import_basic_csv(self, app, test_user):
-        """Test importing a basic revenue CSV."""
-        # New format: TPAccountName, ServiceCompGrouping, ServiceLevel4, months...
-        csv_content = b"""FiscalMonth,,,FY26-Jul,FY26-Aug,FY26-Sep,Total
-TPAccountName,ServiceCompGrouping,ServiceLevel4,$ ACR,$ ACR,$ ACR,$ ACR
-Test Customer,Core DBs,Total,"$10,000","$11,000","$12,000","$33,000"
-Test Customer,Core DBs,SQL Server,"$5,000","$5,500","$6,000","$16,500"
-Test Customer,Analytics,Total,"$5,000","$5,500","$6,000","$16,500"
-"""
-        
-        with app.app_context():
-            import_record = import_revenue_csv(
-                file_content=csv_content,
-                filename="test.csv"
-            )
-            
-            assert import_record.record_count == 3
-            # 2 bucket totals * 3 months = 6 bucket records + 1 product * 3 months = 3 product records
-            assert import_record.records_created == 9
-            assert import_record.records_updated == 0
-            
-            # Verify bucket data was stored
-            data = CustomerRevenueData.query.filter_by(customer_name="Test Customer").all()
-            assert len(data) == 6  # 2 buckets * 3 months
-            
-            # Verify product data was stored
-            from app.models import ProductRevenueData
-            product_data = ProductRevenueData.query.filter_by(customer_name="Test Customer").all()
-            assert len(product_data) == 3  # 1 product * 3 months
-    
-    def test_import_updates_existing(self, app, test_user):
-        """Test that re-importing updates existing records."""
-        csv_content = b"""FiscalMonth,,,FY26-Jul,Total
-TPAccountName,ServiceCompGrouping,ServiceLevel4,$ ACR,$ ACR
-Existing Customer,Core DBs,Total,"$10,000","$10,000"
-"""
-        
-        with app.app_context():
-            # First import
-            import_revenue_csv(csv_content, "test1.csv")
-            
-            # Second import with updated value
-            csv_content2 = b"""FiscalMonth,,,FY26-Jul,Total
-TPAccountName,ServiceCompGrouping,ServiceLevel4,$ ACR,$ ACR
-Existing Customer,Core DBs,Total,"$15,000","$15,000"
-"""
-            import_record = import_revenue_csv(csv_content2, "test2.csv")
-            
-            assert import_record.records_updated == 1
-            assert import_record.records_created == 0
-            
-            # Verify updated value
-            data = CustomerRevenueData.query.filter_by(
-                customer_name="Existing Customer",
-                bucket="Core DBs"
-            ).first()
-            assert data.revenue == 15000.0
-    
-    def test_import_invalid_format(self, app, test_user):
-        """Test that invalid CSV format raises error."""
-        csv_content = b"""This is not a valid MSXI CSV
-Some random content
-"""
-        
-        with app.app_context():
-            with pytest.raises(RevenueImportError):
-                import_revenue_csv(csv_content, "bad.csv")
-
-    def test_import_missing_required_columns(self, app, test_user):
-        """Test that CSV missing required columns raises helpful error."""
-        import pandas as pd
-        from io import StringIO
-
-        # CSV with wrong column names (e.g., user exported wrong table)
-        bad_csv = "Month,SomeOtherCol,Metric1,FY26-Jul\nAccount,Group,Detail,$100"
-        df = pd.read_csv(StringIO(bad_csv), header=None)
-        with pytest.raises(RevenueImportError, match="Missing required columns"):
-            process_csv(df)
-
-    def test_import_valid_columns_pass_validation(self, app, test_user):
-        """Test that CSV with correct columns passes validation."""
-        import pandas as pd
-        from io import StringIO
-
-        # Minimal valid CSV structure
-        valid_csv = (
-            "FiscalMonth,,,FY26-Jul\n"
-            "TPAccountName,ServiceCompGrouping,ServiceLevel4,$ ACR\n"
-            "Contoso,Core DBs,Total,$1000"
-        )
-        df = pd.read_csv(StringIO(valid_csv), header=None)
-        result_df, months, month_map = process_csv(df)
-        assert 'TPAccountName' in result_df.columns
-        assert len(months) == 1
 
 
 class TestSignalComputation:
@@ -575,26 +444,87 @@ class TestDatabaseAnalysis:
             assert stats['actionable'] == 0
     
     def test_run_analysis_with_data(self, app, test_user):
-        """Test analysis after importing data."""
-        # New format with ServiceLevel4 column
-        csv_content = b"""FiscalMonth,,,FY26-Jul,FY26-Aug,FY26-Sep,FY26-Oct,FY26-Nov,FY26-Dec,Total
-TPAccountName,ServiceCompGrouping,ServiceLevel4,$ ACR,$ ACR,$ ACR,$ ACR,$ ACR,$ ACR,$ ACR
-Healthy Customer,Core DBs,Total,"$10,000","$10,100","$10,050","$10,200","$10,150","$10,250","$60,750"
-At Risk Customer,Core DBs,Total,"$20,000","$18,000","$16,000","$14,000","$12,000","$10,000","$90,000"
-"""
-        
+        """Test analysis after revenue lands in the database."""
+        months = ["FY26-Jul", "FY26-Aug", "FY26-Sep", "FY26-Oct", "FY26-Nov", "FY26-Dec"]
+        series = {
+            "Healthy Customer": [10000, 10100, 10050, 10200, 10150, 10250],
+            "At Risk Customer": [20000, 18000, 16000, 14000, 12000, 10000],
+        }
+
         with app.app_context():
-            # Import data
-            import_revenue_csv(csv_content, "test.csv")
-            
-            # Run analysis
+            imp = RevenueImport(filename='sync', record_count=len(months) * len(series))
+            db.session.add(imp)
+            db.session.flush()
+            for name, revenues in series.items():
+                for fm, revenue in zip(months, revenues):
+                    db.session.add(CustomerRevenueData(
+                        customer_name=name,
+                        bucket="Core DBs",
+                        fiscal_month=fm,
+                        month_date=fiscal_month_to_date(fm),
+                        revenue=revenue,
+                        last_import_id=imp.id,
+                    ))
+            db.session.commit()
+
             stats = run_analysis_for_all()
-            
+
             assert stats['analyzed'] >= 1
-            
+
             # Check analyses were created
             analyses = RevenueAnalysis.query.all()
             assert len(analyses) >= 1
+
+
+class TestPartialMonthExclusion:
+    """Don't include the most recent month in the analysis.
+
+    MSXI keeps reporting into it, so its number is still climbing.
+    """
+
+    def _seed(self, months, revenues):
+        imp = RevenueImport(filename='sync', record_count=len(months))
+        db.session.add(imp)
+        db.session.flush()
+        for fm, revenue in zip(months, revenues):
+            db.session.add(CustomerRevenueData(
+                customer_name='Partial Month Co',
+                bucket='Core DBs',
+                fiscal_month=fm,
+                month_date=fiscal_month_to_date(fm),
+                revenue=revenue,
+                last_import_id=imp.id,
+            ))
+        db.session.commit()
+
+    def test_newest_month_is_excluded(self, app, test_user):
+        """Oct is mid-month and has only trickled in, so it must not be analyzed."""
+        with app.app_context():
+            self._seed(
+                ["FY26-Jul", "FY26-Aug", "FY26-Sep", "FY26-Oct"],
+                [50000, 51000, 52000, 4000],
+            )
+            run_analysis_for_all()
+
+            a = RevenueAnalysis.query.filter_by(customer_name='Partial Month Co').first()
+            assert a is not None
+            assert a.months_analyzed == 3
+            # Sep, not the partial Oct that would read as a collapse
+            assert a.latest_revenue == 52000
+
+    def test_month_becomes_analyzable_once_the_next_one_appears(self, app, test_user):
+        """Oct finished reporting and Nov started, so Oct is now fair game."""
+        with app.app_context():
+            self._seed(
+                ["FY26-Jul", "FY26-Aug", "FY26-Sep", "FY26-Oct", "FY26-Nov"],
+                [50000, 51000, 52000, 53000, 3000],
+            )
+            run_analysis_for_all()
+
+            a = RevenueAnalysis.query.filter_by(customer_name='Partial Month Co').first()
+            assert a is not None
+            assert a.months_analyzed == 4
+            assert a.latest_revenue == 53000
 
 
 class TestReviewAPI:
@@ -952,3 +882,21 @@ class TestCompensatedBucketsAPI:
                            data=json.dumps({'not': 'an array'}),
                            content_type='application/json')
         assert resp.status_code == 400
+
+    def test_saving_buckets_clears_the_taxonomy_notice(self, client, app):
+        """Picking buckets is what the notice asks for, so it shouldn't linger."""
+        import json
+        with app.app_context():
+            from app.models import UserPreference
+            pref = UserPreference.query.first()
+            pref.bucket_taxonomy_notice = json.dumps({'status': 'reset', 'removed': ['Core DBs']})
+            db.session.commit()
+
+        resp = client.post('/api/revenue/compensated-buckets',
+                           data=json.dumps(['Databases']),
+                           content_type='application/json')
+        assert resp.status_code == 200
+
+        with app.app_context():
+            from app.models import UserPreference
+            assert UserPreference.query.first().bucket_taxonomy_notice is None

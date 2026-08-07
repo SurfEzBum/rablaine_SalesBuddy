@@ -366,22 +366,6 @@ def index():
         ActionItem.due_date.isnot(None),
     ).count()
 
-    # Revenue import reminder: show after the 10th of each month
-    # (finalized revenue data typically available ~1 week into the new month)
-    show_revenue_reminder = False
-    if pref and pref.revenue_import_reminder:
-        from app.models import RevenueImport
-        last_import = RevenueImport.query.order_by(
-            RevenueImport.imported_at.desc()
-        ).first()
-        if last_import:
-            # User has imported before - remind if no import since the 10th
-            today = date.today()
-            if today.day >= 10:
-                reminder_date = datetime(today.year, today.month, 10, tzinfo=timezone.utc)
-                if last_import.imported_at.replace(tzinfo=timezone.utc) < reminder_date:
-                    show_revenue_reminder = True
-
     return render_template(
         'index.html',
         open_tasks=open_tasks,
@@ -395,7 +379,6 @@ def index():
         has_projects=project_count > 0,
         project_count=project_count,
         task_due_count=task_due_count,
-        show_revenue_reminder=show_revenue_reminder,
         pref=pref,
     )
 
@@ -1971,10 +1954,11 @@ def inject_preferences():
     guided_tour_completed = pref.guided_tour_completed if pref else False
     accounts_synced = SyncStatus.is_complete('accounts')
     has_milestones = Milestone.query.first() is not None
-    has_revenue = SyncStatus.is_complete('revenue_import')
+    from app.services.revenue_sync import has_revenue_data
+    has_revenue = has_revenue_data()
     accounts_sync_state = SyncStatus.get_status('accounts')['state']
     milestones_sync_state = SyncStatus.get_status('milestones')['state']
-    revenue_sync_state = SyncStatus.get_status('revenue_import')['state']
+    revenue_sync_state = SyncStatus.get_status('revenue_sync')['state']
     
     # Check for available updates (lightweight -- reads cached state, no git calls)
     update_available = False

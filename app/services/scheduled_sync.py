@@ -160,12 +160,63 @@ def _run_sync(app):
             # Run marketing insights sync after milestone sync completes
             _run_marketing_sync(app)
 
+            # Refresh revenue from MSXI. Chained here rather than given its own
+            # timer, but rate-limited to weekly - ACR only moves monthly and a
+            # full pull is far heavier than a milestone sync.
+            _run_revenue_sync()
+
             # Check if a U2C snapshot is due (5th of FQ start month)
             _check_u2c_snapshot()
     except Exception:
         logger.exception("Error during milestone sync")
     finally:
         _sync_lock.release()
+
+
+# Revenue is refreshed at most this often, regardless of how often the
+# milestone sync it rides along with runs.
+REVENUE_SYNC_INTERVAL_DAYS = 7
+
+
+def _revenue_sync_due() -> bool:
+    """True when revenue has never synced or the last success is a week old.
+
+    Keyed off SyncStatus rather than a fixed weekday so a machine that was off
+    on the chosen day still catches up on its next run.
+    """
+    from app.models import SyncStatus
+
+    status = SyncStatus.get_status('revenue_sync')
+    completed = status.get('completed_at')
+    if not completed:
+        return True
+    if completed.tzinfo is None:
+        completed = completed.replace(tzinfo=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - completed).total_seconds() / 86400
+    if age_days < REVENUE_SYNC_INTERVAL_DAYS:
+        logger.debug("Revenue sync last ran %.1f days ago, skipping", age_days)
+        return False
+    return True
+
+
+def _run_revenue_sync():
+    """Pull revenue from MSXI in the current thread (already in app context)."""
+    if not _revenue_sync_due():
+        return
+    try:
+        from app.services.revenue_sync import sync_revenue
+        logger.info("Starting revenue sync (weekly)")
+        result = sync_revenue()
+        if result.get('success'):
+            logger.info(
+                "Revenue sync complete: %d bucket rows, %d product rows, %d customers with data",
+                result.get('bucket_rows', 0), result.get('product_rows', 0),
+                result.get('customers_with_data', 0),
+            )
+        else:
+            logger.error("Revenue sync failed: %s", result.get('error', 'Unknown'))
+    except Exception:
+        logger.exception("Error during revenue sync")
 
 
 def _run_marketing_sync(app):

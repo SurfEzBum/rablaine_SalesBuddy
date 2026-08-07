@@ -15,6 +15,7 @@
  */
 var RevenueBucketFilter = (function() {
     var STORAGE_KEY = 'salesbuddy_revenue_bucket_filter';
+    var VERSION_KEY = 'salesbuddy_revenue_bucket_taxonomy_version';
     var allBuckets = [];
     var selectedBuckets = new Set();
     var onFilterChange = null;
@@ -25,14 +26,16 @@ var RevenueBucketFilter = (function() {
     function loadSelection() {
         try {
             var saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-            if (saved && Array.isArray(saved) && saved.length > 0) {
+            if (saved && Array.isArray(saved)) {
                 selectedBuckets = new Set(saved);
-                _usedFallback = false;
+                // An empty selection is valid: it means "no filter yet", so we
+                // still consult the DB in case another device picked buckets.
+                _usedFallback = saved.length === 0;
                 return;
             }
         } catch(e) {}
-        // Default: all buckets selected (may be overridden by DB fallback)
-        selectedBuckets = new Set(allBuckets);
+        // No selection at all - show everything until the user narrows it.
+        selectedBuckets = new Set();
         _usedFallback = true;
     }
 
@@ -52,6 +55,24 @@ var RevenueBucketFilter = (function() {
             .catch(function() {});
     }
 
+    // MSXI renames and retires buckets at the fiscal-year boundary. When that
+    // happens the server clears the stored selection and bumps a version; without
+    // this check a stale localStorage copy would silently win on the next load.
+    function invalidateStaleCache(done) {
+        fetch('/api/revenue/sync/status')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var serverVersion = String(d.bucket_taxonomy_version || 0);
+                var seen = localStorage.getItem(VERSION_KEY);
+                if (seen !== serverVersion) {
+                    localStorage.removeItem(STORAGE_KEY);
+                    localStorage.setItem(VERSION_KEY, serverVersion);
+                }
+            })
+            .catch(function() {})
+            .then(function() { if (done) done(); });
+    }
+
     function saveSelection() {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(selectedBuckets)));
     }
@@ -66,9 +87,11 @@ var RevenueBucketFilter = (function() {
     }
 
     function applyFilter() {
+        // No buckets picked means no filter, not "hide everything".
+        var noFilter = selectedBuckets.size === 0;
         var visibleCount = 0;
         document.querySelectorAll('[data-bucket]').forEach(function(el) {
-            var show = selectedBuckets.has(el.dataset.bucket);
+            var show = noFilter || selectedBuckets.has(el.dataset.bucket);
             el.style.display = show ? '' : 'none';
             if (show) visibleCount++;
         });
@@ -80,7 +103,7 @@ var RevenueBucketFilter = (function() {
         var countEl = document.getElementById('bucketFilterCount');
         if (countEl) {
             var total = allBuckets.length;
-            if (selectedBuckets.size < total) {
+            if (selectedBuckets.size > 0 && selectedBuckets.size < total) {
                 countEl.textContent = selectedBuckets.size + '/' + total;
                 countEl.classList.remove('d-none');
             } else {
@@ -90,7 +113,10 @@ var RevenueBucketFilter = (function() {
     }
 
     function buildContent() {
-        var allSelected = allBuckets.every(function(b) { return selectedBuckets.has(b); });
+        // every() is true for an empty list, which would render "Select all"
+        // ticked when nothing is selectable at all.
+        var allSelected = allBuckets.length > 0 &&
+            allBuckets.every(function(b) { return selectedBuckets.has(b); });
         var c = '<div class="bucket-filter-panel" style="min-width:220px;">';
         // Search box
         c += '<div class="px-2 pt-2 pb-1">';
@@ -163,7 +189,8 @@ var RevenueBucketFilter = (function() {
                 // Sync "Select all" checkbox
                 var allCb = popover.querySelector('#bucketSelectAll');
                 if (allCb) {
-                    allCb.checked = allBuckets.every(function(b) { return selectedBuckets.has(b); });
+                    allCb.checked = allBuckets.length > 0 &&
+                        allBuckets.every(function(b) { return selectedBuckets.has(b); });
                 }
             });
         });
@@ -211,15 +238,17 @@ var RevenueBucketFilter = (function() {
         init: function(opts) {
             opts = opts || {};
             onFilterChange = opts.onFilterChange || null;
-            discoverBuckets();
-            loadSelection();
-            // Remove buckets from selection that no longer exist in data
-            selectedBuckets.forEach(function(b) {
-                if (allBuckets.indexOf(b) === -1) selectedBuckets.delete(b);
+            invalidateStaleCache(function() {
+                discoverBuckets();
+                loadSelection();
+                // Remove buckets from selection that no longer exist in data
+                selectedBuckets.forEach(function(b) {
+                    if (allBuckets.indexOf(b) === -1) selectedBuckets.delete(b);
+                });
+                if (opts.containerId) renderFilterUI(opts.containerId);
+                applyFilter();
+                loadFallbackFromDB();
             });
-            if (opts.containerId) renderFilterUI(opts.containerId);
-            applyFilter();
-            loadFallbackFromDB();
         },
         toggle: function(bucket) {
             if (selectedBuckets.has(bucket)) {

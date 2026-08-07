@@ -8,6 +8,19 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/6/2026
+
+- 🎉 **Revenue can now sync straight from MSXI - no CSV export.** 🎉 Open Import Revenue Data and click "Sync revenue now" to pull your accounts' ACR using your `az login`, with live progress. It also refreshes on its own in the background: the automatic milestone sync runs Monday, Wednesday, and Friday, and revenue rides along with it at most once every 7 days.
+- The sync pulls 25 months of history (two full fiscal years plus the current one) and every bucket, rather than only the ones you picked in the export.
+- Revenue rows now link to your customer records by TPID instead of guessing from the account name, so revenue lands on the right customer far more reliably.
+- Sales Buddy now notices when MSXI renames or retires revenue buckets at the fiscal year boundary. If buckets you had selected disappear, it clears the selection, tells you which ones went away, and shows the new list to pick from. Review notes on surviving buckets are kept; the rest are saved to a JSON archive in your data folder before being removed.
+- The setup wizard is down to two steps. Sign-in now sits on the welcome screen, and a single "Start Import" button pulls your accounts, milestones, and revenue in turn, each with its own progress bar, result summary, and retry.
+- Removed the CSV revenue import. Everything now comes from the MSXI sync, so the upload form, the export instructions, and the hidden "Revenue Pull" beta page are gone. Revenue you imported previously is untouched.
+- Removed the monthly "last month's revenue is finalized, go import it" banner. Sales Buddy pulls that for you now, so there is nothing to go do.
+- Your import history is kept across syncs instead of being replaced each time, so you can still see every revenue import going back to your first one.
+- The bucket-change notice now clears itself once you pick your buckets, rather than waiting for you to find the X.
+- The revenue sync reports live progress as each batch of accounts comes back from MSXI, so the bar keeps moving through the long pulls instead of sitting still.
+
 ## 8/5/2026 - 5055be1
 
 - *Electron Shell Update* - Added Find in Page to the desktop app. Press Ctrl+F (or Edit > Find in Page) to search the current page, cycle matches with Enter and Shift+Enter, and close with Esc. Matches are highlighted with the current one in orange, and a counter shows your position.

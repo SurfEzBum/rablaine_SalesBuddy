@@ -257,12 +257,12 @@ const PageHelp = (function () {
 
     // ── Revenue ──
     { pattern: /^\/revenue\/import/, title: 'Revenue Import', content: `
-      <p>Import ACR (Azure Consumed Revenue) data from CSV exports.</p>
+      <p>Pull ACR (Azure Consumed Revenue) straight from MSXI using your Azure sign-in.</p>
       <h6>Tips</h6>
       <ul>
-        <li>Use the standard ACR export format from the revenue portal</li>
-        <li>Import is additive — existing data won't be overwritten</li>
-        <li>After import, revenue will appear on customer and seller pages</li>
+        <li>Requires the corporate VPN - no export or file needed</li>
+        <li>Each sync replaces the stored revenue with a fresh two-year pull</li>
+        <li>After syncing, revenue will appear on customer and seller pages</li>
       </ul>
     `},
     { pattern: /^\/revenue\/config/, title: 'Revenue Configuration', content: `

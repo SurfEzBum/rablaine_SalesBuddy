@@ -23,7 +23,7 @@ The MSI installer handles everything: prerequisites (Git, Python, Azure CLI, Nod
 
 - **Unified Customer View** - notes, engagements, milestones, opportunities, revenue, and partners on one page
 - **Call Notes** - rich text editor with topic/seller/customer tagging, templates, and meeting import
-- **Revenue Analyzer** - CSV import, trend charts, growth alerts, seller/customer/product drill-downs
+- **Revenue Analyzer** - automatic MSXI sync, trend charts, growth alerts, seller/customer/product drill-downs
 - **Milestone Tracker** - visual board with MSX sync, task management, and AI matching from call notes
 - **AI Assistant** - auto-suggest topics, match milestones, analyze calls, generate Connect summaries (Azure OpenAI)
 - **WorkIQ Integration** - import Teams meeting summaries directly into notes
@@ -73,7 +73,7 @@ A setup wizard walks you through:
 2. **Azure login** - authenticate for MSX integration
 3. **Import Accounts** - pull customer accounts from MSX
 4. **Import Milestones** - sync milestone data from MSX
-5. **Import Revenue** - upload an ACR CSV for the Revenue Analyzer
+5. **Import Revenue** - pull your ACR straight from MSXI for the Revenue Analyzer
 
 All steps are optional and can be re-run from the Admin Panel.
 

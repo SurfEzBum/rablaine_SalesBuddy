@@ -10,59 +10,41 @@
                     <li class="breadcrumb-item active">Import Revenue Data</li>
                 </ol>
             </nav>
-            <h1><i class="bi bi-upload"></i> Import Revenue Data</h1>
+            <h1><i class="bi bi-cloud-download"></i> Import Revenue Data</h1>
         </div>
     </div>
 
+    <div id="bucketNotice"></div>
+
     <div class="row">
         <div class="col-lg-6">
-            <!-- Import Form -->
+            <!-- Sync from MSXI -->
             <div class="card mb-4" id="revenueImportCard" style="position: relative;">
                 <div id="revImportBrainrotToggle" class="brainrot-card-toggle brainrot-pos-top-right d-none">
                     <input type="checkbox" id="revImportBrainrotCheck">
                     <label for="revImportBrainrotCheck" class="small">brainrot mode</label>
                 </div>
                 <div class="card-header">
-                    <h5 class="mb-0">Upload CSV</h5>
+                    <h5 class="mb-0"><i class="bi bi-cloud-download"></i> Sync from MSXI</h5>
                 </div>
                 <div class="card-body">
-                    <input type="file" id="file" accept=".csv" class="d-none">
-                    <button type="button" class="btn btn-primary" id="importBtn">
-                        <i class="bi bi-upload"></i> Import CSV
+                    <p class="text-muted small">
+                        Pulls revenue straight from MSXI using your <code>az login</code> - no export needed.
+                        Requires the corporate VPN.
+                    </p>
+                    <button type="button" class="btn btn-primary" id="syncBtn">
+                        <i class="bi bi-arrow-repeat"></i> Sync revenue now
                     </button>
-                    <p class="text-muted small mb-0 mt-1">Usually takes about 1 minute</p>
-                    
-                    <!-- Progress Section -->
-                    <div id="importProgress" class="mt-3 d-none">
-                        <div class="progress mb-2" style="height: 20px;">
-                            <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
-                        </div>
-                        <p id="progressText" class="text-muted mb-0"><i class="bi bi-hourglass-split"></i> Starting import...</p>
-                    </div>
-                    
-                    <!-- Results Section -->
-                    <div id="importResults" class="mt-3 d-none"></div>
-                </div>
-            </div>
+                    <p class="text-muted small mb-0 mt-1" id="syncLastRun"></p>
 
-            <!-- Instructions -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-info-circle"></i> How to Export from MSXi</h5>
-                </div>
-                <div class="card-body">
-                    <ol>
-                        <li>Go to <a href="https://msxi.microsoft.com/User/report/4ab7af21-7148-47de-9e65-0acfae0a3ff4?reportTab=f116f870cd6e113e0da6" target="_blank">Azure Service Level Subscription Details SL4 - WW</a>
-                            <br>Or go to <a href="https://aka.ms/msxi" target="_blank">https://aka.ms/msxi</a> and search for the report name</li>
-                        <li>(If bookmarked/customized) Click <strong>"My Report Bookmarks"</strong> in the top right corner and <strong>"Clear current view"</strong></li>
-                        <li>Scroll down to the <strong>"ACR Details by Quarter / Month"</strong> section</li>
-                        <li>Under Choose Fields (left), check <strong>"ServiceLevel2"</strong> and <strong>"ServiceLevel4"</strong>. Leave <strong>ServiceCompGrouping</strong> checked.</li>
-                        {% if user_role == 'se' %}<li>Expand <strong>Filters</strong> on the right and under <strong>ServiceCompGrouping</strong>, check the buckets on which you're compensated</li>{% endif %}
-                        <li>Right-click the <strong>"ACR Details by Quarter / Month"</strong> header text → <strong>Expand to next level</strong></li>
-                        <li>Repeat step {% if user_role == 'se' %}6{% else %}5{% endif %}</li>
-                        <li>Top right <strong>'...'</strong> → <strong>Export Data</strong> → <strong>Data with current layout</strong></li>
-                        <li>Open in Excel → <strong>Enable Editing</strong> → <strong>Save As</strong> → <strong>CSV (Comma delimited)</strong></li>
-                    </ol>
+                    <div id="syncProgress" class="mt-3 d-none">
+                        <div class="progress mb-2" style="height: 20px;">
+                            <div id="syncBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <p id="syncText" class="text-muted mb-0"><i class="bi bi-hourglass-split"></i> Starting...</p>
+                    </div>
+                    <div id="syncResults" class="mt-3 d-none"></div>
                 </div>
             </div>
 
@@ -79,8 +61,7 @@
                             <div>
                                 <small class="text-muted"><span class="local-datetime" data-utc="{{ imp.imported_at.isoformat() }}"></span></small><br>
                                 <small>{{ imp.filename }}</small>
-                            </div>
-                            <div class="text-end">
+                            </div>                            <div class="text-end">
                                 <span class="badge bg-secondary">{{ imp.record_count }} records</span><br>
                                 <small class="text-muted">{{ imp.records_created }} new / {{ imp.records_updated }} updated</small>
                             </div>
@@ -104,7 +85,7 @@
                     <h5 class="mb-0"><i class="bi bi-funnel"></i> Select Your Buckets</h5>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted small mb-3">Check the service comp groupings you're compensated on. This filters your revenue views across the app.</p>
+                    <p class="text-muted small mb-3">Check the service comp groupings you're compensated on to filter your revenue views across the app. Leave them all unchecked to see every bucket.</p>
                     <div id="bucketPickerList">
                         <div class="text-center text-muted py-3">
                             <div class="spinner-border spinner-border-sm"></div> Loading buckets...
@@ -137,159 +118,143 @@
 </div>
 
 <script>
-const importBtn = document.getElementById('importBtn');
-const fileInput = document.getElementById('file');
-const importProgress = document.getElementById('importProgress');
-const importResults = document.getElementById('importResults');
-const progressText = document.getElementById('progressText');
-const progressBar = document.getElementById('progressBar');
+// --- Sync from MSXI (SSE) + bucket taxonomy notice --------------------------
+(function () {
+    const syncBtn = document.getElementById('syncBtn');
+    const wrap = document.getElementById('syncProgress');
+    const bar = document.getElementById('syncBar');
+    const text = document.getElementById('syncText');
+    const results = document.getElementById('syncResults');
+    const noticeEl = document.getElementById('bucketNotice');
+    const lastRun = document.getElementById('syncLastRun');
 
-// Button opens file picker
-importBtn.addEventListener('click', function() {
-    fileInput.click();
-});
+    const esc = (s) => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const num = (n) => Number(n || 0).toLocaleString();
 
-// File selected → kick off import immediately
-fileInput.addEventListener('change', async function() {
-    if (!this.files[0]) return;
-    
-    const file = this.files[0];
-    
-    // Check for truncation warning in last line of CSV
-    try {
-        const text = await file.text();
-        const lastLine = text.trimEnd().split('\n').pop().trim();
-        if (lastLine.toLowerCase().includes('exported data exceeded') || lastLine.toLowerCase().includes('some data may have been omitted')) {
-            if (!confirm('Warning: This export appears to be incomplete. The last line says:\n\n"' + lastLine + '"\n\nYou may be missing data. Continue importing anyway?')) {
-                this.value = '';
-                return;
-            }
+    function renderNotice(notice) {
+        if (!notice || !noticeEl) return;
+        const reset = notice.status === 'reset';
+        const missing = notice.missing_selected || [];
+        let html = '<div class="alert ' + (reset ? 'alert-warning' : 'alert-info') +
+            ' alert-dismissible fade show" role="alert">';
+        html += '<h6 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> ' +
+            'MSXI changed its revenue buckets</h6>';
+        if (reset) {
+            html += '<p class="mb-2">These buckets you had selected no longer exist: <strong>' +
+                missing.map(esc).join(', ') + '</strong>. Your selection has been cleared - ' +
+                'please pick your buckets again below.</p>';
+        } else {
+            html += '<p class="mb-2">The bucket list changed this fiscal year. Your selections ' +
+                'still exist, but you may want to revisit them.</p>';
         }
-    } catch (e) { /* proceed if read fails */ }
-
-    // Disable button, show progress
-    importBtn.disabled = true;
-    importBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Importing...';
-    
-    function warnOnLeave(e) { e.preventDefault(); e.returnValue = ''; }
-    window.addEventListener('beforeunload', warnOnLeave);
-    
-    importProgress.classList.remove('d-none');
-    importResults.classList.add('d-none');
-
-    // Show brainrot toggle during import
-    const brToggle = document.getElementById('revImportBrainrotToggle');
-    if (brToggle) brToggle.classList.remove('d-none');
-    if (window.isBrainrotOn && window.isBrainrotOn() && window.showBrainrotPanel) {
-        window.showBrainrotPanel();
-    }
-    
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('run_analysis', 'on');
-    
-    try {
-        const response = await fetch('{{ url_for("revenue.revenue_import_stream") }}', {
-            method: 'POST',
-            body: formData
+        if ((notice.added || []).length) {
+            html += '<p class="mb-1 small"><strong>New:</strong> ' +
+                notice.added.map(esc).join(', ') + '</p>';
+        }
+        if ((notice.removed || []).length) {
+            html += '<p class="mb-0 small"><strong>Retired:</strong> ' +
+                notice.removed.map(esc).join(', ') + '</p>';
+        }
+        html += '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+        noticeEl.innerHTML = html;
+        noticeEl.querySelector('.btn-close').addEventListener('click', () => {
+            fetch('{{ url_for("revenue.revenue_dismiss_bucket_notice") }}', { method: 'DELETE' });
         });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error: ${response.status}`);
-        }
-        
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let finalResult = null;
-        
-        let streamError = null;
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop();
-            
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    try {
-                        const data = JSON.parse(line.slice(6));
-                        
-                        if (data.error) {
-                            streamError = data.error;
-                            break;
+    }
+
+    // Show any notice left behind by a scheduled (headless) sync.
+    fetch('{{ url_for("revenue.revenue_sync_status") }}')
+        .then(r => r.json())
+        .then(d => {
+            renderNotice(d.bucket_notice);
+            const st = d.status || {};
+            if (st.completed_at) {
+                // Flask serialises datetimes as RFC-822 ("Wed, 06 Aug 2026 17:49:53 GMT").
+                const when = new Date(st.completed_at);
+                if (!isNaN(when)) {
+                    lastRun.textContent = 'Last synced ' + when.toLocaleString();
+                }
+            }
+        })
+        .catch(() => {});
+
+    syncBtn.addEventListener('click', async function () {
+        syncBtn.disabled = true;
+        results.classList.add('d-none');
+        results.innerHTML = '';
+        wrap.classList.remove('d-none');
+        bar.style.width = '0%';
+        text.innerHTML = '<i class="bi bi-hourglass-split"></i> Starting...';
+
+        try {
+            const resp = await fetch('{{ url_for("revenue.revenue_sync") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+                body: JSON.stringify({})
+            });
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let event = null;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) { event = line.slice(7).trim(); continue; }
+                    if (!line.startsWith('data: ')) continue;
+                    let d;
+                    try { d = JSON.parse(line.slice(6)); } catch (e) { continue; }
+
+                    if (event === 'error' || d.error) {
+                        wrap.classList.add('d-none');
+                        results.classList.remove('d-none');
+                        results.innerHTML = '<div class="alert alert-danger mb-0">' +
+                            '<strong>Sync failed.</strong><pre class="mb-0 mt-2" ' +
+                            'style="white-space:pre-wrap;">' + esc(d.error) + '</pre></div>';
+                    } else if (event === 'complete') {
+                        bar.style.width = '100%';
+                        wrap.classList.add('d-none');
+                        results.classList.remove('d-none');
+                        let h = '<div class="alert alert-success mb-0">' +
+                            '<h6 class="alert-heading"><i class="bi bi-check-circle"></i> Revenue synced</h6>' +
+                            '<ul class="mb-0 small">' +
+                            '<li>' + num(d.bucket_rows) + ' bucket rows, ' + num(d.product_rows) +
+                            ' product rows across ' + d.months + ' months</li>' +
+                            '<li>' + d.customers_with_data + ' of ' + d.customers +
+                            ' accounts returned revenue</li>' +
+                            '<li>' + d.linked_pct + '% of rows linked to a customer record</li>';
+                        if (d.review_kept || d.review_retired) {
+                            h += '<li>' + d.review_kept + ' review note(s) kept, ' +
+                                 d.review_retired + ' retired with their buckets</li>';
                         }
-                        
-                        if (data.message) {
-                            progressText.innerHTML = `<i class="bi bi-hourglass-split"></i> ${data.message}`;
-                        }
-                        
-                        if (data.progress !== undefined) {
-                            progressBar.style.width = data.progress + '%';
-                        }
-                        
-                        if (data.result) {
-                            finalResult = data.result;
-                        }
-                    } catch (parseError) {
-                        if (parseError.message !== 'Unexpected end of JSON input') {
-                            console.error('Parse error:', parseError);
-                        }
+                        h += '<li>Completed in ' + d.duration_s + 's</li></ul></div>';
+                        results.innerHTML = h;
+                        renderNotice(d.taxonomy);
+                        if (window.showBucketPicker) window.showBucketPicker();
+                    } else {
+                        if (typeof d.progress === 'number') bar.style.width = d.progress + '%';
+                        if (d.message) text.innerHTML = '<i class="bi bi-hourglass-split"></i> ' + esc(d.message);
                     }
                 }
             }
-            if (streamError) break;
+        } catch (err) {
+            wrap.classList.add('d-none');
+            results.classList.remove('d-none');
+            results.innerHTML = '<div class="alert alert-danger mb-0">Request failed: ' +
+                esc(err) + '</div>';
+        } finally {
+            syncBtn.disabled = false;
         }
-        
-        if (streamError) {
-            throw new Error(streamError);
-        }
-        
-        importProgress.classList.add('d-none');
-        importResults.classList.remove('d-none');
-        
-        if (finalResult) {
-            importResults.innerHTML = `
-                <div class="alert alert-success">
-                    <h6 class="mb-2"><i class="bi bi-check-circle"></i> Import Successful!</h6>
-                    <ul class="mb-2">
-                        <li>Records created: ${finalResult.records_created}</li>
-                        <li>Records updated: ${finalResult.records_updated}</li>
-                        <li>New months added: ${finalResult.new_months || 0}</li>
-                        ${finalResult.duration ? '<li><i class="bi bi-clock"></i> Completed in ' + finalResult.duration + 's</li>' : ''}
-                    </ul>
-                    <a href="{{ url_for('main.index') }}" class="btn btn-primary btn-sm">
-                        <i class="bi bi-arrow-right"></i> Go Home
-                    </a>
-                </div>
-            `;
-            // Show bucket picker after successful import
-            if (typeof showBucketPicker === 'function') showBucketPicker();
-        } else {
-            throw new Error('Import completed but no results received');
-        }
-    } catch (error) {
-        importProgress.classList.add('d-none');
-        importResults.classList.remove('d-none');
-        importResults.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="bi bi-x-circle"></i> <strong>Error:</strong> ${error.message}
-            </div>
-        `;
-    } finally {
-        window.removeEventListener('beforeunload', warnOnLeave);
-        importBtn.disabled = false;
-        importBtn.innerHTML = '<i class="bi bi-upload"></i> Import CSV';
-        fileInput.value = '';
-        // Hide brainrot toggle and panel when import finishes
-        const brToggleEnd = document.getElementById('revImportBrainrotToggle');
-        if (brToggleEnd) brToggleEnd.classList.add('d-none');
-        if (window.hideBrainrotPanel) window.hideBrainrotPanel();
-    }
-});
+    });
+})();
+</script>
 
+<script>
 // Wire up brainrot checkbox
 (function() {
     const cb = document.getElementById('revImportBrainrotCheck');
@@ -317,13 +282,13 @@ fileInput.addEventListener('change', async function() {
                     listEl.textContent = 'No buckets found. Import revenue data first.';
                     return;
                 }
-                // Load saved selection
+                // Load saved selection. Nothing checked is the default: the user
+                // ticks the buckets they're paid on, and an empty selection shows all.
                 var selected = new Set();
                 try {
                     var saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
                     if (saved && Array.isArray(saved)) selected = new Set(saved);
                 } catch(e) {}
-                if (selected.size === 0) selected = new Set(buckets);
 
                 listEl.innerHTML = '';
 
@@ -353,7 +318,9 @@ fileInput.addEventListener('change', async function() {
                 var selAllCb = document.createElement('input');
                 selAllCb.type = 'checkbox';
                 selAllCb.className = 'form-check-input mt-0';
-                selAllCb.checked = buckets.every(function(b) { return selected.has(b); });
+                // every() is true for an empty list, which would tick "Select all"
+                // with nothing to select.
+                selAllCb.checked = buckets.length > 0 && buckets.every(function(b) { return selected.has(b); });
                 var selAllText = document.createElement('span');
                 selAllText.className = 'small fw-semibold';
                 selAllText.textContent = 'Select all';

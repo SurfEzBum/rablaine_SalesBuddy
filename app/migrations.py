@@ -257,10 +257,6 @@ def run_migrations(db):
     _add_column_if_not_exists(db, inspector, 'user_preferences',
                               'compensated_buckets', "TEXT")
 
-    # Migration: Add revenue_import_reminder to user_preferences
-    _add_column_if_not_exists(db, inspector, 'user_preferences',
-                              'revenue_import_reminder', "BOOLEAN DEFAULT 1 NOT NULL")
-
     # Migration: Add milestone sync scheduler fields to user_preferences
     _add_column_if_not_exists(db, inspector, 'user_preferences',
                               'milestone_auto_sync', "BOOLEAN DEFAULT 1 NOT NULL")
@@ -335,6 +331,12 @@ def run_migrations(db):
     # Migration: Add start_minimized to user_preferences (desktop shell tray boot)
     _add_column_if_not_exists(db, inspector, 'user_preferences',
                               'start_minimized', "BOOLEAN NOT NULL DEFAULT 0")
+
+    # Migration: Add revenue bucket taxonomy tracking to user_preferences
+    _add_column_if_not_exists(db, inspector, 'user_preferences',
+                              'bucket_taxonomy_version', "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_not_exists(db, inspector, 'user_preferences',
+                              'bucket_taxonomy_notice', "TEXT")
 
     # =========================================================================
     # End migrations

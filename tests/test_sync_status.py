@@ -315,8 +315,8 @@ class TestSyncWarningBanners:
         """Revenue dashboard should NOT show warnings when syncs completed."""
         with app.app_context():
             from app.models import SyncStatus
-            SyncStatus.mark_started('revenue_import')
-            SyncStatus.mark_completed('revenue_import', success=True)
+            SyncStatus.mark_started('revenue_sync')
+            SyncStatus.mark_completed('revenue_sync', success=True)
             SyncStatus.mark_started('revenue_analysis')
             SyncStatus.mark_completed('revenue_analysis', success=True)
         response = client.get('/reports/revenue')
@@ -327,10 +327,10 @@ class TestSyncWarningBanners:
         assert 'Last revenue analysis failed' not in html
 
     def test_revenue_dashboard_warning_when_import_incomplete(self, client, app):
-        """Revenue dashboard should show a warning when import was incomplete."""
+        """Revenue dashboard should show a warning when the sync was incomplete."""
         with app.app_context():
             from app.models import SyncStatus
-            SyncStatus.mark_started('revenue_import')
+            SyncStatus.mark_started('revenue_sync')
         response = client.get('/reports/revenue')
         html = response.data.decode('utf-8')
         assert "Last revenue import didn" in html
@@ -356,10 +356,10 @@ class TestSyncWarningBanners:
                "milestonesSyncState = 'incomplete'" in html
 
     def test_wizard_shows_revenue_incomplete_warning(self, client, app):
-        """Onboarding wizard should reference incomplete state for revenue import."""
+        """Onboarding wizard should reference incomplete state for the revenue sync."""
         with app.app_context():
             from app.models import SyncStatus
-            SyncStatus.mark_started('revenue_import')
+            SyncStatus.mark_started('revenue_sync')
         response = client.get('/')
         html = response.data.decode('utf-8')
         assert "revenueSyncState = &#39;incomplete&#39;" in html or \

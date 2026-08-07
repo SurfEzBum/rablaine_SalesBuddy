@@ -3,11 +3,9 @@ Revenue routes for Sales Buddy.
 Handles revenue data import, analysis, and attention dashboard.
 """
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, g, Response, stream_with_context
-from werkzeug.utils import secure_filename
 import csv
 import json
 import time
-import tempfile
 from io import StringIO
 
 from app.models import (
@@ -15,13 +13,11 @@ from app.models import (
     RevenueConfig, RevenueReviewNote, Customer, Seller, SyncStatus
 )
 from app.services.revenue_import import (
-    import_revenue_csv, get_import_history, get_months_in_database,
+    get_import_history, get_months_in_database,
     get_customer_revenue_history, get_product_revenue_history,
     get_products_for_bucket, get_all_products, get_customers_using_product,
     get_seller_products, get_seller_customers_using_product,
     consolidate_products_list, consolidate_product_name,
-    import_revenue_csv_streaming,
-    RevenueImportError
 )
 from app.services.revenue_analysis import (
     run_analysis_for_all, run_analysis_streaming, get_actionable_analyses,
@@ -52,6 +48,11 @@ def _redirect_new_synapse_users_short():
 @revenue_bp.route('/revenue/reports')
 def _redirect_reports_list():
     return redirect(url_for('revenue.reports_list'), code=301)
+
+
+@revenue_bp.route('/import/revenue')
+def _redirect_revenue_import():
+    return redirect(url_for('revenue.revenue_import'), code=301)
 
 
 @revenue_bp.route('/reports/revenue')
@@ -99,7 +100,7 @@ def revenue_dashboard():
     months_data = get_months_in_database()
     
     # Get sync status for warning banners
-    import_status = SyncStatus.get_status('revenue_import')
+    import_status = SyncStatus.get_status('revenue_sync')
     analysis_status = SyncStatus.get_status('revenue_analysis')
     
     return render_template(
@@ -115,19 +116,12 @@ def revenue_dashboard():
     )
 
 
-@revenue_bp.route('/revenue/import', methods=['GET', 'POST'])
-@revenue_bp.route('/import/revenue', methods=['GET', 'POST'])
+@revenue_bp.route('/revenue/import', methods=['GET'])
 def revenue_import():
-    """Import revenue CSV data (form display only, POST redirects to streaming)."""
-    if request.method == 'POST':
-        # Redirect to dashboard - actual import handled by streaming endpoint
-        flash('Please use the import form', 'info')
-        return redirect(request.url)
-    
-    # GET - show import form
+    """Revenue page: sync from MSXI, review history, and pick compensated buckets."""
     import_history = get_import_history(limit=10)
     months_data = get_months_in_database()
-    
+
     return render_template(
         'revenue_import.html',
         import_history=import_history,
@@ -135,131 +129,81 @@ def revenue_import():
     )
 
 
-@revenue_bp.route('/revenue/pull-test', methods=['GET'])
-def revenue_pull_test():
-    """Hidden beta page for the programmatic (headless) MSXI revenue pull.
+@revenue_bp.route('/api/revenue/sync', methods=['POST'])
+def revenue_sync():
+    """Sync revenue straight from MSXI.
 
-    Not linked in the nav - navigate to it directly. Lets a tester validate that
-    the headless pull returns ACR for their accounts before it feeds the import.
+    Streams SSE progress when the caller asks for it, otherwise starts the sync
+    in a background thread and returns 202 so the scheduler never times out.
     """
-    from app.services.revenue_pull import get_customer_tpids, default_fiscal_years
+    from app.services.revenue_sync import sync_revenue, sync_revenue_stream
 
-    customer_count = len(get_customer_tpids())
-    return render_template(
-        'revenue_pull_test.html',
-        customer_count=customer_count,
-        fiscal_years=default_fiscal_years(),
-    )
-
-
-@revenue_bp.route('/api/revenue/pull-test', methods=['POST'])
-def revenue_pull_test_run():
-    """Run the headless pull for the whole account book and return audit stats."""
-    from app.services import revenue_pull
+    if Customer.query.first() is None:
+        return jsonify({'success': False, 'error': 'Import accounts first'}), 400
 
     payload = request.get_json(silent=True) or {}
     fiscal_years = payload.get('fiscal_years') or None
     if fiscal_years and not isinstance(fiscal_years, list):
         fiscal_years = None
+    run_analysis = payload.get('run_analysis', True)
 
-    customers = revenue_pull.get_customer_tpids()
-    if not customers:
-        return jsonify({'error': 'No customers with a TPID found in this database.'}), 400
+    if 'text/event-stream' in request.headers.get('Accept', ''):
+        def generate():
+            yield from sync_revenue_stream(fiscal_years, run_analysis)
 
-    tpids = [t for t, _ in customers]
-    t0 = time.time()
-    try:
-        rows = revenue_pull.pull_acr_for_customers(tpids, fiscal_years=fiscal_years)
-    except Exception as exc:  # noqa: BLE001 - surface the raw error to the page
-        return jsonify({'error': str(exc), 'elapsed_s': round(time.time() - t0, 1)}), 200
+        return Response(
+            stream_with_context(generate()),
+            mimetype='text/event-stream',
+            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+        )
 
-    audit = revenue_pull.build_audit(rows, customers)
-    audit['elapsed_s'] = round(time.time() - t0, 1)
-    audit['fiscal_years'] = fiscal_years or revenue_pull.default_fiscal_years()
-    return jsonify(audit)
+    import threading
+    from flask import current_app
+
+    def _run(app):
+        with app.app_context():
+            try:
+                sync_revenue(fiscal_years, run_analysis)
+            except Exception:
+                app.logger.exception("Background revenue sync failed")
+
+    threading.Thread(target=_run, args=(current_app._get_current_object(),),
+                     daemon=True).start()
+    return jsonify({'success': True, 'message': 'Revenue sync started in background.',
+                    'async': True}), 202
 
 
-@revenue_bp.route('/api/revenue/import', methods=['POST'])
-def revenue_import_stream():
-    """Import revenue CSV with streaming progress updates."""
-    from app.models import Customer
-    if Customer.query.first() is None:
-        return jsonify({'error': 'Import accounts first'}), 400
+@revenue_bp.route('/api/revenue/sync/status', methods=['GET'])
+def revenue_sync_status():
+    """Current state of the revenue sync plus any pending bucket-change notice."""
+    from app.services.revenue_sync import SYNC_TYPE
+    from app.models import UserPreference
 
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file selected'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
-    
-    if not file.filename.endswith('.csv'):
-        return jsonify({'error': 'Only CSV files are supported'}), 400
-    
-    filename = secure_filename(file.filename)
-    content = file.read()
-    run_analysis = request.form.get('run_analysis', 'on') not in ('off', 'no', '0', '')
-    
-    def generate():
-        """Generator for streaming progress updates."""
+    status = SyncStatus.get_status(SYNC_TYPE)
+    pref = UserPreference.query.first()
+    notice = None
+    if pref and pref.bucket_taxonomy_notice:
         try:
-            import_start_time = time.time()
-            # Stream import progress
-            import_result = None
-            for progress in import_revenue_csv_streaming(content, filename):
-                if progress.get('complete'):
-                    import_result = progress.get('result')
-                else:
-                    yield "data: " + json.dumps(progress) + "\n\n"
-            
-            if not import_result:
-                yield "data: " + json.dumps({"error": "Import failed - no result"}) + "\n\n"
-                return
-            
-            # Run analysis if requested
-            if run_analysis:
-                yield "data: " + json.dumps({"message": "Analyzing revenue trends...", "analysis_started": True}) + "\n\n"
-                
-                analysis_stats = None
-                for update in run_analysis_streaming():
-                    if update.get('complete'):
-                        analysis_stats = update['stats']
-                    else:
-                        yield "data: " + json.dumps({
-                            "message": f"Analyzing customer {update['current']} of {update['total']}...",
-                            "progress": update['progress']
-                        }) + "\n\n"
-                
-                if analysis_stats:
-                    yield "data: " + json.dumps({
-                        "message": f"Analysis complete: {analysis_stats['analyzed']} customers, {analysis_stats['actionable']} need attention"
-                    }) + "\n\n"
-            
-            # Send final result
-            yield "data: " + json.dumps({
-                "result": {
-                    "records_created": import_result.records_created,
-                    "records_updated": import_result.records_updated,
-                    "new_months": import_result.new_months_added,
-                    "duration": round(time.time() - import_start_time, 1),
-                }
-            }) + "\n\n"
-            
-        except RevenueImportError as e:
-            SyncStatus.mark_completed('revenue_import', success=False, details=str(e))
-            yield "data: " + json.dumps({"error": str(e)}) + "\n\n"
-        except Exception as e:
-            SyncStatus.mark_completed('revenue_import', success=False, details=str(e))
-            yield "data: " + json.dumps({"error": f"Unexpected error: {str(e)}"}) + "\n\n"
-    
-    return Response(
-        stream_with_context(generate()),
-        mimetype='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no'
-        }
-    )
+            notice = json.loads(pref.bucket_taxonomy_notice)
+        except (ValueError, TypeError):
+            notice = None
+    return jsonify({
+        'status': status,
+        'bucket_notice': notice,
+        'bucket_taxonomy_version': (pref.bucket_taxonomy_version if pref else 0),
+    })
+
+
+@revenue_bp.route('/api/revenue/bucket-notice', methods=['DELETE'])
+def revenue_dismiss_bucket_notice():
+    """Clear the bucket-change banner once the user has acknowledged it."""
+    from app.models import UserPreference
+
+    pref = UserPreference.query.first()
+    if pref:
+        pref.bucket_taxonomy_notice = None
+        db.session.commit()
+    return jsonify({'success': True})
 
 
 @revenue_bp.route('/revenue/analyze', methods=['POST'])
@@ -815,6 +759,9 @@ def save_compensated_buckets():
         return jsonify(success=False, error='No preferences found'), 400
 
     pref.compensated_buckets = _json.dumps(data)
+    # Picking buckets is the action the taxonomy notice asks for, so retire it
+    # here rather than making the user find the X.
+    pref.bucket_taxonomy_notice = None
     db.session.commit()
     return jsonify(success=True)
 
@@ -1064,7 +1011,8 @@ def report_synapse_customers():
         mode = 'new'
 
     product_name = 'Azure Synapse Analytics'
-    has_revenue_data = SyncStatus.is_complete('revenue_import')
+    from app.services.revenue_sync import has_revenue_data as _has_revenue
+    has_revenue_data = _has_revenue()
 
     if not has_revenue_data:
         return render_template(

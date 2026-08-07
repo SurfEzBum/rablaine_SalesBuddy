@@ -828,8 +828,9 @@ def report_whats_new():
 @bp.route('/reports/whitespace')
 def report_whitespace():
     """Whitespace report: find gaps in customer technology adoption."""
-    has_revenue_data = SyncStatus.is_complete('revenue_import')
-    return render_template('report_whitespace.html', has_revenue_data=has_revenue_data)
+    from app.services.revenue_sync import has_revenue_data
+    has_revenue_data_flag = has_revenue_data()
+    return render_template('report_whitespace.html', has_revenue_data=has_revenue_data_flag)
 
 
 @bp.route('/api/reports/whitespace')

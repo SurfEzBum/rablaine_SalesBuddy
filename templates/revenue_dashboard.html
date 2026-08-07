@@ -8,7 +8,7 @@
         <i class="bi bi-exclamation-triangle-fill me-2"></i>
         <div>
             <strong>Last revenue import didn't finish.</strong>
-            Your revenue data may be incomplete. <a href="{{ url_for('revenue.revenue_import') }}" class="alert-link">Re-import your data</a> to get a full sync.
+            Your revenue data may be incomplete. <a href="{{ url_for('revenue.revenue_import') }}" class="alert-link">Re-sync your data</a> to get a full sync.
             {% if import_status.started_at %}
                 <span class="text-muted small">(Started <span class="local-datetime" data-utc="{{ import_status.started_at.isoformat() }}" data-fmt="short"></span>)</span>
             {% endif %}
@@ -19,7 +19,7 @@
         <i class="bi bi-x-circle-fill me-2"></i>
         <div>
             <strong>Last revenue import failed.</strong>
-            <a href="{{ url_for('revenue.revenue_import') }}" class="alert-link">Re-import your data</a> to get accurate results.
+            <a href="{{ url_for('revenue.revenue_import') }}" class="alert-link">Re-sync your data</a> to get accurate results.
             {% if import_status.details %}
                 <span class="text-muted small">({{ import_status.details }})</span>
             {% endif %}
