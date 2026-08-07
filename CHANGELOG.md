@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 8/6/2026
+## 8/6/2026 - d5452a6
 
 - 🎉 **Revenue can now sync straight from MSXI - no CSV export.** 🎉 Open Import Revenue Data and click "Sync revenue now" to pull your accounts' ACR using your `az login`, with live progress. It also refreshes on its own in the background: the automatic milestone sync runs Monday, Wednesday, and Friday, and revenue rides along with it at most once every 7 days.
 - The sync pulls 25 months of history (two full fiscal years plus the current one) and every bucket, rather than only the ones you picked in the export.
