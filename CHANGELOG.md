@@ -17,6 +17,9 @@ Format: `## M/D/YYYY - <merge-short-sha>`. See
 - The setup wizard is down to two steps. Sign-in now sits on the welcome screen, and a single "Start Import" button pulls your accounts, milestones, and revenue in turn, each with its own progress bar, result summary, and retry.
 - Removed the CSV revenue import. Everything now comes from the MSXI sync, so the upload form, the export instructions, and the hidden "Revenue Pull" beta page are gone. Revenue you imported previously is untouched.
 - Removed the monthly "last month's revenue is finalized, go import it" banner. Sales Buddy pulls that for you now, so there is nothing to go do.
+- Your import history is kept across syncs instead of being replaced each time, so you can still see every revenue import going back to your first one.
+- The bucket-change notice now clears itself once you pick your buckets, rather than waiting for you to find the X.
+- The revenue sync reports live progress as each batch of accounts comes back from MSXI, so the bar keeps moving through the long pulls instead of sitting still.
 
 ## 8/5/2026 - 5055be1
 
