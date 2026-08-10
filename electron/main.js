@@ -389,7 +389,14 @@ async function runUpdate(trigger, rebuildAfter = false) {
   try { stopStack(); }
   catch (e) { log(`stopStack error during update (continuing): ${(e && e.message) || e}`); }
   try {
-    await runStep('git', ['pull', '--ff-only'], REPO_ROOT);
+    // Discard any local changes to tracked files before pulling. Users have
+    // no reason to have edited the install-dir source, but half-finished prior
+    // updates, CRLF churn, or WorkIQ/build artifacts can leave the tree dirty
+    // and break `git pull --ff-only` with "local changes would be overwritten".
+    // fetch + reset --hard is equivalent to a fast-forward pull for a clean
+    // tree, and drops the local churn for a dirty one.
+    await runStep('git', ['fetch', 'origin', 'main'], REPO_ROOT);
+    await runStep('git', ['reset', '--hard', 'origin/main'], REPO_ROOT);
     await runStep(
       PYTHON, ['-m', 'pip', 'install', '-q', '-r', 'requirements.txt'], REPO_ROOT
     );

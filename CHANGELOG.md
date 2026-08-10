@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/10/2026
+
+- *Electron Shell Update* - Fixed the in-app Update button failing with "Your local changes to the following files would be overwritten by merge" when the install directory had drifted (leftover edits from a half-finished prior update, CRLF churn, or stray build artifacts). Updates now reset the tree to the latest `origin/main` instead of refusing to pull, so the app updates cleanly every time.
+
 ## 8/6/2026 - d5452a6
 
 - 🎉 **Revenue can now sync straight from MSXI - no CSV export.** 🎉 Open Import Revenue Data and click "Sync revenue now" to pull your accounts' ACR using your `az login`, with live progress. It also refreshes on its own in the background: the automatic milestone sync runs Monday, Wednesday, and Friday, and revenue rides along with it at most once every 7 days.
