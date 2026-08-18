@@ -8,6 +8,10 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/18/2026
+
+- Fixed "Sync Accounts" failing with "No accounts found for this user." MSX stopped populating the account-team source we relied on, so account discovery now reads your account team memberships the same way MSX's own account team view does. Sync Now pulls your current accounts again.
+
 ## 8/10/2026 - fdb50fc
 
 - *Electron Shell Update* - Fixed the in-app Update button failing with "Your local changes to the following files would be overwritten by merge" when the install directory had drifted (leftover edits from a half-finished prior update, CRLF churn, or stray build artifacts). Updates now reset the tree to the latest `origin/main` instead of refusing to pull, so the app updates cleanly every time.

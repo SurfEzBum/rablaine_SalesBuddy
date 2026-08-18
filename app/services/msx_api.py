@@ -2323,6 +2323,12 @@ MILESTONE_TEAM_TEMPLATE_ID = "316e4735-9e83-eb11-a812-0022481e1be0"
 # Opportunity (Deal) Team template ID (from MSX EntityDefinitions)
 OPPORTUNITY_TEAM_TEMPLATE_ID = "cc923a9d-7651-e311-9405-00155db3ba1e"
 
+# Account Access Team template ID (from MSX EntityDefinitions). This is the
+# source the MSX UI uses for "account team" membership. We discover a user's
+# accounts through this rather than the msp_accountteams custom entity, which
+# MSX stopped populating with current alignments.
+ACCOUNT_ACCESS_TEAM_TEMPLATE_ID = "3fcc1cfc-3e43-e311-9405-00155db3ba1e"
+
 
 def get_my_milestone_team_ids() -> Dict[str, Any]:
     """
@@ -4531,6 +4537,101 @@ def find_my_territories(atu_filter: Optional[str] = None) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def get_my_account_team_ids() -> Dict[str, Any]:
+    """
+    Get the account IDs the current user is on the account team for.
+
+    Uses the native Dynamics account access team model - the same source the
+    MSX UI shows in an account's "account team" view. We read the user's
+    teammembership_association and keep the teams whose template is the
+    Account Access Team template; each such team's regarding object is an
+    account. This replaced the msp_accountteams custom entity, which MSX
+    stopped populating with current alignments.
+
+    Team names are formatted as "{regardingobjectid}+{teamtemplateid}", so the
+    account GUID is recoverable from the name when the lookup value is absent.
+
+    Returns:
+        Dict with:
+        - success: bool
+        - account_ids: list of account GUID strings (lowercase)
+        - team_count: int (total account teams found)
+        - error: str if failed
+    """
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return {
+                "success": False,
+                "error": "Could not get current user ID",
+                "account_ids": [],
+            }
+
+        url = (
+            f"{CRM_BASE_URL}/systemusers({user_id})/teammembership_association"
+            f"?$select=_regardingobjectid_value,teamid,name"
+            f"&$filter=teamtype eq 1 and _teamtemplateid_value eq {ACCOUNT_ACCESS_TEAM_TEMPLATE_ID}"
+            f"&$top=5000"
+        )
+        response = _msx_request('GET', url)
+        if response.status_code != 200:
+            if response.status_code == 403 and is_vpn_blocked():
+                return {
+                    "success": False,
+                    "error": "IP address is blocked — connect to VPN and retry.",
+                    "vpn_blocked": True,
+                    "account_ids": [],
+                }
+            return {
+                "success": False,
+                "error": f"HTTP {response.status_code}: {response.text[:200]}",
+                "account_ids": [],
+            }
+
+        data = response.json()
+        all_teams = data.get("value", [])
+
+        # Follow pagination if needed
+        next_link = data.get("@odata.nextLink")
+        while next_link:
+            resp = _msx_request('GET', next_link)
+            if resp.status_code == 200:
+                page_data = resp.json()
+                all_teams.extend(page_data.get("value", []))
+                next_link = page_data.get("@odata.nextLink")
+            else:
+                logger.warning(
+                    f"Pagination failed on account team memberships: HTTP {resp.status_code}"
+                )
+                break
+
+        # Extract account IDs: prefer the regarding-object lookup, fall back to
+        # parsing the team name "{accountid}+{teamtemplateid}".
+        account_ids = set()
+        suffix = f"+{ACCOUNT_ACCESS_TEAM_TEMPLATE_ID}"
+        for team in all_teams:
+            aid = team.get("_regardingobjectid_value")
+            if not aid:
+                name = team.get("name") or ""
+                if suffix in name:
+                    aid = name.split("+", 1)[0]
+            if aid:
+                account_ids.add(aid.lower())
+
+        logger.info(
+            f"Found {len(account_ids)} account team memberships "
+            f"via access team model (of {len(all_teams)} account teams)"
+        )
+        return {
+            "success": True,
+            "account_ids": list(account_ids),
+            "team_count": len(all_teams),
+        }
+    except Exception as e:
+        logger.exception("Error getting account team IDs")
+        return {"success": False, "error": str(e), "account_ids": []}
+
+
 def scan_init() -> Dict[str, Any]:
     """
     Initialize territory scanning by getting user info and list of accounts to scan.
@@ -4566,44 +4667,15 @@ def scan_init() -> Dict[str, Any]:
         }
         detected_role = role_map.get(user_qualifier2, f"Unknown ({user_qualifier2})")
         
-        # 2. Query msp_accountteams where this user is a member
-        relevant_qualifiers = ["Cloud & AI Data", "Cloud & AI Infrastructure", "Cloud & AI Apps", 
-                               "Cloud & AI", "Cloud & AI-Acq"]
-        
-        team_result = query_entity(
-            "msp_accountteams",
-            select=["msp_accountteamid", "_msp_accountid_value", "msp_qualifier2"],
-            filter_query=f"_msp_systemuserid_value eq {user_id}",
-            top=500
-        )
-        from app.services.msx_health_probe import record_msp_accountteams_call
-        record_msp_accountteams_call(team_result)
-        
+        # 2. Discover the user's accounts via the native account access team
+        # model (the source MSX's own UI uses). The msp_accountteams custom
+        # entity is no longer populated with current alignments.
+        team_result = get_my_account_team_ids()
         if not team_result.get("success"):
-            error_msg = team_result.get("error", "")
-            # Detect broken msp_accountteams entity (MSX-side outage)
-            if "0x80040224" in error_msg or "header name and value" in error_msg.lower():
-                logger.error("MSX msp_accountteams entity is returning 400 - likely an MSX-side outage")
-                return {
-                    "success": False,
-                    "error": (
-                        "The MSX Account Team API is broken right now. "
-                        "Message Alex Blaine on Teams so he can engage MSX to fix it - "
-                        "this is a known recurring issue and won't resolve on its own."
-                    ),
-                    "msx_outage": True,
-                }
             return team_result
-        
-        # 3. Filter to only SE/Seller roles and collect unique account IDs
-        account_ids = set()
-        for entry in team_result.get("records", []):
-            qualifier2 = entry.get("msp_qualifier2", "")
-            if qualifier2 in relevant_qualifiers:
-                account_id = entry.get("_msp_accountid_value")
-                if account_id:
-                    account_ids.add(account_id)
-        
+
+        account_ids = team_result.get("account_ids", [])
+
         return {
             "success": True,
             "user": {"id": user_id, "name": user_name, "qualifier2": user_qualifier2},

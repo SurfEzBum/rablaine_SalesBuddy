@@ -6,6 +6,14 @@ How to identify specific roles (DAE, DSS, CSAM) from the MSX Dynamics 365 CRM AP
 **API:** `https://microsoftsales.crm.dynamics.com/api/data/v9.2`  
 **Entity:** `msp_accountteams` (logical name: `msp_accountteam`)
 
+> ⚠️ **Status (August 2026):** `msp_accountteams` is no longer populated with
+> current data — role queries here can return **zero rows** even for accounts
+> with a full team. The schema still responds (not a 400 hard-break); the data
+> is just absent. Account *discovery* has moved to the native account access
+> team model (see `docs/MSX_INTEGRATION.md`, Step 2 and Gotcha #9). Treat the
+> role-identification queries below as accurate-but-currently-unfed until MSX
+> restores the entity.
+
 ---
 
 ## Account Lookup

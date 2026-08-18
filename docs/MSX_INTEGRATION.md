@@ -113,29 +113,38 @@ GET /api/data/v9.2/WhoAmI
 
 Returns `{ UserId, BusinessUnitId, OrganizationId }`. The `UserId` is the current user's `systemuserid` GUID.
 
-### Step 2: Query Account Team Assignments
+### Step 2: Discover the User's Accounts (Native Account Access Team)
+
+Read the accounts the user is on the **account access team** for. This is the
+same source MSX's own "account team" view uses. Query the user's team
+memberships and keep the teams whose template is the Account Access Team
+template — each such team's regarding object is an account.
 
 ```
-GET /api/data/v9.2/msp_accountteams
-    ?$filter=_msp_systemuserid_value eq {user_id}
-    &$select=_msp_accountid_value,msp_qualifier2
-    &$top=500
+GET /api/data/v9.2/systemusers({user_id})/teammembership_association
+    ?$select=_regardingobjectid_value,teamid,name
+    &$filter=teamtype eq 1
+             and _teamtemplateid_value eq {ACCOUNT_ACCESS_TEAM_TEMPLATE_ID}
+    &$top=5000
 ```
 
-This entity maps users to accounts with their role (`msp_qualifier2`). A user can be assigned to the same account multiple times with different roles.
+- `ACCOUNT_ACCESS_TEAM_TEMPLATE_ID` = `3fcc1cfc-3e43-e311-9405-00155db3ba1e` (see [Key Constants](#key-constants)).
+- The account GUID is `_regardingobjectid_value`. As a fallback, the team `name`
+  is formatted `"{accountid}+{teamtemplateid}"`, so the account GUID is the part
+  before the `+`.
+- Follow `@odata.nextLink` to page through all memberships.
+- Extract distinct account GUIDs — that's your account list.
 
-**Key Fields:**
+> **Why not `msp_accountteams`?** We used to discover accounts from the
+> `msp_accountteams` custom entity filtered by `_msp_systemuserid_value`. As of
+> August 2026 MSX stopped populating that entity with current alignments — it
+> returns **zero rows** for a user by systemuser GUID, name, and email even
+> though the user is on hundreds of native account access teams. The entity
+> schema still responds (it's not the classic 400 hard-break), the data is just
+> absent, so it can't be used for discovery. See Gotcha #7. The role tables
+> below are still referenced by the seller/SE enrichment section.
 
-| Field | Description |
-|-------|-------------|
-| `_msp_accountid_value` | Account GUID |
-| `_msp_systemuserid_value` | User GUID |
-| `msp_qualifier2` | Role: "Cloud & AI", "Cloud & AI-Acq", "Cloud & AI Data", etc. |
-| `msp_qualifier1` | Org level: "Corporate", "Area", etc. |
-| `msp_standardtitle` | Job title like "Specialists IC" |
-| `msp_fullname` | User's display name |
-
-**Relevant `msp_qualifier2` Values:**
+**`msp_qualifier2` role values (used by seller/SE enrichment, not discovery):**
 
 | Value | Role |
 |-------|------|
@@ -145,7 +154,8 @@ This entity maps users to accounts with their role (`msp_qualifier2`). A user ca
 | `Cloud & AI Infrastructure` | Infrastructure SE |
 | `Cloud & AI Apps` | Apps SE |
 
-Filter for these and extract unique `_msp_accountid_value` values — that's your account list.
+**Implementation:** `app/services/msx_api.py::get_my_account_team_ids()`, called
+by `scan_init()`.
 
 ### Step 3: Batch Query Account Details
 
@@ -194,6 +204,14 @@ pod_name = f"{region} POD {pod_num}"
 ---
 
 ## Fetching Account Team Members (Sellers & SEs)
+
+> ⚠️ **Heads up (August 2026):** the queries in this section read the
+> `msp_accountteams` custom entity, which MSX stopped populating with current
+> data (see [Step 2](#step-2-discover-the-users-accounts-native-account-access-team)
+> and Gotcha #7). Account *discovery* has moved to the native access team, but
+> the seller/SE *enrichment* below still targets `msp_accountteams`, so it may
+> return empty until MSX restores the feed or this is migrated to the native
+> access team model as well.
 
 ### The Problem: Record Limits and No $skip
 
@@ -662,6 +680,7 @@ Used for bulk join/leave team operations. Adaptive chunk sizing: starts at 15 op
 | MSX App ID | `fe0c3504-3700-e911-a849-000d3a10b7cc` | For building record URLs |
 | Opportunity Team Template ID | `cc923a9d-7651-e311-9405-00155db3ba1e` | For deal team operations |
 | Milestone Team Template ID | `316e4735-9e83-eb11-a812-0022481e1be0` | For milestone access team operations |
+| Account Access Team Template ID | `3fcc1cfc-3e43-e311-9405-00155db3ba1e` | For discovering a user's accounts (see [Step 2](#step-2-discover-the-users-accounts-native-account-access-team)) |
 
 ---
 
@@ -742,6 +761,26 @@ When building URLs to open records in MSX, include the app ID:
 ?appid=fe0c3504-3700-e911-a849-000d3a10b7cc
 ```
 Without it, MSX might not load the correct app context.
+
+### 9. `msp_accountteams` Is No Longer Populated (August 2026)
+
+The `msp_accountteams` custom entity stopped being fed with current alignments.
+It still responds and its schema is intact (17 attributes), but it returns
+**zero rows** for a user filtered by `_msp_systemuserid_value`, `msp_fullname`,
+or `msp_internalemailaddress` — even when that user is on hundreds of native
+account access teams. This is **not** the classic `0x80040224` 400 hard-break;
+the endpoint is healthy, the data is simply absent.
+
+Consequences and guidance:
+- **Account discovery** moved to the native account access team model — the
+  user's `teammembership_association` filtered to template
+  `3fcc1cfc-3e43-e311-9405-00155db3ba1e`. See
+  [Step 2](#step-2-discover-the-users-accounts-native-account-access-team).
+- **Don't** query `msp_accountteams` unfiltered or with `$count=true` — it's a
+  large entity and those requests time out (~15s), which can also trip the
+  client's VPN-block detection and abort later requests in the same process.
+- The seller/SE enrichment section still reads `msp_accountteams` and may return
+  empty until MSX restores the feed or it's migrated to the native model.
 
 ---
 
