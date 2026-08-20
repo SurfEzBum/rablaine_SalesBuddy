@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 8/20/2026
+## 8/20/2026 - 015f4df
 
 - Revenue sync now uses the AzureBlue MSXI report, returning ACR for substantially more accounts and capturing more complete consumption for existing accounts.
 - Revenue sync now retries transient Power BI TLS failures and removes repeated pagination boundary rows, preventing avoidable sync failures and duplicate-product errors.
