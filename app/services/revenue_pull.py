@@ -44,11 +44,11 @@ _CORP_TENANT = "72f988bf-86f1-41af-91ab-2d7cd011db47"
 _PBI_RESOURCE = "https://analysis.windows.net/powerbi/api"
 _CLUSTER = "https://df-msit-scus-redirect.analysis.windows.net"
 
-# The MSX Insights "AzureSubscriptionDetailsSL4_FY" report + dataset.
-_REPORT_ID = "08a38b76-64a9-4dd0-848c-fe97dff1b189"
-_DATASET_ID = "7678a8b7-ee5b-4ed8-8951-66c60d456a9c"
+# The MSX Insights "AzureBlueSubscriptionSL4" report + dataset.
+_REPORT_ID = "4774bb5f-91a6-4e41-8c8a-0cee2142b765"
+_DATASET_ID = "f7ecc250-c244-43a6-aea5-7a957f9e9d38"
 _VISUAL_ID = "e3f7b28054eb83b11005"
-_MODEL_ID_FALLBACK = 6617391
+_MODEL_ID_FALLBACK = 6642435
 
 # ---------------------------------------------------------------------------
 # Token acquisition
@@ -102,6 +102,7 @@ _mwc_token: Optional[str] = None
 _mwc_expiry: float = 0.0
 _qes_url: Optional[str] = None
 _model_id: int = _MODEL_ID_FALLBACK
+_MWC_MINT_ATTEMPTS = 3
 
 
 def _is_mwc(tok: str) -> bool:
@@ -129,7 +130,18 @@ def _mint_mwc(session: requests.Session) -> str:
         return _mwc_token
 
     url = f"{_CLUSTER}/explore/reports/{_REPORT_ID}/modelsAndExploration?preferReadOnlySession=true"
-    resp = session.get(url, headers={"Authorization": f"Bearer {_get_pbi_token()}"}, timeout=(15, 120))
+    headers = {"Authorization": f"Bearer {_get_pbi_token()}"}
+    for attempt in range(_MWC_MINT_ATTEMPTS):
+        try:
+            resp = session.get(url, headers=headers, timeout=(15, 120))
+            break
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            if attempt == _MWC_MINT_ATTEMPTS - 1:
+                raise RevenuePullError(
+                    f"modelsAndExploration connection failed after "
+                    f"{_MWC_MINT_ATTEMPTS} attempts: {exc}"
+                ) from exc
+            time.sleep(1.5 * (attempt + 1))
     if not resp.ok:
         raise RevenuePullError(f"modelsAndExploration {resp.status_code}: {resp.text[:200]}")
 
@@ -320,13 +332,20 @@ def _qes_post(session: requests.Session, query: dict, retries: int = 2) -> list[
     """Run a query to completion, following restart tokens across pages.
 
     Never returns a partial dataset: a truncated response either paginates or
-    raises, so callers can trust that what they get back is everything.
+    raises, so callers can trust that what they get back is everything. Power BI
+    can repeat the boundary row after a restart token, so exact duplicates are
+    removed rather than double-counted.
     """
     out: list[dict] = []
+    seen: set[str] = set()
     restart: Optional[list] = None
     for _ in range(_MAX_PAGES):
         rows, restart = _qes_post_page(session, query, restart=restart, retries=retries)
-        out.extend(rows)
+        for row in rows:
+            identity = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
+            if identity not in seen:
+                seen.add(identity)
+                out.append(row)
         if not restart:
             return out
     raise RevenuePullError(
