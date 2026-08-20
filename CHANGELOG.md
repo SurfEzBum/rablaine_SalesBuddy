@@ -8,6 +8,11 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/20/2026
+
+- Revenue sync now uses the AzureBlue MSXI report, returning ACR for substantially more accounts and capturing more complete consumption for existing accounts.
+- Revenue sync now retries transient Power BI TLS failures and removes repeated pagination boundary rows, preventing avoidable sync failures and duplicate-product errors.
+
 ## 8/18/2026 - 9881a07
 
 - Fixed "Sync Accounts" failing with "No accounts found for this user." MSX stopped populating the account-team source we relied on, so account discovery now reads your account team memberships the same way MSX's own account team view does. Sync Now pulls your current accounts again.

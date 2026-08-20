@@ -14,6 +14,56 @@ How to identify specific roles (DAE, DSS, CSAM) from the MSX Dynamics 365 CRM AP
 > role-identification queries below as accurate-but-currently-unfed until MSX
 > restores the entity.
 
+## Inferring Acquisition vs. Growth from ACR
+
+Seller alignment remains the authoritative source when a reliable seller is
+available. While seller discovery is unreliable, recent ACR can provide a
+high-confidence fallback classification.
+
+### Data source and validation
+
+Use the MSX Insights `AzureBlueSubscriptionSL4` report:
+
+- Report ID: `4774bb5f-91a6-4e41-8c8a-0cee2142b765`
+- Dataset ID: `f7ecc250-c244-43a6-aea5-7a957f9e9d38`
+- Model ID: `6642435`
+- Measure: `Measures | ACR.$ ACR`
+
+Validation on August 20, 2026 used 210 current accounts and 26 months of ACR.
+Of those accounts, 145 had an existing Acquisition or Growth seller label that
+could serve as ground truth: 87 Acquisition and 58 Growth.
+
+The best simple signal was average monthly ACR over the latest three closed
+months:
+
+| Three-month average ACR | Suggested inference | Validation result |
+|---|---|---|
+| At least $13,400 | Growth | 51 Growth, 0 Acquisition |
+| $10,000 to $13,399 | Ambiguous | 1 Growth, 4 Acquisition |
+| Below $10,000 | Acquisition-leaning | 6 Growth, 83 Acquisition |
+
+Using $13,398.89 as the Growth threshold produced 95.2% overall accuracy,
+94.0% balanced accuracy, and 100% Growth precision. It missed seven labeled
+Growth accounts, so low ACR must not overwrite a known Growth assignment.
+
+Twenty-nine accounts returned no ACR rows at all. Among the 24 with a known
+seller alignment, 23 were Acquisition and one was Growth (Luminis Health).
+No returned ACR is therefore strong Acquisition evidence, but not proof.
+
+### Recommended precedence
+
+1. Use a verified seller assignment when available.
+2. Infer Growth with high confidence when trailing three-month average ACR is
+	at least $13,400.
+3. Treat $10,000 through $13,399 as unknown and require another signal.
+4. Below $10,000, including no returned ACR, infer Acquisition with lower
+	confidence.
+5. Never replace a known seller alignment solely from ACR. Store the result as
+	an inferred classification with its basis, period, and confidence.
+
+This fallback can classify accounts while MSX seller alignment remains broken,
+but it should be recalibrated after territory or compensation-model changes.
+
 ---
 
 ## Account Lookup

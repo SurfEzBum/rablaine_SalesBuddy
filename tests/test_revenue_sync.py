@@ -238,6 +238,52 @@ class TestPurge:
 # Pull safety
 # ---------------------------------------------------------------------------
 class TestPullSafety:
+    def test_uses_azure_blue_subscription_report(self):
+        """Revenue pulls must use the report with complete account coverage."""
+        from app.services import revenue_pull
+
+        assert revenue_pull._REPORT_ID == "4774bb5f-91a6-4e41-8c8a-0cee2142b765"
+        assert revenue_pull._DATASET_ID == "f7ecc250-c244-43a6-aea5-7a957f9e9d38"
+        assert revenue_pull._MODEL_ID_FALLBACK == 6642435
+
+    def test_mwc_mint_retries_transient_ssl_errors(self, monkeypatch):
+        """Power BI bootstrap must ride out transient TLS disconnects."""
+        import requests
+
+        from app.services import revenue_pull
+
+        token = "eyJabcdefghijk.eyJabcdefghijk.abcdefghijk"
+
+        class FakeResponse:
+            ok = True
+            text = token
+
+            @staticmethod
+            def json():
+                return {"models": []}
+
+        class FakeSession:
+            calls = 0
+
+            def get(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    raise requests.exceptions.SSLError("unexpected EOF")
+                if self.calls == 2:
+                    raise requests.exceptions.ReadTimeout("TLS handshake timed out")
+                return FakeResponse()
+
+        session = FakeSession()
+        revenue_pull.clear_token_cache()
+        monkeypatch.setattr(revenue_pull, "_get_pbi_token", lambda: "pbi-token")
+        monkeypatch.setattr(revenue_pull, "_is_mwc", lambda value: value == token)
+        monkeypatch.setattr(revenue_pull, "_qes_url_from_mwc", lambda value: "https://qes.invalid")
+        monkeypatch.setattr(revenue_pull.time, "sleep", lambda seconds: None)
+
+        assert revenue_pull._mint_mwc(session) == token
+        assert session.calls == 3
+        revenue_pull.clear_token_cache()
+
     def test_truncated_response_without_a_cursor_raises(self, monkeypatch):
         """A partial dataset must never be silently accepted."""
         from app.services import revenue_pull
@@ -260,6 +306,25 @@ class TestPullSafety:
         monkeypatch.setattr(revenue_pull, "_qes_url", "https://example.invalid/q")
         with pytest.raises(revenue_pull.RevenuePullError, match="partial"):
             revenue_pull._qes_post(FakeSession(), {"Select": [{"Name": "tpid"}]}, retries=0)
+
+    def test_pagination_deduplicates_repeated_boundary_row(self, monkeypatch):
+        """A restart page may repeat its preceding boundary row."""
+        from app.services import revenue_pull
+
+        repeated = {"tpid": 1, "fm": "FY26-Feb", "product": "Event Hubs", "acr": 61.906}
+        pages = [
+            ([repeated], [["restart"]]),
+            ([repeated, {**repeated, "fm": "FY26-Mar"}], None),
+        ]
+        monkeypatch.setattr(
+            revenue_pull,
+            "_qes_post_page",
+            lambda session, query, restart=None, retries=2: pages.pop(0),
+        )
+
+        rows = revenue_pull._qes_post(object(), {})
+
+        assert rows == [repeated, {**repeated, "fm": "FY26-Mar"}]
 
     def test_default_fiscal_years_spans_three_years(self):
         from app.services.revenue_pull import default_fiscal_years
