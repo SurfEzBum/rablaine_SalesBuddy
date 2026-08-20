@@ -5,6 +5,49 @@ Newer items go on top.
 
 ---
 
+## BLOCKED: seller mapping from MSX account teams (revisit ~Sept 2026)
+
+Parked 8/20/2026. Work is preserved on branch
+`feature/enrichment-systemuser-qualifier` (6 commits, unmerged). `main` keeps
+the account **discovery** fix, which is unaffected and working.
+
+**Why blocked:** MSX account-team data no longer identifies who sells a
+territory. Verified against the real 210-account book:
+
+| Territory | Truth (our data) | What MSX yields |
+|---|---|---|
+| MAA.0101 | Dan Kraft 44, Jarred O'Connor 9 | Dan (4) - correct |
+| SOU.0207 | Rick Bowles 13, Brandi Hurner 6 | Rob Jenkins - not a current seller |
+| SOU.0206.A | Tim O'Shea 32 | Curtis Wesbur / Vincent Jordan - wrong |
+| HLA.0506.A | Tim O'Shea 40 | Tim, but on only 3 of 20 accounts |
+
+Tim owns 40 accounts and appears on 3. Rick owns 13 and appears on **0**.
+Jarred owns 9 and appears on **0**. The right answers simply aren't in the
+source data right now, so no classifier can derive them - and a sync today
+would overwrite good assignments with wrong ones.
+
+This worked ~2 weeks before, so it's likely a temporary backend state
+(alignment churn). **On revisit:** re-check whether Tim/Rick/Jarred have
+`msp_accountteams` rows again; if so the original logic may just work.
+
+Details, the field semantics we mapped out, and seven disproven approaches are
+in repo memory (`seller-mapping-blocked.md`) so we don't re-derive them.
+
+**Worth salvaging from the branch when we return:**
+- SE classification (Data/Infra/Apps) - validated correct, independent of the
+  seller problem.
+- Territory seller override + per-customer "keep this seller" pin - the only
+  reliable path to truth regardless of what MSX does.
+
+**Separate bugs found along the way (not fixed):**
+- `sellers_territories` is append-only in the sync, so stale sellers never
+  leave a territory page. PODs get rebuilt each sync; sellers don't.
+- Territory page shows a seller's *global* customer count, not their count in
+  that territory.
+- `get_entity_metadata()` throws on attributes with a null DisplayName.
+
+---
+
 ## Morning aura sync rewrite
 
 The morning catch-up aura sync uses a separate codepath from the manual
