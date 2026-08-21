@@ -214,21 +214,71 @@ account executive; territory owner is commonly a manager.
 
 ## Account Sync Rewrite Contract
 
-The next account-sync rewrite should:
+Account sync uses one shared service with two HTTP transports:
 
-1. Keep `get_my_account_team_ids()` for current-user account discovery.
-2. Batch-query account details as it does today.
-3. Query each account's native v-team through the access-team FetchXML join.
-4. Apply seller and SE filters to linked `systemuser` records server-side.
-5. Map seller type and SE specialty from `systemuser.msp_qualifier2`.
-6. Resolve aliases from user email fields.
-7. Exclude disabled users, directors, and managers.
-8. Preserve an existing local assignment when no valid current member is
-   returned; do not replace it with a guessed account or territory owner.
-9. Remove `msp_accountteams` enrichment, overlay suppression, territory
-   majority voting, and related fallback logic.
-10. Add focused tests for Growth, Acquisition, all three SE specialties,
-    disabled users, management exclusions, no result, and duplicate members.
+- Requests accepting `text/event-stream` consume the service's progress events
+  as SSE.
+- Other requests start the same service in a background thread and return
+  HTTP 202.
+
+The service builds the complete account graph in memory before changing the
+database:
+
+1. Discover account GUIDs through `get_my_account_team_ids()` or the saved
+   territory-alignment override.
+2. Batch-query account details. Each account supplies its territory GUID.
+3. Batch-query unique territories and derive each POD from the territory name.
+4. Query every account's native v-team through the access-team FetchXML join.
+5. Parse each response once for its Growth/Acquisition seller and Data,
+   Infrastructure, and Apps solution engineers.
+6. Aggregate account sellers by territory and core solution engineers by POD.
+7. Resolve aliases from the linked user email fields.
+8. Write PODs, territories, sellers, core solution engineers, and customers
+   after all query phases finish.
+
+No extra per-POD v-team query is needed. The account queries required for
+seller assignment already return the core solution engineers. Aggregating
+those results across every account is both more complete and no more expensive
+than selecting one representative account per POD.
+
+### POD derivation
+
+POD is a virtual organizational construct. MSX does not expose a relationship
+from territory or account back to that construct. Instead, POD membership is
+encoded in the territory naming convention and materialized through account
+v-team membership.
+
+For example:
+
+```text
+East.SMECC.MAA.0601 -> East POD 06
+East.SMECC.HLA.0610.A -> East POD 06
+```
+
+Sales Buddy therefore derives POD as the territory region plus the first two
+digits of the fourth dot-separated component. Keep this rule in one tested
+helper rather than duplicating string parsing inside the sync route.
+
+### Assignment rules
+
+- One valid seller candidate assigns that seller to the account.
+- No valid seller candidate preserves the existing local assignment.
+- Multiple valid seller candidates preserve the existing local assignment and
+  log a warning; response order must never decide the seller.
+- Core solution engineers are deduplicated by user ID and specialty across all
+  accounts in a POD.
+- POD, seller-territory, and core-SE relationships are rebuilt from the full
+  in-memory result so stale associations do not accumulate.
+- Disabled users, directors, and managers are excluded.
+
+Remove the account sync's CSAM and Digital Solution Specialist query, creation,
+and relationship phases. Existing database records are left untouched; account
+sync simply stops maintaining them.
+
+Remove `msp_accountteams` enrichment, overlay suppression, territory majority
+voting, and related fallback logic from the account sync. Add focused tests for
+Growth, Acquisition, all three core SE specialties, disabled users, management
+exclusions, no result, multiple sellers, POD derivation, and both HTTP modes.
 
 ## Query Guidance
 

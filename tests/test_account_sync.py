@@ -1,7 +1,7 @@
 """
 Tests for account sync upsert logic (issue #23).
 
-Validates that import_accounts and import_stream properly update
+Validates that import_accounts and sync_accounts properly update
 existing customer fields, seller fields, territories, and POD
 associations on re-sync.
 """
@@ -183,9 +183,9 @@ class TestImportAccountsUpsert:
 
 
 class TestImportStreamUpsert:
-    """Tests for the streaming import_stream customer upsert logic.
+    """Tests for the streaming sync_accounts customer upsert logic.
 
-    Since import_stream is SSE-based and requires MSX API mocking,
+    Since sync_accounts is SSE-based and requires MSX API mocking,
     we test the core upsert logic via the simpler import_accounts
     endpoint which shares the same patterns. The streaming-specific
     additions (POD rebuild, seller update, territory pod update) are
@@ -206,7 +206,7 @@ class TestImportStreamUpsert:
             assert len(pod.territories) == 1
             assert len(pod.solution_engineers) == 1
 
-            # Simulate the POD rebuild logic from import_stream:
+            # Simulate the POD rebuild logic from sync_accounts:
             # Clear associations
             pod.territories = []
             pod.solution_engineers = []
@@ -252,7 +252,7 @@ class TestImportStreamUpsert:
 
             assert seller.seller_type == "Growth"
 
-            # Simulate seller upsert from import_stream
+            # Simulate seller upsert from sync_accounts
             new_type = "Acquisition"
             if seller.seller_type != new_type:
                 seller.seller_type = new_type

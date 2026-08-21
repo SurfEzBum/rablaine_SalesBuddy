@@ -2039,7 +2039,10 @@ document.getElementById('importFromMsxBtn').addEventListener('click', async func
     progressBar.style.width = '0%';
     
     try {
-        const response = await fetch('/api/msx/import-stream');
+        const response = await fetch('/api/msx/accounts/sync', {
+            method: 'POST',
+            headers: { 'Accept': 'text/event-stream' },
+        });
         
         if (!response.ok) {
             // Try to extract a useful error message from the response body
@@ -3954,7 +3957,10 @@ async function runFYSync(suffix) {
     window.addEventListener('beforeunload', warnOnLeave);
 
     try {
-        const response = await fetch('/api/msx/import-stream');
+        const response = await fetch('/api/msx/accounts/sync', {
+            method: 'POST',
+            headers: { 'Accept': 'text/event-stream' },
+        });
         if (!response.ok) {
             let detail = '';
             try {
@@ -4084,7 +4090,10 @@ async function finalizeFY() {
         const bar = document.getElementById('fyFinalSyncBar');
         streamEl.style.display = '';
 
-        const response = await fetch('/api/msx/import-stream');
+        const response = await fetch('/api/msx/accounts/sync', {
+            method: 'POST',
+            headers: { 'Accept': 'text/event-stream' },
+        });
         if (!response.ok) {
             let detail = '';
             try { const b = await response.json(); detail = b.error || b.message || ''; } catch (_) {}

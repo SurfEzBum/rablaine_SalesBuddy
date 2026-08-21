@@ -8,7 +8,7 @@ all accounts in the selected territories.
 
 This module provides the read-only probe/discovery helpers plus persistence of
 the user's territory selections. The account-import pipeline
-(``/api/msx/import-stream``) calls :func:`discover_accounts_from_alignment` as an
+(``/api/msx/accounts/sync``) calls :func:`discover_accounts_from_alignment` as an
 alternate Phase 1 when an active alignment exists.
 
 Nothing here fabricates records: it selects *which* live MSX accounts are the
@@ -51,12 +51,14 @@ def current_fy_label() -> str:
         return state["fy_label"]
 
     labels = get_fiscal_year_labels()
+    pref = UserPreference.query.first()
+    last_completed = pref.fy_last_completed if pref else None
+    if last_completed == labels["next_fy"]:
+        return labels["next_fy"]
+
     today = _date.today()
     if today.month in (7, 8):
-        pref = UserPreference.query.first()
-        last_completed = pref.fy_last_completed if pref else None
-        if last_completed != labels["next_fy"]:
-            return labels["next_fy"]
+        return labels["next_fy"]
     return labels["current_fy"]
 
 
@@ -404,9 +406,8 @@ def summarize_accounts_for_territory_ids(
 
     accounts = acct_result.get("accounts", [])
     account_ids = [a["account_id"] for a in accounts if a.get("account_id")]
-    # MSX accounts are a parent/child hierarchy: one customer (TPID / top-level
-    # parent) can span many account records. The sync creates one customer per
-    # unique TPID, so the customer count is what actually lands in Sales Buddy.
+    # The territory query returns canonical top-level records. Keep TPID
+    # deduplication defensive in case MSX ever returns duplicate parents.
     unique_tpids = {a.get("tpid") for a in accounts if a.get("tpid")}
 
     return {
