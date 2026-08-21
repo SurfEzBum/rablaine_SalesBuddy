@@ -304,7 +304,7 @@ def run_migrations(db):
                               'internal_contact_id', 'INTEGER REFERENCES internal_contacts(id)')
 
     # Note: InternalContact records for DAEs are created during MSX account
-    # sync (import_stream in msx.py), not seeded here. Users should run an
+    # sync (sync_accounts in msx.py), not seeded here. Users should run an
     # account sync after upgrading to populate DAEs as internal contacts.
 
     # Migration: Add AI-generated story fields to engagements

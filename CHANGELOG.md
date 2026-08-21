@@ -8,6 +8,11 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/21/2026
+
+- Account sync now reads native MSX v-teams for accurate Growth and Acquisition sellers plus core solution engineers, rebuilds POD assignments from current account data, and supports both live progress and background operation.
+- Account sync no longer imports CSAM or Digital Solution Specialist assignments.
+
 ## 8/20/2026 - 015f4df
 
 - Revenue sync now uses the AzureBlue MSXI report, returning ACR for substantially more accounts and capturing more complete consumption for existing accounts.

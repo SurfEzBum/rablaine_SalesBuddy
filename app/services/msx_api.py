@@ -12,8 +12,10 @@ import json
 import requests
 import logging
 import os
+import xml.etree.ElementTree as ET
 from datetime import datetime as dt, timezone as tz
 from typing import Optional, Dict, Any, List, Callable
+from urllib.parse import urlencode
 
 from app.services.msx_auth import (
     get_msx_token, refresh_token, CRM_BASE_URL,
@@ -3450,102 +3452,203 @@ def batch_query_territories(
 
 def batch_query_account_teams(
     account_ids: List[str],
-    batch_size: int = 5
+    batch_size: int = 5,
 ) -> Dict[str, Any]:
     """
-    Query msp_accountteams for all accounts to get sellers and SEs.
-    
-    Uses server-side filtering for Corporate + Cloud & AI qualifiers,
-    reducing 300+ team members per account to ~20-30 (no pagination needed).
-    
-    Filters for qualifier1="Corporate" AND Cloud & AI roles:
-    - Sellers: "Cloud & AI" (Growth), "Cloud & AI-Acq" (Acquisition) with title "Specialists IC"
-    - SEs: "Cloud & AI Data", "Cloud & AI Infrastructure", "Cloud & AI Apps"
-    
-    Args:
-        account_ids: List of account GUIDs
-        batch_size: How many accounts per query (can be higher now with server-side filtering)
-        
-    Returns:
-        Dict with:
-        - account_sellers: {account_id: {name, type, user_id}}
-        - unique_sellers: {seller_name: {name, type, user_id}}
-        - se_by_pod_account: {account_id: {data_se, infra_se, apps_se}}
+    Query native account access teams for sellers and core solution engineers.
+
+    The native team is joined through teammembership to current systemuser
+    records. The return shape intentionally matches the former
+    msp_accountteams implementation so sync consumers share one classifier.
     """
-    # Relevant qualifier2 values
     seller_qualifiers = {"Cloud & AI": "Growth", "Cloud & AI-Acq": "Acquisition"}
     se_qualifiers = {
         "Cloud & AI Data": "data_se",
         "Cloud & AI Infrastructure": "infra_se",
-        "Cloud & AI Apps": "apps_se"
+        "Cloud & AI Apps": "apps_se",
     }
-    
-    account_sellers = {}  # account_id -> {name, type, user_id}
-    unique_sellers = {}   # seller_name -> {name, type, user_id}
-    account_ses = {}      # account_id -> {data_se, infra_se, apps_se}
-    
-    def process_record(record):
-        """Process a single team member record."""
-        acct_id = record.get("_msp_accountid_value")
-        qualifier2 = record.get("msp_qualifier2", "")
-        standardtitle = record.get("msp_standardtitle", "")
-        name = record.get("msp_fullname", "")
-        user_id = record.get("_msp_systemuserid_value")
-        
-        if not acct_id or not name:
+    account_sellers: Dict[str, Dict[str, Any]] = {}
+    unique_sellers: Dict[str, Dict[str, Any]] = {}
+    account_ses: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    seller_candidates: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    def add_condition(parent, attribute, operator, value=None):
+        condition = ET.SubElement(
+            parent,
+            "condition",
+            {"attribute": attribute, "operator": operator},
+        )
+        if value is not None:
+            condition.set("value", value)
+        return condition
+
+    def build_fetchxml(batch: List[str]) -> str:
+        fetch = ET.Element("fetch", {"distinct": "true"})
+        team = ET.SubElement(fetch, "entity", {"name": "team"})
+        ET.SubElement(team, "attribute", {"name": "teamid"})
+        ET.SubElement(team, "attribute", {"name": "regardingobjectid"})
+
+        team_filter = ET.SubElement(team, "filter", {"type": "and"})
+        add_condition(team_filter, "teamtype", "eq", "1")
+        add_condition(
+            team_filter,
+            "teamtemplateid",
+            "eq",
+            ACCOUNT_ACCESS_TEAM_TEMPLATE_ID,
+        )
+        account_filter = ET.SubElement(team_filter, "filter", {"type": "or"})
+        for account_id in batch:
+            add_condition(account_filter, "regardingobjectid", "eq", account_id)
+
+        membership = ET.SubElement(
+            team,
+            "link-entity",
+            {
+                "name": "teammembership",
+                "from": "teamid",
+                "to": "teamid",
+                "intersect": "true",
+            },
+        )
+        member = ET.SubElement(
+            membership,
+            "link-entity",
+            {
+                "name": "systemuser",
+                "from": "systemuserid",
+                "to": "systemuserid",
+                "alias": "member",
+            },
+        )
+        for attribute in (
+            "systemuserid",
+            "fullname",
+            "internalemailaddress",
+            "domainname",
+            "title",
+            "msp_qualifier1",
+            "msp_qualifier2",
+            "isdisabled",
+        ):
+            ET.SubElement(member, "attribute", {"name": attribute})
+
+        member_filter = ET.SubElement(member, "filter", {"type": "and"})
+        add_condition(member_filter, "isdisabled", "eq", "0")
+        add_condition(member_filter, "msp_qualifier1", "eq", "Corporate")
+        role_filter = ET.SubElement(member_filter, "filter", {"type": "or"})
+
+        seller_filter = ET.SubElement(role_filter, "filter", {"type": "and"})
+        add_condition(seller_filter, "title", "like", "%Digital Specialist%")
+        add_condition(seller_filter, "title", "not-like", "%Dir%")
+        add_condition(seller_filter, "title", "not-like", "%Manager%")
+        seller_values = add_condition(seller_filter, "msp_qualifier2", "in")
+        for qualifier in seller_qualifiers:
+            ET.SubElement(seller_values, "value").text = qualifier
+
+        se_filter = ET.SubElement(role_filter, "filter", {"type": "and"})
+        add_condition(se_filter, "title", "like", "%Sol Engineer%")
+        se_values = add_condition(se_filter, "msp_qualifier2", "in")
+        for qualifier in se_qualifiers:
+            ET.SubElement(se_values, "value").text = qualifier
+
+        return ET.tostring(fetch, encoding="unicode")
+
+    def member_value(record: Dict[str, Any], field: str) -> Any:
+        return record.get(f"member.{field}")
+
+    def process_record(record: Dict[str, Any]) -> None:
+        account_id = record.get("_regardingobjectid_value")
+        qualifier = member_value(record, "msp_qualifier2") or ""
+        name = member_value(record, "fullname") or ""
+        title = member_value(record, "title") or ""
+        title_lower = title.casefold()
+        qualifier1 = member_value(record, "msp_qualifier1") or ""
+        is_disabled = member_value(record, "isdisabled")
+        user_id = member_value(record, "systemuserid")
+        email = (
+            member_value(record, "internalemailaddress")
+            or member_value(record, "domainname")
+            or ""
+        )
+        alias = email.split("@", 1)[0] if email else None
+        if (
+            not account_id
+            or not name
+            or qualifier1 != "Corporate"
+            or is_disabled in (True, 1, "1", "true", "True")
+        ):
             return
-        
-        # Seller assignment: qualifier2 is Cloud & AI or Cloud & AI-Acq
-        # AND standardtitle contains "Specialists IC" (filters out managers, CSAs, CSU, etc.)
-        if qualifier2 in seller_qualifiers and "Specialists IC" in standardtitle:
-            seller_type = seller_qualifiers[qualifier2]
-            account_sellers[acct_id] = {"name": name, "type": seller_type, "user_id": user_id}
-            if name not in unique_sellers:
-                unique_sellers[name] = {"name": name, "type": seller_type, "user_id": user_id}
-        
-        # SE assignment - collect ALL SEs per role (there can be multiple)
-        elif qualifier2 in se_qualifiers:
-            if acct_id not in account_ses:
-                account_ses[acct_id] = {"data_se": [], "infra_se": [], "apps_se": []}
-            
-            se_key = se_qualifiers[qualifier2]  # "data_se", "infra_se", or "apps_se"
-            # Add SE if not already in the list for this account
-            existing_names = [se["name"] for se in account_ses[acct_id][se_key]]
-            if name not in existing_names:
-                account_ses[acct_id][se_key].append({"name": name, "user_id": user_id})
-    
+
+        person = {"name": name, "user_id": user_id, "alias": alias}
+        is_seller_title = (
+            "digital specialist" in title_lower
+            and "dir" not in title_lower
+            and "manager" not in title_lower
+        )
+        if qualifier in seller_qualifiers and is_seller_title:
+            seller = {**person, "type": seller_qualifiers[qualifier]}
+            key = user_id or name.casefold()
+            seller_candidates.setdefault(account_id, {})[key] = seller
+            return
+
+        se_role = se_qualifiers.get(qualifier) if "sol engineer" in title_lower else None
+        if not se_role:
+            return
+        roles = account_ses.setdefault(
+            account_id,
+            {"data_se": [], "infra_se": [], "apps_se": []},
+        )
+        existing_keys = {
+            item.get("user_id") or item["name"].casefold()
+            for item in roles[se_role]
+        }
+        person_key = user_id or name.casefold()
+        if person_key not in existing_keys:
+            roles[se_role].append(person)
+
     try:
-        # Query accounts in batches with server-side filtering
-        # Server-side filter for Corporate + Cloud & AI* reduces 300+ to ~20-30 per account
         for i in range(0, len(account_ids), batch_size):
             batch = account_ids[i:i + batch_size]
-            
-            # Build filter: account IDs + Corporate + Cloud & AI qualifiers (server-side)
-            account_filter = " or ".join([f"_msp_accountid_value eq {aid}" for aid in batch])
-            # Filter server-side for Corporate + Cloud & AI* (reduces 300+ records to ~20-30)
-            filter_query = f"({account_filter}) and msp_qualifier1 eq 'Corporate' and startswith(msp_qualifier2,'Cloud ')"
-            
-            result = query_entity(
-                "msp_accountteams",
-                select=["_msp_accountid_value", "msp_fullname", "msp_qualifier2", "msp_standardtitle", "_msp_systemuserid_value"],
-                filter_query=filter_query,
-                top=100  # With server-side filtering, 100 should be enough for 3 accounts
-            )
-            from app.services.msx_health_probe import record_msp_accountteams_call
-            record_msp_accountteams_call(result)
-            
-            if not result.get("success"):
-                logger.warning(f"Batch account teams query failed: {result.get('error')}")
+            fetchxml = build_fetchxml(batch)
+            url = f"{CRM_BASE_URL}/teams?{urlencode({'fetchXml': fetchxml})}"
+            response = _msx_request("GET", url)
+            if response.status_code != 200:
+                logger.warning(
+                    "Native account v-team query failed: HTTP %s: %s",
+                    response.status_code,
+                    response.text[:200],
+                )
                 continue
-            
-            records = result.get("records", [])
-            # Warn if we hit the 100 record limit (may have lost data)
-            if len(records) >= 100:
-                logger.warning(f"Hit 100 record limit for batch of {len(batch)} accounts - may be missing sellers/SEs")
-            
-            for record in records:
-                process_record(record)
-        
+
+            page = response.json()
+            while True:
+                for record in page.get("value", []):
+                    process_record(record)
+                next_link = page.get("@odata.nextLink")
+                if not next_link:
+                    break
+                response = _msx_request("GET", next_link)
+                if response.status_code != 200:
+                    logger.warning(
+                        "Native account v-team pagination failed: HTTP %s",
+                        response.status_code,
+                    )
+                    break
+                page = response.json()
+
+        for account_id, candidates in seller_candidates.items():
+            if len(candidates) != 1:
+                logger.warning(
+                    "Expected one native v-team seller for account %s, found %d; "
+                    "preserving any local assignment",
+                    account_id,
+                    len(candidates),
+                )
+                continue
+            seller = next(iter(candidates.values()))
+            account_sellers[account_id] = seller
+            unique_sellers.setdefault(seller["name"], seller)
+
         return {
             "success": True,
             "account_sellers": account_sellers,
@@ -3554,173 +3657,9 @@ def batch_query_account_teams(
             "seller_count": len(unique_sellers),
             "accounts_with_sellers": len(account_sellers),
         }
-        
-    except Exception as e:
-        logger.exception("Error in batch account teams query")
-        return {"success": False, "error": str(e)}
-
-
-def batch_query_account_csams(
-    account_ids: List[str],
-    batch_size: int = 10
-) -> Dict[str, Any]:
-    """
-    Query msp_accountteams for CSAM (Customer Success Account Mgmt IC) members.
-
-    Uses a separate query from the seller/SE batch because the CSAM filter is
-    independent of the Cloud & AI qualifier used for sellers. CSAM records are
-    identified by ``msp_standardtitle eq 'Customer Success Account Mgmt IC'``.
-
-    With the tight title filter results are small (~0-3 per account), so a
-    batch size of 10 is safe without hitting the top-100 limit.
-
-    Args:
-        account_ids: List of account GUIDs
-        batch_size: How many accounts per query (default 10)
-
-    Returns:
-        Dict with:
-        - account_csams: {account_id: [{name, user_id}]}
-        - unique_csams: {name: {name, user_id}}
-    """
-    account_csams: Dict[str, list] = {}  # account_id -> [{name, user_id}]
-    unique_csams: Dict[str, dict] = {}   # name -> {name, user_id}
-
-    try:
-        for i in range(0, len(account_ids), batch_size):
-            batch = account_ids[i:i + batch_size]
-
-            account_filter = " or ".join(
-                [f"_msp_accountid_value eq {aid}" for aid in batch]
-            )
-            filter_query = (
-                f"({account_filter}) and "
-                "msp_standardtitle eq 'Customer Success Account Mgmt IC'"
-            )
-
-            result = query_entity(
-                "msp_accountteams",
-                select=[
-                    "_msp_accountid_value",
-                    "msp_fullname",
-                    "_msp_systemuserid_value",
-                ],
-                filter_query=filter_query,
-                top=100,
-            )
-            from app.services.msx_health_probe import record_msp_accountteams_call
-            record_msp_accountteams_call(result)
-
-            if not result.get("success"):
-                logger.warning(f"CSAM batch query failed: {result.get('error')}")
-                continue
-
-            for record in result.get("records", []):
-                acct_id = record.get("_msp_accountid_value")
-                name = record.get("msp_fullname", "")
-                user_id = record.get("_msp_systemuserid_value")
-                if not acct_id or not name:
-                    continue
-
-                account_csams.setdefault(acct_id, [])
-                # Avoid duplicates within the same account
-                if not any(c["name"] == name for c in account_csams[acct_id]):
-                    account_csams[acct_id].append({"name": name, "user_id": user_id})
-
-                if name not in unique_csams:
-                    unique_csams[name] = {"name": name, "user_id": user_id}
-
-        return {
-            "success": True,
-            "account_csams": account_csams,
-            "unique_csams": unique_csams,
-        }
 
     except Exception as e:
-        logger.exception("Error in batch account CSAM query")
-        return {"success": False, "error": str(e)}
-
-
-def batch_query_account_dss(
-    account_ids: List[str],
-    batch_size: int = 10
-) -> Dict[str, Any]:
-    """
-    Query msp_accountteams for Digital Solution Specialists (DSS).
-
-    DSSs are identified by ``msp_standardtitle eq 'Digital Solution Area
-    Specialists IC'``.  Their specialty area comes from ``msp_qualifier2``
-    (e.g. "Security", "Modern Work", "Azure Infrastructure").
-
-    Args:
-        account_ids: List of account GUIDs
-        batch_size: How many accounts per query (default 10)
-
-    Returns:
-        Dict with:
-        - account_dss: {account_id: [{name, specialty, user_id}]}
-        - unique_dss: {name: {name, specialty, user_id}}
-    """
-    account_dss: Dict[str, list] = {}   # account_id -> [{name, specialty, user_id}]
-    unique_dss: Dict[str, dict] = {}    # name -> {name, specialty, user_id}
-
-    try:
-        for i in range(0, len(account_ids), batch_size):
-            batch = account_ids[i:i + batch_size]
-
-            account_filter = " or ".join(
-                [f"_msp_accountid_value eq {aid}" for aid in batch]
-            )
-            filter_query = (
-                f"({account_filter}) and "
-                "msp_standardtitle eq 'Digital Solution Area Specialists IC'"
-            )
-
-            result = query_entity(
-                "msp_accountteams",
-                select=[
-                    "_msp_accountid_value",
-                    "msp_fullname",
-                    "msp_qualifier2",
-                    "_msp_systemuserid_value",
-                ],
-                filter_query=filter_query,
-                top=100,
-            )
-            from app.services.msx_health_probe import record_msp_accountteams_call
-            record_msp_accountteams_call(result)
-
-            if not result.get("success"):
-                logger.warning(f"DSS batch query failed: {result.get('error')}")
-                continue
-
-            for record in result.get("records", []):
-                acct_id = record.get("_msp_accountid_value")
-                name = record.get("msp_fullname", "")
-                specialty = record.get("msp_qualifier2", "")
-                user_id = record.get("_msp_systemuserid_value")
-                if not acct_id or not name:
-                    continue
-
-                account_dss.setdefault(acct_id, [])
-                if not any(d["name"] == name for d in account_dss[acct_id]):
-                    account_dss[acct_id].append({
-                        "name": name, "specialty": specialty, "user_id": user_id,
-                    })
-
-                if name not in unique_dss:
-                    unique_dss[name] = {
-                        "name": name, "specialty": specialty, "user_id": user_id,
-                    }
-
-        return {
-            "success": True,
-            "account_dss": account_dss,
-            "unique_dss": unique_dss,
-        }
-
-    except Exception as e:
-        logger.exception("Error in batch account DSS query")
+        logger.exception("Error querying native account v-teams")
         return {"success": False, "error": str(e)}
 
 
@@ -4306,7 +4245,7 @@ def get_accounts_for_territories(territory_names: List[str]) -> Dict[str, Any]:
 
 
 def get_accounts_for_territory_ids(territory_ids: List[str]) -> Dict[str, Any]:
-    """Get all accounts for a list of territory GUIDs (no name lookup).
+    """Get canonical top-level accounts for territory GUIDs (no name lookup).
 
     More robust than :func:`get_accounts_for_territories`: it skips the
     name -> id resolution entirely (callers usually already have the ids), so
@@ -4329,8 +4268,12 @@ def get_accounts_for_territory_ids(territory_ids: List[str]) -> Dict[str, Any]:
             accounts_result = query_entity(
                 "accounts",
                 select=["accountid", "name", "msp_mstopparentid",
-                        "_ownerid_value", "_territoryid_value"],
-                filter_query=f"_territoryid_value eq {territory_id}",
+                        "msp_parentinglevelcode", "_ownerid_value",
+                        "_territoryid_value"],
+                filter_query=(
+                    f"_territoryid_value eq {territory_id} and "
+                    "msp_parentinglevelcode eq 861980000"
+                ),
                 top=200,
             )
             if not accounts_result.get("success"):

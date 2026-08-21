@@ -2105,7 +2105,10 @@
                     setPhaseProgress('accounts', 0, 'Starting import...');
 
                     try {
-                        const resp = await fetch('/api/msx/import-stream');
+                        const resp = await fetch('/api/msx/accounts/sync', {
+                            method: 'POST',
+                            headers: { 'Accept': 'text/event-stream' },
+                        });
                         if (!resp.ok) {
                             // Try to extract a useful error message from the response body
                             let detail = '';

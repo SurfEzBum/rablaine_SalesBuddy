@@ -16,6 +16,25 @@ def _terr(tid, name):
     return {"msx_territory_id": tid, "territory_name": name}
 
 
+def test_current_fy_label_keeps_completed_next_fy_during_grace_period(app):
+    with app.app_context():
+        from app.models import UserPreference, db
+        from app.services import alignment
+
+        pref = UserPreference.query.first()
+        pref.fy_last_completed = "FY27"
+        db.session.commit()
+
+        with (
+            patch("app.services.fy_cutover.get_transition_state", return_value={}),
+            patch(
+                "app.services.fy_cutover.get_fiscal_year_labels",
+                return_value={"current_fy": "FY26", "next_fy": "FY27"},
+            ),
+        ):
+            assert alignment.current_fy_label() == "FY27"
+
+
 class TestAlignmentModels:
     """Model-level behavior for alignment tables."""
 
@@ -335,7 +354,7 @@ class TestSaveCommitsOverride:
 
 
 class TestAccountDiscovery:
-    """discover_accounts_from_alignment - all accounts in selected territories."""
+    """discover_accounts_from_alignment - top-level accounts in selected territories."""
 
     def test_no_alignment_returns_empty(self, app):
         with app.app_context():
@@ -344,7 +363,7 @@ class TestAccountDiscovery:
             assert result["success"] is True
             assert result["account_ids"] == []
 
-    def test_returns_all_accounts_in_selected_territories(self, app):
+    def test_returns_top_level_accounts_in_selected_territories(self, app):
         with app.app_context():
             from app.services import alignment
 
@@ -355,23 +374,44 @@ class TestAccountDiscovery:
                 "success": True,
                 "accounts": [
                     {"account_id": "a1", "territory_id": "t1", "tpid": 100},
-                    {"account_id": "a2", "territory_id": "t1", "tpid": 100},
-                    {"account_id": "a3", "territory_id": "t2", "tpid": 200},
+                    {"account_id": "a2", "territory_id": "t2", "tpid": 200},
                 ],
             }
             with patch.object(alignment, "get_accounts_for_territory_ids",
                               return_value=accounts) as mock_get:
                 result = alignment.discover_accounts_from_alignment(FY)
 
-            # Whole-territory: all account records kept, no seller scoping.
-            assert set(result["account_ids"]) == {"a1", "a2", "a3"}
+            assert set(result["account_ids"]) == {"a1", "a2"}
             assert result["territory_count"] == 2
-            assert result["kept_account_count"] == 3
-            # a1 and a2 share TPID 100, so 2 unique customers, not 3.
+            assert result["kept_account_count"] == 2
             assert result["customer_count"] == 2
             # Queried by territory ids, not names (robust path).
             called_ids = sorted(mock_get.call_args[0][0])
             assert called_ids == ["t1", "t2"]
+
+    def test_territory_query_filters_to_top_level_accounts(self):
+        from app.services import msx_api
+
+        query_result = {
+            "success": True,
+            "records": [{
+                "accountid": "a1",
+                "name": "Top Account",
+                "msp_mstopparentid": 100,
+                "msp_parentinglevelcode": 861980000,
+                "_territoryid_value": "t1",
+            }],
+        }
+        with patch.object(msx_api, "query_entity", return_value=query_result) as mock_query:
+            result = msx_api.get_accounts_for_territory_ids(["t1"])
+
+        assert result["success"] is True
+        assert result["account_count"] == 1
+        call = mock_query.call_args
+        assert "msp_parentinglevelcode" in call.kwargs["select"]
+        assert call.kwargs["filter_query"] == (
+            "_territoryid_value eq t1 and msp_parentinglevelcode eq 861980000"
+        )
 
     def test_discovery_propagates_msx_error(self, app):
         with app.app_context():

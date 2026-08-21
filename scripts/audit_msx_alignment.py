@@ -1,6 +1,6 @@
 """Read-only audit of what an MSX account sync would pull for the current user.
 
-Mirrors the discovery phases of the real sync (``/api/msx/import-stream``) WITHOUT
+Mirrors the discovery phases of the real sync (``/api/msx/accounts/sync``) WITHOUT
 writing anything to the database. Use this to verify a tentative alignment before
 committing it: it reports the sellers and territories you're aligned to plus the
 number of accounts the sync sees.

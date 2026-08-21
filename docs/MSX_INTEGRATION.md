@@ -135,14 +135,10 @@ GET /api/data/v9.2/systemusers({user_id})/teammembership_association
 - Follow `@odata.nextLink` to page through all memberships.
 - Extract distinct account GUIDs — that's your account list.
 
-> **Why not `msp_accountteams`?** We used to discover accounts from the
-> `msp_accountteams` custom entity filtered by `_msp_systemuserid_value`. As of
-> August 2026 MSX stopped populating that entity with current alignments — it
-> returns **zero rows** for a user by systemuser GUID, name, and email even
-> though the user is on hundreds of native account access teams. The entity
-> schema still responds (it's not the classic 400 hard-break), the data is just
-> absent, so it can't be used for discovery. See Gotcha #7. The role tables
-> below are still referenced by the seller/SE enrichment section.
+> **Why not `msp_accountteams`?** The custom entity does not reliably represent
+> current membership. It can omit current users and retain misleading overlay
+> rows. Both discovery and seller/core-SE enrichment use native account access
+> teams instead. See Gotcha #9.
 
 **`msp_qualifier2` role values (used by seller/SE enrichment, not discovery):**
 
@@ -203,97 +199,26 @@ pod_name = f"{region} POD {pod_num}"
 
 ---
 
-## Fetching Account Team Members (Sellers & SEs)
+## Fetching Account Team Members (Sellers and Core SEs)
 
-> ⚠️ **Heads up (August 2026):** the queries in this section read the
-> `msp_accountteams` custom entity, which MSX stopped populating with current
-> data (see [Step 2](#step-2-discover-the-users-accounts-native-account-access-team)
-> and Gotcha #7). Account *discovery* has moved to the native access team, but
-> the seller/SE *enrichment* below still targets `msp_accountteams`, so it may
-> return empty until MSX restores the feed or this is migrated to the native
-> access team model as well.
+Query each account's native access team with FetchXML. Join `team` through
+`teammembership` to `systemuser`, then filter linked users to active Corporate
+Growth/Acquisition sellers and Data, Infrastructure, or Apps solution
+engineers. The same response supplies names, user IDs, titles, qualifiers, and
+email aliases.
 
-### The Problem: Record Limits and No $skip
+The sync batches these queries across three workers. It parses seller and core
+SE assignments from each response, aggregates SEs across every account in a
+POD, then writes the complete in-memory graph to the database.
 
-Each account can have 250–300+ team members. MSX returns max 100 per query and **does not support `$skip`** for pagination on `msp_accountteams`.
+POD is not an MSX entity relationship. It is encoded in territory names:
 
-### The Solution: Server-Side Filtering
-
-Filter to reduce 300+ records to ~20–30 per account:
-
-```
-GET /api/data/v9.2/msp_accountteams
-    ?$filter=_msp_accountid_value eq {account_id}
-            and msp_qualifier1 eq 'Corporate'
-            and startswith(msp_qualifier2,'Cloud ')
-    &$select=msp_fullname,msp_qualifier2,msp_standardtitle,_msp_systemuserid_value
-    &$top=100
+```text
+East.SMECC.MAA.0601 -> East POD 06
 ```
 
-- `msp_qualifier1 eq 'Corporate'` — Only corporate-level assignments
-- `startswith(msp_qualifier2,'Cloud ')` — All Cloud & AI roles (sellers AND SEs)
-
-### Batching Multiple Accounts
-
-Query multiple accounts in one request:
-
-```
-GET /api/data/v9.2/msp_accountteams
-    ?$filter=(_msp_accountid_value eq guid1 or _msp_accountid_value eq guid2 or ...)
-            and msp_qualifier1 eq 'Corporate'
-            and startswith(msp_qualifier2,'Cloud ')
-    &$select=_msp_accountid_value,msp_fullname,msp_qualifier2,msp_standardtitle,_msp_systemuserid_value
-    &$top=100
-```
-
-**Batch Size Calculation** (~22 records per account after filtering):
-- 3 accounts: 66 records (safe)
-- 4 accounts: 88 records (borderline)
-- 5 accounts: 110 records (exceeds limit!)
-
-**Use batch size of 3** to stay safely under 100.
-
-### Identifying Sellers vs SEs
-
-**Sellers:** `msp_qualifier2` = "Cloud & AI" or "Cloud & AI-Acq" AND `msp_standardtitle` contains "Specialists IC"
-
-The title filter is important — without it you'll also get CSU, CSA, managers, and other roles.
-
-```python
-if qualifier2 in ("Cloud & AI", "Cloud & AI-Acq") and "Specialists IC" in standardtitle:
-    seller_type = "Growth" if qualifier2 == "Cloud & AI" else "Acquisition"
-```
-
-**SEs:** Check `msp_qualifier2`:
-```python
-se_map = {
-    "Cloud & AI Data": "data_se",
-    "Cloud & AI Infrastructure": "infra_se",
-    "Cloud & AI Apps": "apps_se",
-}
-```
-
-### Looking Up User Aliases (Email)
-
-Account team records include `_msp_systemuserid_value` — use it to look up email:
-
-```
-GET /api/data/v9.2/systemusers({systemuser_id})
-    ?$select=domainname,internalemailaddress
-```
-
-Extract the alias from the email:
-```python
-email = data.get("domainname") or data.get("internalemailaddress") or ""
-alias = email.split("@")[0] if "@" in email else None
-```
-
-The email also enables Teams chat deep links:
-```
-https://teams.microsoft.com/l/chat/0/0?users={email}
-```
-
-**On-demand approach:** Only look up aliases when creating a *new* seller or SE. If they already exist in the database, skip the lookup. This minimizes API calls after initial import.
+See [MSX Native Account V-Team](MSX_ACCOUNT_TEAM_ROLES.md) for FetchXML,
+classification rules, validation results, and sync architecture.
 
 ---
 
@@ -762,25 +687,22 @@ When building URLs to open records in MSX, include the app ID:
 ```
 Without it, MSX might not load the correct app context.
 
-### 9. `msp_accountteams` Is No Longer Populated (August 2026)
+### 9. Do Not Use `msp_accountteams` for Current Alignment
 
-The `msp_accountteams` custom entity stopped being fed with current alignments.
-It still responds and its schema is intact (17 attributes), but it returns
-**zero rows** for a user filtered by `_msp_systemuserid_value`, `msp_fullname`,
-or `msp_internalemailaddress` — even when that user is on hundreds of native
-account access teams. This is **not** the classic `0x80040224` 400 hard-break;
-the endpoint is healthy, the data is simply absent.
+The `msp_accountteams` custom entity does not reliably represent current
+alignment. User discovery can return no rows, valid account sellers can be
+missing, and overlay rows can resemble the assigned seller.
 
 Consequences and guidance:
-- **Account discovery** moved to the native account access team model — the
+- **Account discovery** uses the native account access team model - the
   user's `teammembership_association` filtered to template
   `3fcc1cfc-3e43-e311-9405-00155db3ba1e`. See
   [Step 2](#step-2-discover-the-users-accounts-native-account-access-team).
-- **Don't** query `msp_accountteams` unfiltered or with `$count=true` — it's a
+- **Don't** query `msp_accountteams` unfiltered or with `$count=true` - it is a
   large entity and those requests time out (~15s), which can also trip the
   client's VPN-block detection and abort later requests in the same process.
-- The seller/SE enrichment section still reads `msp_accountteams` and may return
-  empty until MSX restores the feed or it's migrated to the native model.
+- **Seller and core-SE enrichment** joins each native account access team to
+    current `systemuser` records. It does not read `msp_accountteams`.
 
 ---
 

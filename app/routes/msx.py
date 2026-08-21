@@ -12,6 +12,7 @@ Provides API endpoints for MSX (Dynamics 365) integration:
 import json
 import math
 import queue
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -65,13 +66,11 @@ from app.services.msx_api import (
     batch_query_accounts,
     batch_query_territories,
     batch_query_account_teams,
-    batch_query_account_csams,
-    batch_query_account_dss,
     build_account_url,
     get_user_alias,
     get_user_info,
 )
-from app.models import Customer, CustomerCSAM, InternalContact, Milestone, MsxTask, Opportunity, Territory, Seller, POD, SolutionEngineer, SyncStatus, Vertical, db, utc_now
+from app.models import Customer, InternalContact, Milestone, MsxTask, Opportunity, Territory, Seller, POD, SolutionEngineer, SyncStatus, Vertical, db, utc_now
 
 
 logger = logging.getLogger(__name__)
@@ -1217,6 +1216,14 @@ def _sse(data: dict) -> str:
     return "data: " + json.dumps(data) + "\n\n"
 
 
+def _derive_pod_name(territory_name: str) -> str | None:
+    """Derive the virtual POD encoded in an MSX territory name."""
+    parts = territory_name.split(".")
+    if len(parts) < 4 or len(parts[3]) < 2:
+        return None
+    return f"{parts[0]} POD {parts[3][:2]}"
+
+
 def _drain(q: queue.Queue) -> list:
     events = []
     while True:
@@ -1325,76 +1332,18 @@ def _par_query_teams(account_ids, batch_size, progress_q, worker_id):
             "account_ses": account_ses}
 
 
-_CSAM_BATCH = 10  # CSAMs are rare (~0-3 per account), safe to batch more
-
-
-def _par_query_csams(account_ids, batch_size, progress_q, worker_id):
-    """Worker: query CSAM team members for a chunk of account IDs."""
-    from app.services.msx_api import msx_retry_state
-
-    def _on_retry(attempt, max_retries, wait_secs, error_type):
-        progress_q.put({"retry": True, "message":
-            f"Querying CSAMs - timeout, retrying ({attempt}/{max_retries})..."})
-    msx_retry_state.callback = _on_retry
-
-    account_csams: dict = {}
-    unique_csams: dict = {}
-    batches = math.ceil(len(account_ids) / batch_size) if account_ids else 0
-    try:
-        for batch_num, i in enumerate(range(0, len(account_ids), batch_size), start=1):
-            batch = account_ids[i:i + batch_size]
-            csam_result = batch_query_account_csams(batch, batch_size=len(batch))
-            if csam_result.get("success"):
-                account_csams.update(csam_result.get("account_csams", {}))
-                unique_csams.update(csam_result.get("unique_csams", {}))
-            progress_q.put({"worker": worker_id, "batch": batch_num,
-                            "total_batches": batches, "csams_found": len(unique_csams)})
-    finally:
-        msx_retry_state.callback = None
-    return {"account_csams": account_csams, "unique_csams": unique_csams}
-
-
-_DSS_BATCH = 10  # DSSs are sparse (~0-3 per account), safe to batch more
-
-
-def _par_query_dss(account_ids, batch_size, progress_q, worker_id):
-    """Worker: query DSS team members for a chunk of account IDs."""
-    from app.services.msx_api import msx_retry_state
-
-    def _on_retry(attempt, max_retries, wait_secs, error_type):
-        progress_q.put({"retry": True, "message":
-            f"Querying DSSs - timeout, retrying ({attempt}/{max_retries})..."})
-    msx_retry_state.callback = _on_retry
-
-    account_dss: dict = {}
-    unique_dss: dict = {}
-    batches = math.ceil(len(account_ids) / batch_size) if account_ids else 0
-    try:
-        for batch_num, i in enumerate(range(0, len(account_ids), batch_size), start=1):
-            batch = account_ids[i:i + batch_size]
-            dss_result = batch_query_account_dss(batch, batch_size=len(batch))
-            if dss_result.get("success"):
-                account_dss.update(dss_result.get("account_dss", {}))
-                unique_dss.update(dss_result.get("unique_dss", {}))
-            progress_q.put({"worker": worker_id, "batch": batch_num,
-                            "total_batches": batches, "dss_found": len(unique_dss)})
-    finally:
-        msx_retry_state.callback = None
-    return {"account_dss": account_dss, "unique_dss": unique_dss}
-
-
-@msx_bp.route('/import-stream')
-def import_stream():
+@msx_bp.route('/accounts/sync', methods=['POST'])
+def sync_accounts():
     """
     Stream import all accounts/data from MSX into Sales Buddy database.
 
-    Uses 3 concurrent workers for the API query phases (accounts,
-    territories, teams) then writes to the database sequentially.
-    Sends Server-Sent Events (SSE) to stream progress updates.
+    Uses three concurrent workers for the API query phases, then writes to the
+    database sequentially. SSE clients receive progress; other clients start
+    the same sync in a background thread and receive HTTP 202.
     """
     token = get_msx_token()
     if not token:
-        logger.warning("import-stream: No MSX token available")
+        logger.warning("accounts/sync: No MSX token available")
         return jsonify({
             "error": "Not authenticated with MSX. Complete Step 2 (Sign in with Azure) first.",
             "auth_required": True,
@@ -1405,7 +1354,7 @@ def import_stream():
         if not user_check:
             return jsonify({"error": "Database not initialized. No user record found."}), 500
     except Exception as e:
-        logger.exception("import-stream: Database check failed")
+        logger.exception("accounts/sync: Database check failed")
         return jsonify({"error": f"Database error: {e}"}), 500
 
     # Capture app object outside the generator so the post-import background
@@ -1413,8 +1362,8 @@ def import_stream():
     _app_for_aura = current_app._get_current_object()
 
     # Determine account-discovery source before streaming: the alignment
-    # override (when switched on) makes the sync use the user's declared
-    # territories; otherwise fall back to the msp_accountteams-based scan_init.
+    # override uses declared territories; otherwise scan_init reads native
+    # account access-team memberships.
     # An explicit ?source= overrides the toggle.
     from app.services.alignment import (
         current_fy_label,
@@ -1440,7 +1389,7 @@ def import_stream():
             # ----------------------------------------------------------
             # Phase 1: discover the accounts to import
             #   - alignment mode: the user's declared territories
-            #   - default mode: msp_accountteams (scan_init)
+            #   - default mode: native account access teams (scan_init)
             # ----------------------------------------------------------
             if _use_alignment:
                 phase = "reading your territory alignment"
@@ -1638,13 +1587,7 @@ def import_stream():
                 if territory_id and territory_id in territories_raw:
                     terr = territories_raw[territory_id]
                     terr_name = terr.get("name", "")
-                    name_parts = terr_name.split(".")
-                    if len(name_parts) >= 4:
-                        region = name_parts[0]
-                        territory_num = name_parts[3]
-                        if len(territory_num) >= 2:
-                            pod_num = territory_num[:2]
-                            pod_name = f"{region} POD {pod_num}"
+                    pod_name = _derive_pod_name(terr_name)
                     territory_info = {
                         "id": territory_id,
                         "name": terr_name,
@@ -1758,123 +1701,6 @@ def import_stream():
                     sellers_seen.update(r["unique_sellers"])
                     account_ses.update(r["account_ses"])
 
-            # ----------------------------------------------------------
-            # Phase 4b: Parallel CSAM queries (3 workers)
-            # ----------------------------------------------------------
-            phase = "querying CSAMs"
-            yield _sse({"message": "Querying CSAMs...", "progress": 60})
-
-            csam_chunks = _split_chunks(all_ids, _PARALLEL_WORKERS)
-            csam_total = sum(
-                math.ceil(len(c) / _CSAM_BATCH) for c in csam_chunks if c
-            )
-            csam_done = 0
-
-            account_csams: dict = {}    # account_id -> [{name, user_id}]
-            csams_seen: dict = {}       # name -> {name, user_id}
-
-            with ThreadPoolExecutor(max_workers=_PARALLEL_WORKERS) as pool:
-                futures = [
-                    pool.submit(_par_query_csams, chunk, _CSAM_BATCH,
-                                progress_q, idx + 1)
-                    for idx, chunk in enumerate(csam_chunks) if chunk
-                ]
-                while not all(f.done() for f in futures):
-                    time.sleep(0.3)
-                    for evt in _drain(progress_q):
-                        if evt.get('retry'):
-                            yield _sse({"message": evt['message']})
-                            continue
-                        csam_done += 1
-                    if csam_done > 0 and csam_done % 3 == 0:
-                        yield _sse({
-                            "message": f"Querying CSAMs batch {csam_done}/{csam_total}...",
-                            "progress": 60 + round((csam_done / max(csam_total, 1)) * 10),
-                        })
-                for evt in _drain(progress_q):
-                    if evt.get('retry'):
-                        yield _sse({"message": evt['message']})
-                        continue
-                    csam_done += 1
-                for f in futures:
-                    r = f.result()
-                    account_csams.update(r["account_csams"])
-                    csams_seen.update(r["unique_csams"])
-
-            yield _sse({
-                "message": f"Found {len(csams_seen)} CSAMs",
-                "progress": 70,
-            })
-
-            # ----------------------------------------------------------
-            # Phase 4c: Parallel DSS queries (3 workers)
-            # ----------------------------------------------------------
-            phase = "querying DSSs"
-            yield _sse({"message": "Querying DSSs...", "progress": 70})
-
-            dss_chunks = _split_chunks(all_ids, _PARALLEL_WORKERS)
-            dss_batch_total = sum(
-                math.ceil(len(c) / _DSS_BATCH) for c in dss_chunks if c
-            )
-            dss_done = 0
-
-            account_dss: dict = {}    # account_id -> [{name, specialty, user_id}]
-            dss_seen: dict = {}       # name -> {name, specialty, user_id}
-
-            with ThreadPoolExecutor(max_workers=_PARALLEL_WORKERS) as pool:
-                futures = [
-                    pool.submit(_par_query_dss, chunk, _DSS_BATCH,
-                                progress_q, idx + 1)
-                    for idx, chunk in enumerate(dss_chunks) if chunk
-                ]
-                while not all(f.done() for f in futures):
-                    time.sleep(0.3)
-                    for evt in _drain(progress_q):
-                        if evt.get('retry'):
-                            yield _sse({"message": evt['message']})
-                            continue
-                        dss_done += 1
-                    if dss_done > 0 and dss_done % 3 == 0:
-                        yield _sse({
-                            "message": f"Querying DSSs batch {dss_done}...",
-                            "progress": 70 + round((dss_done / max(dss_batch_total, 1)) * 18),
-                        })
-                for evt in _drain(progress_q):
-                    if evt.get('retry'):
-                        yield _sse({"message": evt['message']})
-                        continue
-                    dss_done += 1
-                for f in futures:
-                    r = f.result()
-                    account_dss.update(r["account_dss"])
-                    dss_seen.update(r["unique_dss"])
-
-            # Filter out broad/non-specific DSS specialties that aren't useful
-            _DSS_EXCLUDED_SPECIALTIES = {"Unified", "Cloud & AI-Acq", "Cloud & AI"}
-            dss_seen = {
-                name: info for name, info in dss_seen.items()
-                if info.get("specialty", "") not in _DSS_EXCLUDED_SPECIALTIES
-            }
-            _allowed_dss_names = set(dss_seen.keys())
-            for acct_id in list(account_dss):
-                account_dss[acct_id] = [
-                    d for d in account_dss[acct_id]
-                    if d["name"] in _allowed_dss_names
-                ]
-                if not account_dss[acct_id]:
-                    del account_dss[acct_id]
-
-            # Clean up previously-synced DSS records with excluded specialties
-            excluded_dss = SolutionEngineer.query.filter(
-                SolutionEngineer.specialty.in_(_DSS_EXCLUDED_SPECIALTIES)
-            ).all()
-            for se in excluded_dss:
-                se.territories.clear()
-                se.pods.clear()
-                db.session.delete(se)
-            if excluded_dss:
-                db.session.flush()
-
             # Populate seller info on accounts
             accounts_with_sellers = 0
             for ad in accounts_data:
@@ -1900,8 +1726,7 @@ def import_stream():
             yield _sse({
                 "message": (
                     f"Found {len(sellers_seen)} sellers, "
-                    f"{len(csams_seen)} CSAMs, "
-                    f"{len(dss_seen)} DSSs for "
+                    f"core solution engineers for "
                     f"{accounts_with_sellers}/{len(accounts_data)} accounts"
                 ),
                 "progress": 88,
@@ -1914,26 +1739,33 @@ def import_stream():
 
             # Collect all unique user_ids from every source
             all_user_ids: set = set()
+            alias_cache: dict = {}
             for info in sellers_seen.values():
                 if info.get("user_id"):
-                    all_user_ids.add(info["user_id"])
+                    if info.get("alias"):
+                        alias_cache[info["user_id"]] = {
+                            "alias": info["alias"],
+                            "fullname": info.get("name"),
+                        }
+                    else:
+                        all_user_ids.add(info["user_id"])
             for team in pod_teams.values():
                 for se_list in team.values():
                     for se_info in se_list:
                         if se_info.get("user_id"):
-                            all_user_ids.add(se_info["user_id"])
-            for info in dss_seen.values():
-                if info.get("user_id"):
-                    all_user_ids.add(info["user_id"])
-            for info in csams_seen.values():
-                if info.get("user_id"):
-                    all_user_ids.add(info["user_id"])
+                            if se_info.get("alias"):
+                                alias_cache[se_info["user_id"]] = {
+                                    "alias": se_info["alias"],
+                                    "fullname": se_info.get("name"),
+                                }
+                            else:
+                                all_user_ids.add(se_info["user_id"])
             for ad in accounts_data:
                 if ad.get("owner_id"):
-                    all_user_ids.add(ad["owner_id"])
+                    if ad["owner_id"] not in alias_cache:
+                        all_user_ids.add(ad["owner_id"])
 
             alias_total = len(all_user_ids)
-            alias_cache: dict = {}  # user_id -> {alias, fullname} or None
             alias_done = 0
 
             if alias_total > 0:
@@ -2086,6 +1918,13 @@ def import_stream():
             db.session.flush()
 
             # Associate sellers with territories
+            synced_territories = set(territories_map.values())
+            for seller in Seller.query.all():
+                seller.territories = [
+                    territory
+                    for territory in seller.territories
+                    if territory not in synced_territories
+                ]
             for ad in accounts_data:
                 sn = ad.get("seller_name")
                 tn = ad.get("territory_name")
@@ -2155,113 +1994,6 @@ def import_stream():
             yield _sse({
                 "message": f"Created {ses_created} new solution engineers",
                 "progress": 93,
-            })
-
-            # Digital Solution Specialists (DSSs)
-            # DSSs are SolutionEngineer records linked to territories (not pods).
-            dss_map: dict = {}  # (name, specialty) -> SolutionEngineer
-            dss_created = 0
-            dss_updated = 0
-            dss_total = len(dss_seen)
-
-            yield _sse({
-                "message": f"Syncing digital solution specialists (0/{dss_total})...",
-                "progress": 93,
-            })
-
-            # Build account_id → territory_name for DSS territory linking
-            acct_territory: dict = {
-                ad["id"]: ad.get("territory_name")
-                for ad in accounts_data
-                if ad.get("territory_name")
-            }
-
-            for dss_idx, (dss_name, dss_info) in enumerate(dss_seen.items(), 1):
-                specialty = dss_info.get("specialty", "")
-                dss_key = (dss_name, specialty)
-                existing = SolutionEngineer.query.filter_by(
-                    name=dss_name, specialty=specialty,
-                ).first()
-                if existing:
-                    dss_map[dss_key] = existing
-                    # Backfill alias if missing
-                    if not existing.alias and dss_info.get("user_id"):
-                        alias = _cached_alias(dss_info["user_id"])
-                        if alias:
-                            existing.alias = alias
-                            dss_updated += 1
-                else:
-                    systemuser_id = dss_info.get("user_id")
-                    alias = _cached_alias(systemuser_id)
-                    se = SolutionEngineer(
-                        name=dss_name, alias=alias, specialty=specialty,
-                    )
-                    db.session.add(se)
-                    dss_map[dss_key] = se
-                    dss_created += 1
-                if dss_idx % 5 == 0 or dss_idx == dss_total:
-                    yield _sse({
-                        "message": f"Syncing DSSs ({dss_idx}/{dss_total})...",
-                        "progress": 93 + round((dss_idx / max(dss_total, 1)) * 1),
-                    })
-            db.session.flush()
-
-            # Link DSSs to territories based on which accounts they cover
-            for acct_id, dss_list in account_dss.items():
-                terr_name = acct_territory.get(acct_id)
-                territory = territories_map.get(terr_name) if terr_name else None
-                if not territory:
-                    continue
-                for d in dss_list:
-                    dss_key = (d["name"], d.get("specialty", ""))
-                    se = dss_map.get(dss_key)
-                    if se and territory not in se.territories:
-                        se.territories.append(territory)
-            db.session.flush()
-
-            yield _sse({
-                "message": f"Created {dss_created} new DSSs, linked to territories",
-                "progress": 94,
-            })
-
-            # CSAMs
-            csam_map: dict = {}  # name -> CustomerCSAM
-            csams_created = 0
-            csams_updated = 0
-            csam_total = len(csams_seen)
-
-            yield _sse({
-                "message": f"Syncing CSAMs (0/{csam_total})...",
-                "progress": 94,
-            })
-
-            for csam_idx, (csam_name, csam_info) in enumerate(csams_seen.items(), 1):
-                existing = CustomerCSAM.query.filter_by(name=csam_name).first()
-                if existing:
-                    csam_map[csam_name] = existing
-                    # Backfill alias if missing
-                    if not existing.alias and csam_info.get("user_id"):
-                        alias = _cached_alias(csam_info["user_id"])
-                        if alias:
-                            existing.alias = alias
-                            csams_updated += 1
-                else:
-                    systemuser_id = csam_info.get("user_id")
-                    alias = _cached_alias(systemuser_id)
-                    csam = CustomerCSAM(name=csam_name, alias=alias)
-                    db.session.add(csam)
-                    csam_map[csam_name] = csam
-                    csams_created += 1
-                if csam_idx % 5 == 0 or csam_idx == csam_total:
-                    yield _sse({
-                        "message": f"Syncing CSAMs ({csam_idx}/{csam_total})...",
-                        "progress": 94 + round((csam_idx / max(csam_total, 1)) * 1),
-                    })
-            db.session.flush()
-
-            yield _sse({
-                "message": f"Created {csams_created} new CSAMs",
-                "progress": 95,
             })
 
             # DAE aliases already resolved in alias_cache (Phase 4d)
@@ -2440,16 +2172,6 @@ def import_stream():
                                     ic.name = fullname
                                     daes_updated += 1
 
-                        # Update available CSAMs (M2M) from MSX
-                        acct_csam_list = account_csams.get(ad["id"], [])
-                        new_csam_objs = [
-                            csam_map[c["name"]]
-                            for c in acct_csam_list if c["name"] in csam_map
-                        ]
-                        if set(new_csam_objs) != set(cust.available_csams):
-                            cust.available_csams = new_csam_objs
-                            changed = True
-
                         if changed:
                             customers_updated += 1
                         else:
@@ -2493,12 +2215,6 @@ def import_stream():
                                 db.session.add(ic)
                                 internal_contacts_by_alias[alias] = ic
                                 daes_created += 1
-                    # Available CSAMs (M2M)
-                    acct_csam_list = account_csams.get(ad["id"], [])
-                    for c in acct_csam_list:
-                        csam_obj = csam_map.get(c["name"])
-                        if csam_obj:
-                            customer.available_csams.append(csam_obj)
                     db.session.add(customer)
                     existing_customers_by_tpid[tpid] = customer
                     customers_created += 1
@@ -2595,10 +2311,6 @@ def import_stream():
                     "sellers_created": sellers_created,
                     "sellers_updated": sellers_updated,
                     "solution_engineers_created": ses_created,
-                    "dss_created": dss_created,
-                    "dss_updated": dss_updated,
-                    "csams_created": csams_created,
-                    "csams_updated": csams_updated,
                     "daes_created": daes_created,
                     "daes_updated": daes_updated,
                     "verticals_created": verticals_created,
@@ -2639,8 +2351,6 @@ def import_stream():
                 f"Parallel MSX Import complete in {duration}s: "
                 f"{pods_created} PODs, {territories_created} territories, "
                 f"{sellers_created} sellers ({sellers_updated} updated), {ses_created} SEs, "
-                f"{dss_created} DSSs ({dss_updated} updated), "
-                f"{csams_created} CSAMs ({csams_updated} updated), "
                 f"{daes_created} DAEs ({daes_updated} updated), "
                 f"{verticals_created} verticals, "
                 f"{customers_created} customers created, {customers_updated} updated, "
@@ -2663,14 +2373,31 @@ def import_stream():
             )
             yield _sse({"error": f"Import failed during '{phase}': {error_detail}"})
 
-    return Response(
-        stream_with_context(generate()),
-        mimetype='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no',
-        },
-    )
+    if 'text/event-stream' in request.headers.get('Accept', ''):
+        return Response(
+            stream_with_context(generate()),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'X-Accel-Buffering': 'no',
+            },
+        )
+
+    def _run_sync(app):
+        with app.app_context():
+            for _ in generate():
+                pass
+
+    threading.Thread(
+        target=_run_sync,
+        args=(current_app._get_current_object(),),
+        daemon=True,
+    ).start()
+    return jsonify({
+        "success": True,
+        "message": "Account sync started in background.",
+        "async": True,
+    }), 202
 
 
 @msx_bp.route('/sync-marketing', methods=['POST'])
