@@ -860,6 +860,51 @@ def list_action_items(
 # ============================================================================
 
 @tool(
+    'report_activity_coverage',
+    'Get fiscal-year meeting coverage and meetings needing MSX activity follow-up.',
+    {
+        'type': 'object',
+        'properties': {
+            'week': {
+                'type': 'string',
+                'description': 'Any date in the requested week, YYYY-MM-DD.',
+            },
+        },
+    },
+)
+def report_activity_coverage(week: str | None = None) -> dict:
+    """Return activity coverage totals and selected-week meeting statuses."""
+    from app.services.activity_coverage import get_report_data, normalize_week_start
+
+    try:
+        week_start = normalize_week_start(week) if week else None
+    except ValueError:
+        return {'error': 'week must use YYYY-MM-DD format'}
+    data = get_report_data(week_start)
+    return {
+        'url': f'{_BASE}/reports/activity-coverage?week={data["week_start"].isoformat()}',
+        'fiscal_year': {
+            'start': data['fiscal_start'].isoformat(),
+            'end': data['fiscal_end'].isoformat(),
+        },
+        'summary': data['summary'],
+        'meetings': [
+            {
+                'id': meeting['id'],
+                'subject': _clean(meeting['subject']),
+                'date': meeting['meeting_date'].isoformat(),
+                'customer': meeting['customer'].name if meeting['customer'] else None,
+                'status': meeting['status'],
+                'milestone': (
+                    meeting['activity'].milestone.display_text
+                    if meeting['activity'] else None
+                ),
+            }
+            for meeting in data['meetings']
+        ],
+    }
+
+@tool(
     'report_hygiene',
     'Get data hygiene gaps: engagements missing milestones and milestones missing engagements.',
     {

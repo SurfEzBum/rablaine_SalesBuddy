@@ -77,7 +77,14 @@ _X500_RE = re.compile(r'^/O=', re.IGNORECASE)
 # named "SME". Blacklisted meetings are dropped wholesale: no ghost, no
 # picker entry, no customer resolution.
 _SUBJECT_BLACKLIST = [
+    re.compile(r'^\s*Canceled\s*:', re.IGNORECASE),
+    re.compile(r'\b(?:OOO|OOF)\b', re.IGNORECASE),
+    re.compile(r'\bOut\s+of\s+Office\b', re.IGNORECASE),
+    re.compile(r'\bFY27\s+CAIP\b', re.IGNORECASE),
+    re.compile(r'\bFY27\s+Partner\b', re.IGNORECASE),
+    re.compile(r'\bMCAPS\b', re.IGNORECASE),
     re.compile(r'\bSME\s*&\s*C\b', re.IGNORECASE),
+    re.compile(r'\bOffice\s+Hours\b', re.IGNORECASE),
 ]
 
 
@@ -135,6 +142,29 @@ def _extract_json_array(response: str) -> List[Dict[str, Any]]:
     if not isinstance(data, list):
         raise ValueError("parsed JSON is not a list")
     return data
+
+
+def _legacy_meetings_to_raw(
+    meetings: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Convert proven markdown-parser output into prefetch meeting shape."""
+    converted = []
+    for meeting in meetings:
+        start_time = meeting.get('start_time')
+        if not start_time or not meeting.get('title'):
+            continue
+        local_start = start_time.astimezone()
+        local_end = local_start + timedelta(minutes=30)
+        converted.append({
+            'subject': meeting['title'],
+            'start_time': local_start.isoformat(),
+            'end_time': local_end.isoformat(),
+            'organizer_email': None,
+            'is_recurring': False,
+            'attendees': [],
+            'external_company': meeting.get('customer') or '',
+        })
+    return converted
 
 
 def _parse_dt(value: Optional[str]) -> Optional[datetime]:
@@ -542,6 +572,7 @@ def _upsert_meeting(
     end_time = _parse_dt(raw.get('end_time'))
     organizer = _normalize_organizer(raw.get('organizer_email'))
     is_recurring = bool(raw.get('is_recurring'))
+    recurring_key = _recurring_key(subject, organizer) if is_recurring else None
 
     if not subject or not start_time:
         logger.debug("Prefetch: skipping meeting with no subject or start_time")
@@ -556,9 +587,13 @@ def _upsert_meeting(
     if not isinstance(raw_attendees, list):
         raw_attendees = []
 
+    matching_subject = ' '.join(filter(None, [
+        subject,
+        (raw.get('external_company') or '').strip(),
+    ]))
     customer_id, matched_via = _resolve_customer(
         raw_attendees, domain_map,
-        subject=subject, subject_matchers=subject_matchers,
+        subject=matching_subject, subject_matchers=subject_matchers,
     )
 
     existing = PrefetchedMeeting.query.filter_by(workiq_id=workiq_id).first()
@@ -569,7 +604,7 @@ def _upsert_meeting(
         existing.meeting_date = target_date
         existing.organizer_email = organizer
         existing.is_recurring = is_recurring
-        existing.recurring_key = _recurring_key(subject, organizer) if is_recurring else None
+        existing.recurring_key = recurring_key
         existing.fetched_at = utc_now()
         existing.expires_at = _expires_at_for(target_date)
         # Preserve dismissed + note_id; only refresh customer match if it
@@ -590,13 +625,18 @@ def _upsert_meeting(
             meeting_date=target_date,
             organizer_email=organizer,
             is_recurring=is_recurring,
-            recurring_key=_recurring_key(subject, organizer) if is_recurring else None,
+            recurring_key=recurring_key,
             customer_id=customer_id,
             matched_via=matched_via,
             expires_at=_expires_at_for(target_date),
         )
         db.session.add(meeting)
         db.session.flush()
+
+    if recurring_key:
+        from app.models import DismissedRecurringMeeting
+        if db.session.get(DismissedRecurringMeeting, recurring_key) is not None:
+            meeting.dismissed = True
 
     seen_emails: set = set()
     for att in raw_attendees:
@@ -623,26 +663,17 @@ def _upsert_meeting(
 
 
 def purge_expired() -> int:
-    """Delete meetings outside the ghost-aura retention window.
+    """Delete meetings older than the current Microsoft fiscal year.
 
-    Computes the cutoff live from ``meeting_date`` rather than trusting the
-    ``expires_at`` column. This way changes to
-    ``GHOST_RETENTION_BUSINESS_DAYS`` take effect immediately for existing
-    rows, and rows stamped by an older (shorter) retention policy don't get
-    nuked the moment a new build ships.
+    Activity coverage needs a durable ledger for the full fiscal year. The
+    home-page ghost query still applies its short display window, so retaining
+    these rows does not add stale meetings to that calendar.
 
     Returns the number of rows deleted.
     """
     today = date.today()
-    # Walk back GHOST_RETENTION_BUSINESS_DAYS business days from today.
-    # Anything whose meeting_date is BEFORE that cutoff is outside the
-    # trailing aura and safe to delete.
-    cutoff_date = today
-    remaining = GHOST_RETENTION_BUSINESS_DAYS
-    while remaining > 0:
-        cutoff_date = cutoff_date - timedelta(days=1)
-        if cutoff_date.weekday() < 5:  # Mon=0 .. Fri=4
-            remaining -= 1
+    fiscal_start_year = today.year if today.month >= 7 else today.year - 1
+    cutoff_date = date(fiscal_start_year, 7, 1)
 
     expired = PrefetchedMeeting.query.filter(
         PrefetchedMeeting.meeting_date < cutoff_date
@@ -653,8 +684,8 @@ def purge_expired() -> int:
     if count:
         db.session.commit()
         logger.info(
-            "Prefetch: purged %d meetings older than %s (>%d business days back)",
-            count, cutoff_date.isoformat(), GHOST_RETENTION_BUSINESS_DAYS,
+            "Prefetch: purged %d meetings before fiscal year start %s",
+            count, cutoff_date.isoformat(),
         )
     return count
 
@@ -737,43 +768,77 @@ def prefetch_for_date_full(
     # day-number click, ad-hoc back-fills, etc.) must NOT delete other
     # days' ghosts as a side effect.
 
-    prompt = _build_prompt(date_str)
-    # WorkIQ is LLM-backed and occasionally produces malformed JSON or
-    # truncates the response. A second/third call usually returns a clean
-    # array, so retry on parse errors before giving up. WorkIQ network
-    # errors (timeout, npx crash) are not retried here -- query_workiq
-    # already has its own retry semantics for those.
-    MAX_PARSE_RETRIES = 3
     raw_meetings: Optional[List[Dict[str, Any]]] = None
+    if target_date < date.today():
+        try:
+            from app.services.outlook_calendar import fetch_outlook_meetings_for_date
+            raw_meetings = fetch_outlook_meetings_for_date(target_date)
+            logger.info(
+                'Prefetch: read %d historical meetings from Outlook for %s',
+                len(raw_meetings), date_str,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                'Prefetch: Outlook historical fetch failed for %s; using WorkIQ',
+                date_str,
+                exc_info=True,
+            )
+
+    prompt = _build_prompt(date_str)
+    # WorkIQ sometimes ignores the JSON contract and returns its legacy
+    # markdown table. Parse that response in place, then make one explicit
+    # markdown-table request if needed. Repeating the same JSON prompt three
+    # times proved both slow and unreliable for historical dates.
     last_parse_error: Optional[str] = None
-    for attempt in range(1, MAX_PARSE_RETRIES + 1):
-        logger.info(
-            "Prefetch: querying WorkIQ for %s (attempt %d/%d)",
-            date_str, attempt, MAX_PARSE_RETRIES,
-        )
+    if raw_meetings is None:
+        logger.info("Prefetch: querying WorkIQ for %s", date_str)
         try:
             # Today JSON observed at 131s in Phase 0 probe; give 240s headroom.
             response = query_workiq(prompt, timeout=240, operation='meeting_list')
         except Exception as exc:  # noqa: BLE001
-            logger.error(
-                "Prefetch: WorkIQ call failed for %s: %s", date_str, exc,
-            )
+            logger.error("Prefetch: WorkIQ call failed for %s: %s", date_str, exc)
             return 0, [], str(exc)
 
         try:
             raw_meetings = _extract_json_array(response)
-            break  # success
         except ValueError as exc:
             last_parse_error = str(exc)
             logger.warning(
-                "Prefetch: parse failed for %s (attempt %d/%d): %s",
-                date_str, attempt, MAX_PARSE_RETRIES, exc,
+                'Prefetch: JSON parse failed for %s; retrying once: %s',
+                date_str, exc,
             )
-            # Fall through and retry. The LLM is non-deterministic so
-            # the next call may produce clean JSON.
+            try:
+                retry_response = query_workiq(
+                    prompt,
+                    timeout=240,
+                    operation='meeting_list',
+                )
+                raw_meetings = _extract_json_array(retry_response)
+            except Exception as retry_exc:  # noqa: BLE001
+                last_parse_error = str(retry_exc)
+
+        if raw_meetings is None:
+            from app.services.workiq_service import (
+                _parse_meetings_response,
+                get_meetings_for_date,
+            )
+            raw_meetings = _legacy_meetings_to_raw(
+                _parse_meetings_response(response, date_str),
+            ) or None
+            if raw_meetings is None:
+                logger.warning(
+                    "Prefetch: JSON parsing failed for %s; trying markdown fallback: %s",
+                    date_str, last_parse_error,
+                )
+                legacy_meetings, _ = get_meetings_for_date(date_str)
+                raw_meetings = _legacy_meetings_to_raw(legacy_meetings) or None
+                if raw_meetings is None:
+                    last_parse_error = (
+                        f'{last_parse_error}; markdown fallback returned no meetings'
+                    )
 
     if raw_meetings is None:
-        # All retries returned malformed JSON. Preserve existing rows
+        # Both formats returned unusable data. Preserve existing rows
         # rather than wiping them; UI surfaces the stale-sync indicator.
         try:
             from app.services.telemetry_shipper import queue_workiq_call
@@ -782,10 +847,10 @@ def prefetch_for_date_full(
         except Exception:
             pass
         logger.error(
-            "Prefetch: parse failed for %s after %d attempts: %s",
-            date_str, MAX_PARSE_RETRIES, last_parse_error,
+            "Prefetch: JSON and markdown parsing failed for %s: %s",
+            date_str, last_parse_error,
         )
-        return 0, [], f"parse failed after {MAX_PARSE_RETRIES} attempts: {last_parse_error}"
+        return 0, [], f"JSON and markdown parsing failed: {last_parse_error}"
 
     if not raw_meetings:
         logger.warning("Prefetch: empty meeting list for %s", date_str)

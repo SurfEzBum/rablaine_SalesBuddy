@@ -1,7 +1,7 @@
 """Reports blueprint - cross-domain reports hub and individual report views."""
 import logging
 from datetime import datetime, timedelta, timezone, date
-from flask import Blueprint, render_template, url_for, jsonify, request
+from flask import Blueprint, current_app, render_template, url_for, jsonify, request
 from app.models import (
     db, Customer, Engagement, Note, Milestone, MilestoneAudit, Opportunity, Seller,
     SolutionEngineer, SyncStatus, MsxTask,
@@ -45,6 +45,16 @@ def reports_hub():
                     ),
                     'icon': 'bi-flag-fill',
                     'url': url_for('milestones.milestone_tracker'),
+                },
+                {
+                    'id': 'activity-coverage',
+                    'name': 'Activity Coverage',
+                    'description': (
+                        'Review fiscal-year customer meetings, match them to '
+                        'milestones, and create or reconcile MSX activities.'
+                    ),
+                    'icon': 'bi-calendar2-check',
+                    'url': url_for('reports.report_activity_coverage'),
                 },
                 {
                     'id': 'msx-workspace',
@@ -180,6 +190,125 @@ def reports_hub():
     ]
 
     return render_template('reports_hub.html', report_groups=report_groups)
+
+
+@bp.route('/reports/activity-coverage')
+def report_activity_coverage():
+    """Review calendar meetings and their MSX activity coverage."""
+    from app.services.activity_coverage import get_population_status, get_report_data
+
+    week_value = request.args.get('week')
+    try:
+        week_start = (
+            datetime.strptime(week_value, '%Y-%m-%d').date()
+            if week_value else None
+        )
+    except ValueError:
+        week_start = None
+    data = get_report_data(week_start)
+    data['population'] = get_population_status()
+    return render_template('report_activity_coverage.html', **data)
+
+
+@bp.route('/api/reports/activity-coverage/populate', methods=['POST'])
+def api_activity_coverage_populate():
+    """Start or resume fiscal-year meeting population."""
+    from app.services.activity_coverage import start_population
+
+    started = start_population(current_app._get_current_object())
+    if not started:
+        return jsonify({'success': False, 'error': 'Population is already running or up to date'}), 409
+    return jsonify({'success': True})
+
+
+@bp.route('/api/reports/activity-coverage/import-status')
+def api_activity_coverage_import_status():
+    """Return fiscal population checkpoint and live progress."""
+    from app.services.activity_coverage import get_population_status
+
+    return jsonify({'success': True, **get_population_status()})
+
+
+@bp.route('/api/reports/activity-coverage/customers/<int:customer_id>/milestones')
+def api_activity_coverage_milestones(customer_id):
+    """Return locally cached milestones for one customer."""
+    milestones = (
+        Milestone.query.filter_by(customer_id=customer_id)
+        .filter(Milestone.msx_milestone_id.isnot(None))
+        .order_by(Milestone.due_date.desc(), Milestone.title.asc())
+        .all()
+    )
+    return jsonify({
+        'success': True,
+        'milestones': [
+            {'id': item.id, 'label': item.display_text, 'status': item.msx_status}
+            for item in milestones
+        ],
+    })
+
+
+@bp.route('/api/reports/activity-coverage/meetings/<int:meeting_id>', methods=['PATCH'])
+def api_activity_coverage_update_meeting(meeting_id):
+    """Save customer, milestone, and editable activity draft fields."""
+    from app.services.activity_coverage import update_meeting_draft
+
+    try:
+        meeting = update_meeting_draft(meeting_id, request.get_json(silent=True) or {})
+    except (TypeError, ValueError) as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return jsonify({'success': True, 'meeting_id': meeting.id})
+
+
+@bp.route(
+    '/api/reports/activity-coverage/meetings/<int:meeting_id>/create',
+    methods=['POST'],
+)
+def api_activity_coverage_create(meeting_id):
+    """Create an MSX activity from a saved meeting draft."""
+    from app.services.activity_coverage import create_meeting_activity
+
+    try:
+        task = create_meeting_activity(meeting_id)
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 502
+    return jsonify({
+        'success': True,
+        'task_id': task.id,
+        'task_url': task.msx_task_url,
+    })
+
+
+@bp.route(
+    '/api/reports/activity-coverage/meetings/<int:meeting_id>/link',
+    methods=['POST'],
+)
+def api_activity_coverage_link(meeting_id):
+    """Confirm an existing imported MSX task for a meeting."""
+    from app.services.activity_coverage import link_existing_activity
+
+    data = request.get_json(silent=True) or {}
+    try:
+        task = link_existing_activity(meeting_id, int(data.get('task_id') or 0))
+    except (TypeError, ValueError) as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return jsonify({'success': True, 'task_id': task.id})
+
+
+@bp.route(
+    '/api/reports/activity-coverage/meetings/<int:meeting_id>/dismiss',
+    methods=['POST'],
+)
+def api_activity_coverage_dismiss(meeting_id):
+    """Dismiss one occurrence or all known occurrences in a recurring series."""
+    from app.services.ghost_meetings import dismiss_ghost
+
+    dismiss_series = bool((request.get_json(silent=True) or {}).get('series'))
+    success, error = dismiss_ghost(meeting_id, dismiss_series=dismiss_series)
+    if not success:
+        return jsonify({'success': False, 'error': error}), 404
+    return jsonify({'success': True})
 
 
 @bp.route('/reports/one-on-one')

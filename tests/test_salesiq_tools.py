@@ -130,6 +130,11 @@ class TestToolCoverage:
 
     # -- Reports -------------------------------------------------------------
 
+    def test_activity_coverage_report_tool_exists(self):
+        """Activity coverage report should have a tool."""
+        names = self._tool_names()
+        assert 'report_activity_coverage' in names
+
     def test_hygiene_report_tool_exists(self):
         """Hygiene report should have a tool."""
         names = self._tool_names()
@@ -322,6 +327,14 @@ class TestToolExecution:
             result = execute_tool('report_hygiene', {})
             assert 'engagements_without_milestones' in result
             assert 'milestones_without_engagements' in result
+
+    def test_report_activity_coverage(self, app):
+        """Activity coverage should return fiscal-year summary data."""
+        with app.app_context():
+            result = execute_tool('report_activity_coverage', {})
+            assert 'summary' in result
+            assert 'meetings' in result
+            assert '/reports/activity-coverage' in result['url']
 
     def test_report_workload(self, app):
         """report_workload should return structured data."""

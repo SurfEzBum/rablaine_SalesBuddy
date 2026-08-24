@@ -1,0 +1,491 @@
+{% extends "base.html" %}
+{% block title %}Activity Coverage - Sales Buddy{% endblock %}
+
+{% block content %}
+<style>
+    .coverage-summary {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0;
+        color: var(--bs-secondary-color);
+        font-size: 0.82rem;
+    }
+    .coverage-metric { display: inline-flex; gap: 0.3rem; align-items: baseline; }
+    .coverage-metric + .coverage-metric::before { content: "·"; margin: 0 0.65rem; color: var(--bs-border-color); }
+    .coverage-value { color: var(--bs-body-color); font-weight: 700; }
+    .coverage-toolbar { border-block: 1px solid var(--bs-border-color); }
+    .meeting-list { border-top: 1px solid var(--bs-border-color); }
+    .meeting-row { border-bottom: 1px solid var(--bs-border-color); }
+    .meeting-row:last-child { border-bottom: 0; }
+    .meeting-summary {
+        display: grid;
+        grid-template-columns: 1.1rem 7rem minmax(12rem, 2fr) minmax(9rem, 1fr) minmax(12rem, 1.4fr) 7.5rem auto;
+        align-items: center;
+        gap: 0.75rem;
+        min-height: 3rem;
+        padding: 0.4rem 0.6rem;
+        cursor: pointer;
+    }
+    .meeting-summary:hover { background: var(--bs-tertiary-bg); }
+    .meeting-chevron { transition: transform 160ms ease-out; }
+    .meeting-row.is-expanded .meeting-chevron { transform: rotate(90deg); }
+    .meeting-subject { min-width: 0; font-size: 0.9rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .meeting-date { font-size: 0.78rem; line-height: 1.2; }
+    .meeting-customer, .meeting-milestone { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; }
+    .meeting-detail { display: none; padding: 0.85rem 0.75rem 1rem 9.55rem; background: color-mix(in srgb, var(--bs-tertiary-bg) 55%, transparent); }
+    .meeting-row.is-expanded .meeting-detail { display: block; }
+    .meeting-fields {
+        display: grid;
+        grid-template-columns: minmax(12rem, 1fr) minmax(15rem, 1.4fr) 12rem 7rem;
+        gap: 0.6rem;
+    }
+    .meeting-detail .form-label { margin-bottom: 0.2rem; }
+    .meeting-detail .form-control, .meeting-detail .form-select { font-size: 0.85rem; }
+    .meeting-description { min-height: 4.5rem; resize: vertical; }
+    .status-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; display: inline-block; }
+    .status-logged { background: var(--bs-success); }
+    .status-ready { background: var(--bs-primary); }
+    .status-attention { background: var(--bs-warning); }
+    .filter-button.active { box-shadow: inset 0 -2px 0 currentColor; }
+    #populationButton { min-width: 9.5rem; }
+    @media (max-width: 991.98px) {
+        .meeting-summary { grid-template-columns: 1.1rem 6.5rem minmax(10rem, 2fr) minmax(8rem, 1fr) 7rem auto; }
+        .meeting-milestone { display: none; }
+        .meeting-detail { padding-left: 1.75rem; }
+        .meeting-fields { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 575.98px) {
+        .meeting-summary { grid-template-columns: 1rem minmax(0, 1fr) auto auto; gap: 0.5rem; padding-block: 0.55rem; }
+        .meeting-date { grid-column: 2; grid-row: 2; }
+        .meeting-subject { grid-column: 2; grid-row: 1; }
+        .meeting-customer, .meeting-milestone { display: none; }
+        .meeting-status { grid-column: 3; grid-row: 1 / span 2; }
+        .meeting-actions { grid-column: 4; grid-row: 1 / span 2; margin-left: 0.25rem; }
+        .meeting-detail { padding: 0.75rem; }
+        .meeting-fields { grid-template-columns: 1fr; }
+        .coverage-toolbar .btn-group { width: 100%; }
+        .coverage-toolbar .btn-group .btn { flex: 1; }
+        .coverage-metric + .coverage-metric::before { margin-inline: 0.35rem; }
+    }
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+    <div>
+        <div class="d-flex flex-wrap align-items-baseline gap-2">
+            <h3 class="mb-0"><i class="bi bi-calendar2-check"></i> Activity Coverage</h3>
+            <span class="text-muted small">{{ fiscal_year_label }}</span>
+        </div>
+        <div class="coverage-summary mt-1">
+            <span class="coverage-metric"><span class="coverage-value">{{ summary.coverage_percent }}%</span> covered</span>
+            <span class="coverage-metric"><span class="coverage-value">{{ summary.logged }}</span> logged</span>
+            <span class="coverage-metric"><span class="coverage-value">{{ summary.ready }}</span> ready</span>
+            <span class="coverage-metric"><span class="coverage-value">{{ summary.needs_attention }}</span> need matching</span>
+        </div>
+    </div>
+    <a class="btn btn-sm btn-link text-secondary text-decoration-none" href="{{ url_for('milestones.milestone_tracker') }}">
+        <i class="bi bi-flag"></i> Milestones
+    </a>
+</div>
+
+<div class="coverage-toolbar py-2 mb-2">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div class="btn-group btn-group-sm" aria-label="Week navigation">
+            <a class="btn btn-link text-secondary {% if not can_go_previous %}disabled{% endif %}" href="{{ url_for('reports.report_activity_coverage', week=previous_week.isoformat()) }}" title="Previous week" aria-label="Previous week" {% if not can_go_previous %}aria-disabled="true"{% endif %}>
+                <i class="bi bi-chevron-left"></i>
+            </a>
+            <button class="btn btn-link text-body text-decoration-none fw-semibold" type="button" disabled>
+                {{ week_start.strftime('%b %d') }} - {{ week_end.strftime('%b %d') }}
+            </button>
+            <a class="btn btn-link text-secondary {% if not can_go_next %}disabled{% endif %}" href="{{ url_for('reports.report_activity_coverage', week=next_week.isoformat()) }}" title="Next week" aria-label="Next week" {% if not can_go_next %}aria-disabled="true"{% endif %}>
+                <i class="bi bi-chevron-right"></i>
+            </a>
+        </div>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <div class="btn-group btn-group-sm" id="coverageFilters" aria-label="Meeting filters">
+                <button class="btn btn-outline-secondary filter-button active" data-filter="all">All</button>
+                <button class="btn btn-outline-secondary filter-button" data-filter="open">Open</button>
+                <button class="btn btn-outline-secondary filter-button" data-filter="logged">Logged</button>
+            </div>
+            <button class="btn btn-sm btn-primary" id="populationButton" {% if not population.can_start %}disabled{% endif %} title="{{ population.detail }}">
+                <span class="spinner-border spinner-border-sm {% if not population.running %}d-none{% endif %}" id="populationSpinner" aria-hidden="true"></span>
+                <i class="bi bi-arrow-repeat{% if population.running %} d-none{% endif %}" id="populationIcon"></i>
+                <span id="populationButtonLabel">{{ population.label }}{% if population.running %} {{ population.completed_count }}/{{ population.total_dates }}{% endif %}</span>
+            </button>
+        </div>
+    </div>
+    <div id="importProgress" class="mt-2 {% if not population.running and not population.error %}d-none{% endif %}">
+        <div class="progress" role="progressbar" aria-label="Fiscal year population progress" style="height: 6px;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" id="populationProgressBar" style="width: 0"></div>
+        </div>
+        <div class="small {% if population.error and not population.running %}text-danger{% else %}text-muted{% endif %} mt-1" id="importProgressText">{{ population.detail }}</div>
+    </div>
+</div>
+
+<div class="meeting-list" id="meetingList">
+    {% for meeting in meetings %}
+    <section class="meeting-row" data-status="{{ meeting.status }}">
+        <div class="meeting-summary" role="button" tabindex="0" aria-expanded="false" aria-controls="meeting-detail-{{ meeting.id }}">
+            <i class="bi bi-chevron-right meeting-chevron text-muted small"></i>
+            <div class="meeting-date">
+                <div class="fw-semibold">{{ meeting.meeting_date.strftime('%a %b %d') }}</div>
+                {% if meeting.is_all_day %}
+                <div class="text-muted">All day</div>
+                {% else %}
+                <div class="text-muted local-datetime" data-utc="{{ meeting.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="time"></div>
+                {% endif %}
+            </div>
+            <div class="meeting-subject" title="{{ meeting.subject }}">{{ meeting.subject }}</div>
+            <div class="meeting-customer text-muted" title="{{ meeting.customer.name if meeting.customer else 'No customer' }}">
+                {% if meeting.customer %}<i class="bi bi-building me-1"></i>{{ meeting.customer.name }}{% else %}<span class="text-warning">No customer</span>{% endif %}
+            </div>
+            <div class="meeting-milestone text-muted" title="{{ meeting.activity.milestone.display_text if meeting.activity else (meeting.selected_milestone.display_text if meeting.selected_milestone else 'No milestone') }}">
+                {% if meeting.activity %}{{ meeting.activity.milestone.display_text }}{% elif meeting.selected_milestone %}{{ meeting.selected_milestone.display_text }}{% else %}<span class="text-warning">No milestone</span>{% endif %}
+            </div>
+            <div class="meeting-status small text-nowrap">
+                {% if meeting.status == 'logged' %}<span class="status-dot status-logged"></span> Logged
+                {% elif meeting.status == 'ready' %}<span class="status-dot status-ready"></span> Ready
+                {% elif meeting.status == 'needs_customer' %}<span class="status-dot status-attention"></span> Customer
+                {% else %}<span class="status-dot status-attention"></span> Milestone{% endif %}
+            </div>
+            <div class="meeting-actions d-flex gap-1" onclick="event.stopPropagation();">
+                        {% if meeting.activity and meeting.activity.msx_task_url %}
+                        <a class="btn btn-sm btn-outline-success" href="{{ meeting.activity.msx_task_url }}" target="_blank" rel="noopener" title="Open activity in MSX">
+                            <i class="bi bi-box-arrow-up-right"></i>
+                        </a>
+                        {% endif %}
+                        {% if meeting.is_recurring %}
+                        <div class="dropdown">
+                            <button class="btn btn-sm btn-outline-danger" data-bs-toggle="dropdown" title="Dismiss meeting" aria-label="Dismiss meeting">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><button class="dropdown-item dismiss-meeting" data-id="{{ meeting.id }}" data-series="false"><i class="bi bi-x-circle"></i> Dismiss occurrence</button></li>
+                                <li><button class="dropdown-item dismiss-meeting" data-id="{{ meeting.id }}" data-series="true"><i class="bi bi-calendar-x"></i> Dismiss series</button></li>
+                            </ul>
+                        </div>
+                        {% else %}
+                        <button class="btn btn-sm btn-outline-danger dismiss-meeting" data-id="{{ meeting.id }}" data-series="false" title="Dismiss meeting" aria-label="Dismiss meeting">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                        {% endif %}
+            </div>
+        </div>
+
+        <div class="meeting-detail" id="meeting-detail-{{ meeting.id }}">
+                <div class="d-flex flex-wrap align-items-center gap-1 mb-2 small text-muted">
+                    <span class="me-1">Attendees:</span>
+                    {% for attendee in meeting.attendees %}
+                    <span>{{ attendee.name or attendee.email }}{% if not loop.last %},{% endif %}</span>
+                    {% endfor %}
+                    {% if meeting.note_id %}<span class="ms-2">·</span><a class="ms-1" href="{{ url_for('notes.note_view', id=meeting.note_id) }}">View note</a>{% endif %}
+                </div>
+
+                {% if meeting.activity %}
+                <div class="d-flex flex-wrap align-items-center gap-2 py-2">
+                    <i class="bi bi-check-circle-fill text-success"></i>
+                    <strong>{{ meeting.activity.subject }}</strong>
+                    <span class="badge bg-secondary">{{ meeting.activity.task_category_name }}</span>
+                    <span class="text-muted small">{{ meeting.activity.milestone.display_text }}</span>
+                </div>
+                {% else %}
+                <form class="activity-form" data-id="{{ meeting.id }}">
+                    <div class="meeting-fields mb-3">
+                        <div>
+                            <label class="form-label small" for="customer-{{ meeting.id }}">Customer</label>
+                            <select class="form-select customer-select" id="customer-{{ meeting.id }}" name="customer_id">
+                                <option value="">Select customer</option>
+                                {% for customer in customers %}
+                                <option value="{{ customer.id }}" {% if customer.id == meeting.customer_id %}selected{% endif %}>{{ customer.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label small" for="milestone-{{ meeting.id }}">Milestone</label>
+                            <select class="form-select milestone-select" id="milestone-{{ meeting.id }}" name="milestone_id">
+                                <option value="">Select milestone</option>
+                                {% for milestone in meeting.milestones %}
+                                <option value="{{ milestone.id }}" {% if milestone.id == meeting.milestone_id %}selected{% endif %}>{{ milestone.display_text }}{% if milestone.msx_status %} · {{ milestone.msx_status }}{% endif %}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label small" for="category-{{ meeting.id }}">Activity type</label>
+                            <select class="form-select" id="category-{{ meeting.id }}" name="task_category">
+                                {% for category in task_categories %}
+                                <option value="{{ category.value }}" {% if category.value == meeting.draft_task_category %}selected{% endif %}>{{ category.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label small" for="duration-{{ meeting.id }}">Minutes</label>
+                            <input class="form-control" id="duration-{{ meeting.id }}" name="duration_minutes" type="number" min="1" max="1440" value="{{ meeting.draft_duration_minutes }}">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small" for="subject-{{ meeting.id }}">Activity subject</label>
+                        <input class="form-control" id="subject-{{ meeting.id }}" name="subject" maxlength="500" value="{{ meeting.draft_subject }}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small" for="description-{{ meeting.id }}">Description</label>
+                        <textarea class="form-control meeting-description" id="description-{{ meeting.id }}" name="description">{{ meeting.draft_description }}</textarea>
+                    </div>
+                    {% if meeting.candidate_tasks %}
+                    <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+                        <div class="flex-grow-1">
+                            <label class="form-label small" for="candidate-{{ meeting.id }}">Possible existing activity</label>
+                            <select class="form-select candidate-select" id="candidate-{{ meeting.id }}">
+                                {% for candidate in meeting.candidate_tasks %}
+                                <option value="{{ candidate.id }}">{{ candidate.subject }} · {{ candidate.milestone }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button class="btn btn-outline-success link-activity" type="button"><i class="bi bi-link-45deg"></i> Link Existing</button>
+                    </div>
+                    {% endif %}
+                    <div class="d-flex flex-wrap justify-content-end gap-2">
+                        <button class="btn btn-outline-primary enrich-draft" type="button" data-title="{{ meeting.subject }}" data-date="{{ meeting.meeting_date.isoformat() }}"><i class="bi bi-stars"></i> Enrich</button>
+                        <button class="btn btn-outline-secondary save-draft" type="button"><i class="bi bi-floppy"></i> Save</button>
+                        <button class="btn btn-success create-activity" type="button" {% if not meeting.milestone_id %}disabled{% endif %}><i class="bi bi-plus-circle"></i> Create Activity</button>
+                    </div>
+                </form>
+                {% endif %}
+        </div>
+    </section>
+    {% else %}
+    <div class="text-center py-5" id="emptyMeetingState">
+        <i class="bi bi-calendar2-week fs-2 text-muted"></i>
+        <div class="mt-2 text-muted">No meetings stored for this week.</div>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+(function() {
+    'use strict';
+
+    function requestJson(url, options) {
+        return fetch(url, options).then(function(response) {
+            return response.json().then(function(data) {
+                if (!response.ok || !data.success) throw new Error(data.error || 'Request failed');
+                return data;
+            });
+        });
+    }
+
+    function toggleMeeting(summary) {
+        var row = summary.closest('.meeting-row');
+        var willExpand = !row.classList.contains('is-expanded');
+        document.querySelectorAll('.meeting-row.is-expanded').forEach(function(openRow) {
+            openRow.classList.remove('is-expanded');
+            openRow.querySelector('.meeting-summary').setAttribute('aria-expanded', 'false');
+        });
+        if (willExpand) {
+            row.classList.add('is-expanded');
+            summary.setAttribute('aria-expanded', 'true');
+        }
+    }
+
+    document.querySelectorAll('.meeting-summary').forEach(function(summary) {
+        summary.addEventListener('click', function() { toggleMeeting(summary); });
+        summary.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleMeeting(summary);
+            }
+        });
+    });
+
+    function formPayload(form) {
+        var data = new FormData(form);
+        return {
+            customer_id: data.get('customer_id'),
+            milestone_id: data.get('milestone_id'),
+            task_category: data.get('task_category'),
+            duration_minutes: data.get('duration_minutes'),
+            subject: data.get('subject'),
+            description: data.get('description'),
+        };
+    }
+
+    function saveForm(form, createAfter) {
+        var meetingId = form.dataset.id;
+        var buttons = form.querySelectorAll('button');
+        buttons.forEach(function(button) { button.disabled = true; });
+        return requestJson('/api/reports/activity-coverage/meetings/' + meetingId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formPayload(form)),
+        }).then(function() {
+            if (!createAfter) return null;
+            return requestJson('/api/reports/activity-coverage/meetings/' + meetingId + '/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }).then(function() {
+            window.location.reload();
+        }).catch(function(error) {
+            alert(error.message);
+            buttons.forEach(function(button) { button.disabled = false; });
+        });
+    }
+
+    document.querySelectorAll('.save-draft').forEach(function(button) {
+        button.addEventListener('click', function() { saveForm(button.closest('form'), false); });
+    });
+    document.querySelectorAll('.create-activity').forEach(function(button) {
+        button.addEventListener('click', function() { saveForm(button.closest('form'), true); });
+    });
+    document.querySelectorAll('.enrich-draft').forEach(function(button) {
+        button.addEventListener('click', function() {
+            var form = button.closest('form');
+            var original = button.innerHTML;
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Enriching';
+            var params = new URLSearchParams({ title: button.dataset.title, date: button.dataset.date });
+            fetch('/api/meetings/summary?' + params.toString())
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    if (!data.success) throw new Error(data.error || 'WorkIQ enrichment failed');
+                    if (data.task_subject) form.querySelector('[name="subject"]').value = data.task_subject;
+                    form.querySelector('[name="description"]').value = data.task_description || data.summary || '';
+                }).catch(function(error) { alert(error.message); })
+                .finally(function() {
+                    button.disabled = false;
+                    button.innerHTML = original;
+                });
+        });
+    });
+
+    document.querySelectorAll('.customer-select').forEach(function(select) {
+        select.addEventListener('change', function() {
+            var form = select.closest('form');
+            var milestoneSelect = form.querySelector('.milestone-select');
+            var createButton = form.querySelector('.create-activity');
+            milestoneSelect.innerHTML = '<option value="">Select milestone</option>';
+            createButton.disabled = true;
+            if (!select.value) return;
+            requestJson('/api/reports/activity-coverage/customers/' + select.value + '/milestones')
+                .then(function(data) {
+                    data.milestones.forEach(function(milestone) {
+                        var option = document.createElement('option');
+                        option.value = milestone.id;
+                        option.textContent = milestone.label + (milestone.status ? ' · ' + milestone.status : '');
+                        milestoneSelect.appendChild(option);
+                    });
+                }).catch(function(error) { alert(error.message); });
+        });
+    });
+    document.querySelectorAll('.milestone-select').forEach(function(select) {
+        select.addEventListener('change', function() {
+            select.closest('form').querySelector('.create-activity').disabled = !select.value;
+        });
+    });
+
+    document.querySelectorAll('.link-activity').forEach(function(button) {
+        button.addEventListener('click', function() {
+            var form = button.closest('form');
+            var taskId = form.querySelector('.candidate-select').value;
+            requestJson('/api/reports/activity-coverage/meetings/' + form.dataset.id + '/link', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: taskId }),
+            }).then(function() { window.location.reload(); })
+              .catch(function(error) { alert(error.message); });
+        });
+    });
+
+    document.querySelectorAll('.dismiss-meeting').forEach(function(button) {
+        button.addEventListener('click', function() {
+            requestJson('/api/reports/activity-coverage/meetings/' + button.dataset.id + '/dismiss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ series: button.dataset.series === 'true' }),
+            }).then(function() { window.location.reload(); })
+              .catch(function(error) { alert(error.message); });
+        });
+    });
+
+    document.querySelectorAll('.filter-button').forEach(function(button) {
+        button.addEventListener('click', function() {
+            document.querySelectorAll('.filter-button').forEach(function(item) { item.classList.remove('active'); });
+            button.classList.add('active');
+            document.querySelectorAll('.meeting-row').forEach(function(row) {
+                var show = button.dataset.filter === 'all'
+                    || (button.dataset.filter === 'logged' && row.dataset.status === 'logged')
+                    || (button.dataset.filter === 'open' && row.dataset.status !== 'logged');
+                row.classList.toggle('d-none', !show);
+            });
+        });
+    });
+
+    var importButton = document.getElementById('populationButton');
+    var progress = document.getElementById('importProgress');
+    var progressBar = document.getElementById('populationProgressBar');
+    var progressText = document.getElementById('importProgressText');
+    var populationSpinner = document.getElementById('populationSpinner');
+    var populationIcon = document.getElementById('populationIcon');
+    var populationButtonLabel = document.getElementById('populationButtonLabel');
+    var pollTimer = null;
+    var pollFailures = 0;
+
+    function showPopulationRunning(label) {
+        importButton.disabled = true;
+        populationSpinner.classList.remove('d-none');
+        populationIcon.classList.add('d-none');
+        populationButtonLabel.textContent = label;
+        progress.classList.remove('d-none');
+    }
+
+    function schedulePoll(delay) {
+        clearTimeout(pollTimer);
+        pollTimer = setTimeout(pollImport, delay);
+    }
+
+    function pollImport() {
+        requestJson('/api/reports/activity-coverage/import-status').then(function(state) {
+            pollFailures = 0;
+            var percent = state.total_dates ? Math.round((state.completed_count / state.total_dates) * 100) : 0;
+            progressBar.style.width = percent + '%';
+            progressBar.parentElement.setAttribute('aria-valuenow', percent);
+            showPopulationRunning('Populating ' + state.completed_count + '/' + state.total_dates);
+            progressText.textContent = state.current_date
+                ? (state.retrying ? 'Retry ' + state.attempt + '/3 for ' : 'Importing ')
+                    + state.current_date + ' · ' + state.completed_count + ' of ' + state.total_dates + ' days'
+                : state.detail;
+            if (!state.running) {
+                clearTimeout(pollTimer);
+                window.location.reload();
+            } else {
+                schedulePoll(1500);
+            }
+        }).catch(function(error) {
+            pollFailures += 1;
+            showPopulationRunning('Reconnecting...');
+            progressText.textContent = 'Connection interrupted. Import continues; reconnecting...';
+            schedulePoll(Math.min(1000 * Math.pow(2, pollFailures - 1), 10000));
+        });
+    }
+
+    importButton.addEventListener('click', function() {
+        showPopulationRunning('Starting...');
+        progressBar.style.width = '0%';
+        progressText.textContent = 'Starting fiscal year population...';
+        requestJson('/api/reports/activity-coverage/populate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        }).then(function() {
+            pollImport();
+        }).catch(function(error) {
+            progressText.textContent = 'Could not confirm start. Checking import status...';
+            schedulePoll(1000);
+        });
+    });
+
+    {% if population.running %}
+    importButton.disabled = true;
+    pollImport();
+    {% endif %}
+})();
+</script>
+{% endblock %}

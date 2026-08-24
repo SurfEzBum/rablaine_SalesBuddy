@@ -1244,7 +1244,7 @@ class Milestone(db.Model):
 
 
 class MsxTask(db.Model):
-    """Task created in MSX linked to a milestone and note."""
+    """Task created in MSX linked to a milestone, note, or calendar meeting."""
     __tablename__ = 'msx_tasks'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -1264,11 +1264,18 @@ class MsxTask(db.Model):
     
     # Relationships
     note_id = db.Column(db.Integer, db.ForeignKey('notes.id'), nullable=True)
+    meeting_id = db.Column(
+        db.Integer,
+        db.ForeignKey('prefetched_meetings.id'),
+        nullable=True,
+        unique=True,
+    )
     milestone_id = db.Column(db.Integer, db.ForeignKey('milestones.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
     
     # Relationships
     note = db.relationship('Note', backref=db.backref('msx_tasks', lazy='dynamic'))
+    meeting = db.relationship('PrefetchedMeeting', back_populates='activity')
     milestone = db.relationship('Milestone', back_populates='tasks')
     
     def __repr__(self) -> str:
@@ -2275,6 +2282,18 @@ class DailyMeetingCache(db.Model):
         return f'<DailyMeetingCache {self.meeting_date}>'
 
 
+class ActivityCoveragePopulation(db.Model):
+    """Durable checkpoint for fiscal-year calendar population."""
+    __tablename__ = 'activity_coverage_population'
+
+    id = db.Column(db.Integer, primary_key=True)
+    fiscal_year_end = db.Column(db.Integer, nullable=False)
+    populated_through = db.Column(db.Date, nullable=True)
+    last_started_at = db.Column(db.DateTime, nullable=True)
+    last_completed_at = db.Column(db.DateTime, nullable=True)
+    last_error = db.Column(db.Text, nullable=True)
+
+
 # =============================================================================
 # Pre-fetched Meetings (Phase 1 of PREFETCH_MEETINGS_BACKLOG.md)
 # =============================================================================
@@ -2312,6 +2331,14 @@ class PrefetchedMeeting(db.Model):
         db.Integer, db.ForeignKey('notes.id'),
         nullable=True,
     )
+    milestone_id = db.Column(
+        db.Integer, db.ForeignKey('milestones.id'),
+        nullable=True, index=True,
+    )
+    draft_subject = db.Column(db.String(500), nullable=True)
+    draft_description = db.Column(db.Text, nullable=True)
+    draft_task_category = db.Column(db.Integer, nullable=True)
+    draft_duration_minutes = db.Column(db.Integer, nullable=True)
 
     attendees = db.relationship(
         'PrefetchedMeetingAttendee',
@@ -2321,6 +2348,13 @@ class PrefetchedMeeting(db.Model):
     )
     customer = db.relationship('Customer', foreign_keys=[customer_id])
     note = db.relationship('Note', foreign_keys=[note_id])
+    selected_milestone = db.relationship('Milestone', foreign_keys=[milestone_id])
+    activity = db.relationship(
+        'MsxTask',
+        back_populates='meeting',
+        uselist=False,
+        foreign_keys='MsxTask.meeting_id',
+    )
 
     def __repr__(self) -> str:
         return f'<PrefetchedMeeting {self.id} {self.subject!r} @ {self.start_time}>'
