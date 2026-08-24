@@ -49,6 +49,7 @@
     .status-attention { background: var(--bs-warning); }
     .filter-button.active { box-shadow: inset 0 -2px 0 currentColor; }
     #populationButton { min-width: 9.5rem; }
+    #reconcileButton { min-width: 8.5rem; }
     @media (max-width: 991.98px) {
         .meeting-summary { grid-template-columns: 1.1rem 6.5rem minmax(10rem, 2fr) minmax(8rem, 1fr) 7rem auto; }
         .meeting-milestone { display: none; }
@@ -107,12 +108,20 @@
                 <button class="btn btn-outline-secondary filter-button" data-filter="open">Open</button>
                 <button class="btn btn-outline-secondary filter-button" data-filter="logged">Logged</button>
             </div>
+            <button class="btn btn-sm btn-outline-secondary" id="reconcileButton" {% if reconciliation.running %}disabled{% endif %} title="Refresh activities from MSX and match them to meetings">
+                <span class="spinner-border spinner-border-sm {% if not reconciliation.running %}d-none{% endif %}" id="reconcileSpinner" aria-hidden="true"></span>
+                <i class="bi bi-link-45deg{% if reconciliation.running %} d-none{% endif %}" id="reconcileIcon"></i>
+                <span id="reconcileButtonLabel">{% if reconciliation.running %}Syncing MSX{% else %}Reconcile MSX{% endif %}</span>
+            </button>
             <button class="btn btn-sm btn-primary" id="populationButton" {% if not population.can_start %}disabled{% endif %} title="{{ population.detail }}">
                 <span class="spinner-border spinner-border-sm {% if not population.running %}d-none{% endif %}" id="populationSpinner" aria-hidden="true"></span>
                 <i class="bi bi-arrow-repeat{% if population.running %} d-none{% endif %}" id="populationIcon"></i>
                 <span id="populationButtonLabel">{{ population.label }}{% if population.running %} {{ population.completed_count }}/{{ population.total_dates }}{% endif %}</span>
             </button>
         </div>
+    </div>
+    <div id="reconcileResult" class="small mt-1 {% if reconciliation.error %}text-danger{% else %}text-muted{% endif %}{% if not reconciliation.error and not reconciliation.linked and not reconciliation.ambiguous %} d-none{% endif %}">
+        {% if reconciliation.error %}{{ reconciliation.error }}{% elif reconciliation.linked or reconciliation.ambiguous %}{{ reconciliation.linked }} linked{% if reconciliation.ambiguous %} · {{ reconciliation.ambiguous }} need review{% endif %}{% endif %}
     </div>
     <div id="importProgress" class="mt-2 {% if not population.running and not population.error %}d-none{% endif %}">
         <div class="progress" role="progressbar" aria-label="Fiscal year population progress" style="height: 6px;">
@@ -420,6 +429,11 @@
     });
 
     var importButton = document.getElementById('populationButton');
+    var reconcileButton = document.getElementById('reconcileButton');
+    var reconcileSpinner = document.getElementById('reconcileSpinner');
+    var reconcileIcon = document.getElementById('reconcileIcon');
+    var reconcileButtonLabel = document.getElementById('reconcileButtonLabel');
+    var reconcileResult = document.getElementById('reconcileResult');
     var progress = document.getElementById('importProgress');
     var progressBar = document.getElementById('populationProgressBar');
     var progressText = document.getElementById('importProgressText');
@@ -428,6 +442,46 @@
     var populationButtonLabel = document.getElementById('populationButtonLabel');
     var pollTimer = null;
     var pollFailures = 0;
+    var reconcileTimer = null;
+
+    function showReconciliationRunning(label) {
+        reconcileButton.disabled = true;
+        reconcileSpinner.classList.remove('d-none');
+        reconcileIcon.classList.add('d-none');
+        reconcileButtonLabel.textContent = label;
+        reconcileResult.classList.remove('d-none', 'text-danger');
+        reconcileResult.classList.add('text-muted');
+    }
+
+    function pollReconciliation() {
+        requestJson('/api/reports/activity-coverage/reconcile-status').then(function(state) {
+            showReconciliationRunning(state.phase === 'matching' ? 'Matching' : 'Syncing MSX');
+            reconcileResult.textContent = state.phase === 'matching'
+                ? 'Matching refreshed activities to meetings...'
+                : 'Refreshing activities from MSX...';
+            if (!state.running) {
+                clearTimeout(reconcileTimer);
+                window.location.reload();
+            } else {
+                reconcileTimer = setTimeout(pollReconciliation, 1500);
+            }
+        }).catch(function() {
+            showReconciliationRunning('Reconnecting...');
+            reconcileResult.textContent = 'Connection interrupted. Reconciliation continues; reconnecting...';
+            reconcileTimer = setTimeout(pollReconciliation, 3000);
+        });
+    }
+
+    reconcileButton.addEventListener('click', function() {
+        showReconciliationRunning('Starting...');
+        reconcileResult.textContent = 'Starting MSX activity refresh...';
+        requestJson('/api/reports/activity-coverage/reconcile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        }).then(pollReconciliation).catch(function() {
+            reconcileTimer = setTimeout(pollReconciliation, 1000);
+        });
+    });
 
     function showPopulationRunning(label) {
         importButton.disabled = true;
@@ -485,6 +539,9 @@
     {% if population.running %}
     importButton.disabled = true;
     pollImport();
+    {% endif %}
+    {% if reconciliation.running %}
+    pollReconciliation();
     {% endif %}
 })();
 </script>

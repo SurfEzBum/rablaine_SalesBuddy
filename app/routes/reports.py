@@ -195,7 +195,11 @@ def reports_hub():
 @bp.route('/reports/activity-coverage')
 def report_activity_coverage():
     """Review calendar meetings and their MSX activity coverage."""
-    from app.services.activity_coverage import get_population_status, get_report_data
+    from app.services.activity_coverage import (
+        get_population_status,
+        get_reconciliation_status,
+        get_report_data,
+    )
 
     week_value = request.args.get('week')
     try:
@@ -207,6 +211,7 @@ def report_activity_coverage():
         week_start = None
     data = get_report_data(week_start)
     data['population'] = get_population_status()
+    data['reconciliation'] = get_reconciliation_status()
     return render_template('report_activity_coverage.html', **data)
 
 
@@ -227,6 +232,28 @@ def api_activity_coverage_import_status():
     from app.services.activity_coverage import get_population_status
 
     return jsonify({'success': True, **get_population_status()})
+
+
+@bp.route('/api/reports/activity-coverage/reconcile', methods=['POST'])
+def api_activity_coverage_reconcile():
+    """Refresh MSX activities and reconcile them with stored meetings."""
+    from app.services.activity_coverage import start_reconciliation
+
+    started = start_reconciliation(current_app._get_current_object())
+    if not started:
+        return jsonify({
+            'success': False,
+            'error': 'Activity reconciliation is already running',
+        }), 409
+    return jsonify({'success': True})
+
+
+@bp.route('/api/reports/activity-coverage/reconcile-status')
+def api_activity_coverage_reconcile_status():
+    """Return live MSX activity reconciliation state."""
+    from app.services.activity_coverage import get_reconciliation_status
+
+    return jsonify({'success': True, **get_reconciliation_status()})
 
 
 @bp.route('/api/reports/activity-coverage/customers/<int:customer_id>/milestones')

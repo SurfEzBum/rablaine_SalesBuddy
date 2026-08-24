@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
+from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
+from difflib import SequenceMatcher
 from typing import Any
 
 from flask import Flask
@@ -39,6 +42,39 @@ _import_state: dict[str, Any] = {
     'error': None,
 }
 _create_lock = threading.Lock()
+_reconcile_lock = threading.Lock()
+_reconcile_state_lock = threading.Lock()
+_reconcile_state: dict[str, Any] = {
+    'running': False,
+    'phase': None,
+    'scanned': 0,
+    'linked': 0,
+    'ambiguous': 0,
+    'tasks_created': 0,
+    'tasks_updated': 0,
+    'error': None,
+}
+
+
+def _normalized_subject(value: str) -> str:
+    """Normalize a meeting or activity subject for conservative comparison."""
+    return ' '.join(re.findall(r'[a-z0-9]+', value.lower()))
+
+
+def _subject_similarity(meeting: PrefetchedMeeting, task: MsxTask) -> float:
+    """Return normalized similarity between meeting and activity subjects."""
+    meeting_subject = _normalized_subject(meeting.draft_subject or meeting.subject)
+    task_subject = _normalized_subject(task.subject)
+    if not meeting_subject or not task_subject:
+        return 0.0
+    return SequenceMatcher(None, meeting_subject, task_subject).ratio()
+
+
+def _task_activity_date(task: MsxTask) -> date | None:
+    """Prefer linked note date because MSX task due dates are often one day later."""
+    if task.note and task.note.call_date:
+        return task.note.call_date.date()
+    return task.due_date.date() if task.due_date else None
 
 
 def fiscal_year_bounds(reference: date | None = None) -> tuple[date, date]:
@@ -121,17 +157,14 @@ def _status(meeting: PrefetchedMeeting, task: MsxTask | None) -> str:
 def _candidate_tasks(meeting: PrefetchedMeeting) -> list[dict[str, Any]]:
     if meeting.customer_id is None:
         return []
-    day_start = datetime.combine(meeting.meeting_date, time.min)
-    day_end = datetime.combine(meeting.meeting_date, time.max)
     tasks = (
         MsxTask.query.join(Milestone)
         .filter(Milestone.customer_id == meeting.customer_id)
         .filter(MsxTask.meeting_id.is_(None))
-        .filter(MsxTask.due_date >= day_start, MsxTask.due_date <= day_end)
         .order_by(MsxTask.created_at.desc())
-        .limit(5)
         .all()
     )
+    tasks = [task for task in tasks if _task_activity_date(task) == meeting.meeting_date][:5]
     return [
         {
             'id': task.id,
@@ -142,6 +175,145 @@ def _candidate_tasks(meeting: PrefetchedMeeting) -> list[dict[str, Any]]:
         }
         for task in tasks
     ]
+
+
+def reconcile_existing_activities(today: date | None = None) -> dict[str, int]:
+    """Link unique, high-confidence local MSX activities to fiscal-year meetings."""
+    today = today or date.today()
+    fiscal_start, fiscal_end = fiscal_year_bounds(today)
+    meetings = (
+        PrefetchedMeeting.query
+        .filter(PrefetchedMeeting.meeting_date >= fiscal_start)
+        .filter(PrefetchedMeeting.meeting_date <= min(today, fiscal_end))
+        .filter(PrefetchedMeeting.dismissed.is_(False))
+        .filter(~PrefetchedMeeting.activity.has())
+        .all()
+    )
+    tasks = MsxTask.query.join(Milestone).filter(MsxTask.meeting_id.is_(None)).all()
+    meetings_by_customer_date: dict[
+        tuple[int, date], list[PrefetchedMeeting]
+    ] = defaultdict(list)
+    for meeting in meetings:
+        if meeting.customer_id:
+            meetings_by_customer_date[(meeting.customer_id, meeting.meeting_date)].append(
+                meeting
+            )
+
+    task_matches: dict[int, list[PrefetchedMeeting]] = {}
+    meeting_matches: dict[int, list[MsxTask]] = defaultdict(list)
+    for task in tasks:
+        activity_date = _task_activity_date(task)
+        if not activity_date or not task.milestone:
+            continue
+        candidates = meetings_by_customer_date.get(
+            (task.milestone.customer_id, activity_date),
+            [],
+        )
+        if task.note_id:
+            confident = candidates
+        else:
+            confident = [
+                meeting for meeting in candidates
+                if meeting.milestone_id == task.milestone_id
+                or _subject_similarity(meeting, task) >= 0.68
+            ]
+        if confident:
+            task_matches[task.id] = confident
+            for meeting in confident:
+                meeting_matches[meeting.id].append(task)
+
+    linked = 0
+    ambiguous = 0
+    for task in tasks:
+        candidates = task_matches.get(task.id, [])
+        if len(candidates) != 1:
+            ambiguous += int(bool(candidates))
+            continue
+        meeting = candidates[0]
+        if len(meeting_matches[meeting.id]) != 1:
+            ambiguous += 1
+            continue
+        task.meeting_id = meeting.id
+        meeting.milestone_id = task.milestone_id
+        if task.note_id and meeting.note_id is None:
+            meeting.note_id = task.note_id
+        linked += 1
+
+    db.session.commit()
+    return {'scanned': len(tasks), 'linked': linked, 'ambiguous': ambiguous}
+
+
+def get_reconciliation_status() -> dict[str, Any]:
+    """Return current activity refresh and reconciliation state."""
+    with _reconcile_state_lock:
+        return dict(_reconcile_state)
+
+
+def _sync_and_reconcile() -> None:
+    """Refresh MSX tasks for known milestones, then reconcile local meetings."""
+    from app.services.milestone_sync import _sync_all_tasks
+
+    with _reconcile_state_lock:
+        _reconcile_state['phase'] = 'syncing'
+    task_sync = _sync_all_tasks()
+    try:
+        while True:
+            next(task_sync)
+    except StopIteration as stop:
+        sync_result = stop.value
+    if not sync_result.get('success'):
+        raise RuntimeError(sync_result.get('error') or 'MSX activity sync failed')
+
+    with _reconcile_state_lock:
+        _reconcile_state.update({
+            'phase': 'matching',
+            'tasks_created': sync_result.get('tasks_created', 0),
+            'tasks_updated': sync_result.get('tasks_updated', 0),
+        })
+    result = reconcile_existing_activities()
+    with _reconcile_state_lock:
+        _reconcile_state.update(result)
+
+
+def _reconciliation_worker(app: Flask) -> None:
+    """Run activity reconciliation inside an application context."""
+    try:
+        with app.app_context():
+            _sync_and_reconcile()
+    except Exception as exc:
+        logger.exception('Activity coverage reconciliation failed')
+        with _reconcile_state_lock:
+            _reconcile_state['error'] = str(exc)
+    finally:
+        with _reconcile_state_lock:
+            _reconcile_state['running'] = False
+            _reconcile_state['phase'] = None
+        _reconcile_lock.release()
+
+
+def start_reconciliation(app: Flask) -> bool:
+    """Start one background MSX refresh and reconciliation pass."""
+    if not _reconcile_lock.acquire(blocking=False):
+        return False
+    with _reconcile_state_lock:
+        _reconcile_state.update({
+            'running': True,
+            'phase': 'starting',
+            'scanned': 0,
+            'linked': 0,
+            'ambiguous': 0,
+            'tasks_created': 0,
+            'tasks_updated': 0,
+            'error': None,
+        })
+    thread = threading.Thread(
+        target=_reconciliation_worker,
+        args=(app,),
+        daemon=True,
+        name='activity-coverage-reconciliation',
+    )
+    thread.start()
+    return True
 
 
 def _serialize_meeting(meeting: PrefetchedMeeting) -> dict[str, Any]:

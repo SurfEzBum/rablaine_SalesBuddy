@@ -10,7 +10,7 @@ Format: `## M/D/YYYY - <merge-short-sha>`. See
 
 ## 8/24/2026
 
-- Add Activity Coverage to populate fiscal-year calendar history with resumable catch-up, match meetings to customers and milestones, reconcile existing work, and create editable MSX activities without leaving Sales Buddy.
+- Add Activity Coverage to populate fiscal-year calendar history with resumable catch-up, match meetings to customers and milestones, refresh and reconcile existing MSX activities, and create editable activities without leaving Sales Buddy.
 
 ## 8/21/2026 - b3ab7f4
 

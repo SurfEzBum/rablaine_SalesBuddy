@@ -10,6 +10,7 @@ from app.models import (
     DailyMeetingCache,
     Milestone,
     MsxTask,
+    Note,
     PrefetchedMeeting,
     PrefetchedMeetingAttendee,
     db,
@@ -149,6 +150,113 @@ def test_link_existing_activity(app, coverage_data):
         assert meeting.milestone_id == coverage_data['milestone_id']
         db.session.delete(task)
         db.session.commit()
+
+
+def test_reconcile_uses_note_call_date(app, coverage_data):
+    """Unique note-backed activity links even when its due date is next day."""
+    with app.app_context():
+        note = Note(
+            customer_id=coverage_data['customer_id'],
+            call_date=datetime.combine(date.today(), datetime.min.time()),
+            content='Customer meeting notes',
+        )
+        db.session.add(note)
+        db.session.flush()
+        task = MsxTask(
+            msx_task_id='historical-note-task',
+            subject='Different but valid activity subject',
+            task_category=861980000,
+            task_category_name='Customer Engagement',
+            duration_minutes=60,
+            is_hok=False,
+            due_date=datetime.combine(
+                date.today() + timedelta(days=1), datetime.min.time(),
+            ),
+            note_id=note.id,
+            milestone_id=coverage_data['milestone_id'],
+        )
+        db.session.add(task)
+        db.session.commit()
+
+        result = activity_coverage.reconcile_existing_activities()
+
+        assert result['linked'] == 1
+        assert task.meeting_id == coverage_data['meeting_id']
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        assert meeting.note_id == note.id
+        db.session.delete(task)
+        db.session.delete(note)
+        db.session.commit()
+
+
+def test_reconcile_leaves_ambiguous_note_activity_unlinked(app, coverage_data):
+    """Multiple same-customer meetings require explicit user confirmation."""
+    with app.app_context():
+        second_meeting = PrefetchedMeeting(
+            workiq_id='second-coverage-meeting',
+            subject='Second customer meeting',
+            start_time=datetime.combine(date.today(), datetime.min.time()),
+            meeting_date=date.today(),
+            customer_id=coverage_data['customer_id'],
+            expires_at=datetime.now() + timedelta(days=5),
+        )
+        note = Note(
+            customer_id=coverage_data['customer_id'],
+            call_date=datetime.combine(date.today(), datetime.min.time()),
+            content='Ambiguous customer meeting notes',
+        )
+        db.session.add_all([second_meeting, note])
+        db.session.flush()
+        task = MsxTask(
+            msx_task_id='ambiguous-note-task',
+            subject='Customer follow-up',
+            task_category=861980000,
+            duration_minutes=60,
+            is_hok=False,
+            due_date=datetime.combine(date.today(), datetime.min.time()),
+            note_id=note.id,
+            milestone_id=coverage_data['milestone_id'],
+        )
+        db.session.add(task)
+        db.session.commit()
+
+        result = activity_coverage.reconcile_existing_activities()
+
+        assert result['linked'] == 0
+        assert result['ambiguous'] == 1
+        assert task.meeting_id is None
+        db.session.delete(task)
+        db.session.delete(second_meeting)
+        db.session.delete(note)
+        db.session.commit()
+
+
+def test_sync_and_reconcile_refreshes_tasks_before_matching(app):
+    """Reconciliation refreshes local MSX tasks before matching meetings."""
+    def task_sync():
+        yield 1, 1, 'Tasks batch 1/1', 'ok'
+        return {
+            'success': True,
+            'tasks_created': 2,
+            'tasks_updated': 3,
+            'error': '',
+        }
+
+    with app.app_context(), patch(
+        'app.services.milestone_sync._sync_all_tasks',
+        side_effect=task_sync,
+    ), patch(
+        'app.services.activity_coverage.reconcile_existing_activities',
+        return_value={'scanned': 5, 'linked': 4, 'ambiguous': 1},
+    ) as reconcile:
+        activity_coverage._sync_and_reconcile()
+
+    reconcile.assert_called_once_with()
+    state = activity_coverage.get_reconciliation_status()
+    assert state['tasks_created'] == 2
+    assert state['tasks_updated'] == 3
+    assert state['linked'] == 4
+    assert state['ambiguous'] == 1
 
 
 def test_population_imports_fiscal_year_then_catches_up(app):
@@ -311,10 +419,28 @@ def test_report_page_and_hub_registration(client, coverage_data):
     assert b'Activity Coverage' in response.data
     assert b'Fabric architecture workshop' in response.data
     assert b'Create Activity' in response.data
+    assert b'Reconcile MSX' in response.data
 
     hub = client.get('/reports')
     assert hub.status_code == 200
     assert b'/reports/activity-coverage' in hub.data
+
+
+def test_reconciliation_routes(client):
+    """Report can start reconciliation and poll its status."""
+    with patch(
+        'app.services.activity_coverage.start_reconciliation',
+        return_value=True,
+    ) as start:
+        response = client.post('/api/reports/activity-coverage/reconcile')
+
+    assert response.status_code == 200
+    assert response.get_json()['success'] is True
+    start.assert_called_once()
+
+    status = client.get('/api/reports/activity-coverage/reconcile-status')
+    assert status.status_code == 200
+    assert status.get_json()['success'] is True
 
 
 def test_update_route_validates_required_subject(client, coverage_data):
