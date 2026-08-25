@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 8/25/2026
+## 8/25/2026 - 25f6d44
 
 - Add Activity Coverage to populate fiscal-year calendar history with resumable catch-up, refresh existing MSX activities, and create editable activities without leaving Sales Buddy.
 - Add durable five-worker meeting preparation that stores WorkIQ summaries, drafts task details, prefers on-team milestone matches, and supports expand-all auditing with manual milestone overrides.
