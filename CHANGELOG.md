@@ -8,7 +8,7 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 8/25/2026
+## 8/25/2026 - 8d81100
 
 - *Electron Shell Update* - Updating Sales Buddy now restores its window when finished instead of restarting silently in the system tray when Start minimized is enabled.
 
