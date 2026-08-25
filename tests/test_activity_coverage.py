@@ -16,6 +16,7 @@ from app.models import (
     db,
 )
 from app.services import activity_coverage
+from app.services import activity_enrichment
 
 
 @pytest.fixture
@@ -259,6 +260,178 @@ def test_sync_and_reconcile_refreshes_tasks_before_matching(app):
     assert state['ambiguous'] == 1
 
 
+def test_enrichment_prefers_on_team_milestones():
+    """Matcher tries team milestones before considering off-team milestones."""
+    milestones = [
+        {
+            'local_id': 1, 'id': 'team-id', 'name': 'Team milestone',
+            'status': 'On Track', 'opportunity': '', 'workload': 'Fabric',
+            'on_my_team': True,
+        },
+        {
+            'local_id': 2, 'id': 'other-id', 'name': 'Other milestone',
+            'status': 'On Track', 'opportunity': '', 'workload': 'AI',
+            'on_my_team': False,
+        },
+    ]
+    with patch('app.services.activity_enrichment.gateway_call', return_value={
+        'milestone_id': 'team-id',
+        'reason': 'Strong team match',
+    }) as gateway:
+        result = activity_enrichment._match_milestone('Fabric workshop', milestones)
+
+    assert result['milestone_id'] == 1
+    assert result['on_my_team'] is True
+    gateway.assert_called_once()
+
+
+def test_enrichment_allows_off_team_fallback():
+    """Matcher considers off-team milestones when team choices have no fit."""
+    milestones = [
+        {
+            'local_id': 1, 'id': 'team-id', 'name': 'Unrelated milestone',
+            'status': 'On Track', 'opportunity': '', 'workload': 'Security',
+            'on_my_team': True,
+        },
+        {
+            'local_id': 2, 'id': 'other-id', 'name': 'Relevant milestone',
+            'status': 'At Risk', 'opportunity': '', 'workload': 'Fabric',
+            'on_my_team': False,
+        },
+    ]
+    with patch('app.services.activity_enrichment.gateway_call', side_effect=[
+        {'milestone_id': None},
+        {'milestone_id': 'other-id', 'reason': 'Best content match'},
+    ]) as gateway:
+        result = activity_enrichment._match_milestone('Fabric workshop', milestones)
+
+    assert result['milestone_id'] == 2
+    assert result['on_my_team'] is False
+    assert gateway.call_count == 2
+
+
+def test_enrichment_job_persists_result(app, coverage_data):
+    """Completed enrichment fills drafts and suggested milestone durably."""
+    with app.app_context():
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        meeting.enrichment_status = activity_enrichment.STATUS_QUEUED
+        db.session.commit()
+        enriched = {
+            'summary': 'Discussed Fabric architecture and implementation steps.',
+            'task_subject': 'Document Fabric architecture',
+            'task_description': 'Capture the agreed implementation plan.',
+            'task_category': 861980004,
+            'milestone_id': coverage_data['milestone_id'],
+            'match_reason': 'Architecture work advances this milestone.',
+            'matched_on_team': True,
+            'used_fallback': False,
+        }
+        with patch(
+            'app.services.activity_enrichment._enrich_external',
+            return_value=enriched,
+        ):
+            result = activity_enrichment.process_enrichment_job({
+                'meeting_ids': [meeting.id],
+            })
+
+        assert result == {'total': 1, 'completed': 1, 'failed': 0}
+        assert meeting.enrichment_status == activity_enrichment.STATUS_COMPLETE
+        assert meeting.enrichment_summary.startswith('Discussed Fabric')
+        assert meeting.suggested_milestone_id == coverage_data['milestone_id']
+        assert meeting.milestone_id == coverage_data['milestone_id']
+        assert meeting.draft_subject == 'Document Fabric architecture'
+        assert meeting.draft_task_category == 861980004
+        meeting.enrichment_status = None
+        meeting.enrichment_summary = None
+        meeting.suggested_milestone_id = None
+        meeting.milestone_id = None
+        meeting.draft_subject = None
+        meeting.draft_description = None
+        meeting.draft_task_category = None
+        meeting.enriched_at = None
+        db.session.commit()
+
+
+def test_enrichment_preserves_manual_draft_choices(app, coverage_data):
+    """Batch stores its suggestion without replacing user-reviewed fields."""
+    with app.app_context():
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        meeting.enrichment_status = activity_enrichment.STATUS_QUEUED
+        meeting.milestone_id = coverage_data['milestone_id']
+        meeting.draft_subject = 'Keep reviewed subject'
+        meeting.draft_description = 'Keep reviewed description'
+        meeting.draft_task_category = 861980002
+        db.session.commit()
+        enriched = {
+            'summary': 'Stored source context.',
+            'task_subject': 'Replacement subject',
+            'task_description': 'Replacement description',
+            'task_category': 861980004,
+            'milestone_id': coverage_data['milestone_id'],
+            'match_reason': 'Suggested from transcript.',
+            'matched_on_team': True,
+            'used_fallback': False,
+        }
+        with patch(
+            'app.services.activity_enrichment._enrich_external',
+            return_value=enriched,
+        ):
+            activity_enrichment.process_enrichment_job({
+                'meeting_ids': [meeting.id],
+            })
+
+        assert meeting.draft_subject == 'Keep reviewed subject'
+        assert meeting.draft_description == 'Keep reviewed description'
+        assert meeting.draft_task_category == 861980002
+        assert meeting.suggested_milestone_id == coverage_data['milestone_id']
+        meeting.enrichment_status = None
+        meeting.enrichment_summary = None
+        meeting.suggested_milestone_id = None
+        meeting.milestone_id = None
+        meeting.draft_subject = None
+        meeting.draft_description = None
+        meeting.draft_task_category = None
+        meeting.enriched_at = None
+        db.session.commit()
+
+
+def test_enrichment_job_resumes_interrupted_running_row(app, coverage_data):
+    """A reclaimed durable job processes rows left running by a dead worker."""
+    with app.app_context():
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        meeting.enrichment_status = activity_enrichment.STATUS_RUNNING
+        db.session.commit()
+        enriched = {
+            'summary': 'Recovered summary.',
+            'task_subject': 'Recovered task',
+            'task_description': 'Recovered description',
+            'task_category': 861980000,
+            'milestone_id': coverage_data['milestone_id'],
+            'match_reason': 'Recovered match.',
+            'matched_on_team': True,
+            'used_fallback': False,
+        }
+        with patch(
+            'app.services.activity_enrichment._enrich_external',
+            return_value=enriched,
+        ):
+            result = activity_enrichment.process_enrichment_job({
+                'meeting_ids': [meeting.id],
+            })
+
+        assert result['completed'] == 1
+        assert meeting.enrichment_status == activity_enrichment.STATUS_COMPLETE
+        meeting.enrichment_status = None
+        meeting.enrichment_summary = None
+        meeting.suggested_milestone_id = None
+        meeting.milestone_id = None
+        meeting.draft_subject = None
+        meeting.draft_description = None
+        meeting.draft_task_category = None
+        meeting.enriched_at = None
+        db.session.commit()
+
+
 def test_population_imports_fiscal_year_then_catches_up(app):
     """First run starts July 1; later run starts after durable checkpoint."""
     with app.app_context():
@@ -420,6 +593,8 @@ def test_report_page_and_hub_registration(client, coverage_data):
     assert b'Fabric architecture workshop' in response.data
     assert b'Create Activity' in response.data
     assert b'Reconcile MSX' in response.data
+    assert b'Match Milestones' in response.data
+    assert b'Expand All' in response.data
 
     hub = client.get('/reports')
     assert hub.status_code == 200
@@ -441,6 +616,42 @@ def test_reconciliation_routes(client):
     status = client.get('/api/reports/activity-coverage/reconcile-status')
     assert status.status_code == 200
     assert status.get_json()['success'] is True
+
+
+def test_enrichment_routes(client):
+    """Report can queue enrichment and poll durable progress."""
+    with patch(
+        'app.services.activity_enrichment.start_enrichment',
+        return_value={'started': True, 'job_id': 42, 'queued': 8},
+    ):
+        response = client.post('/api/reports/activity-coverage/match-milestones')
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        'success': True,
+        'started': True,
+        'job_id': 42,
+        'queued': 8,
+    }
+
+    status = client.get('/api/reports/activity-coverage/match-status')
+    assert status.status_code == 200
+    assert status.get_json()['success'] is True
+
+
+def test_milestone_options_include_team_membership(client, coverage_data):
+    """Manual milestone choices expose team preference metadata."""
+    response = client.get(
+        '/api/reports/activity-coverage/customers/'
+        f"{coverage_data['customer_id']}/milestones"
+    )
+
+    assert response.status_code == 200
+    option = next(
+        item for item in response.get_json()['milestones']
+        if item['id'] == coverage_data['milestone_id']
+    )
+    assert isinstance(option['on_my_team'], bool)
 
 
 def test_update_route_validates_required_subject(client, coverage_data):

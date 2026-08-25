@@ -10,7 +10,8 @@ Format: `## M/D/YYYY - <merge-short-sha>`. See
 
 ## 8/24/2026
 
-- Add Activity Coverage to populate fiscal-year calendar history with resumable catch-up, match meetings to customers and milestones, refresh and reconcile existing MSX activities, and create editable activities without leaving Sales Buddy.
+- Add Activity Coverage to populate fiscal-year calendar history with resumable catch-up, refresh existing MSX activities, and create editable activities without leaving Sales Buddy.
+- Add durable five-worker meeting preparation that stores WorkIQ summaries, drafts task details, prefers on-team milestone matches, and supports expand-all auditing with manual milestone overrides.
 
 ## 8/21/2026 - b3ab7f4
 

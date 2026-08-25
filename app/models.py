@@ -2339,6 +2339,15 @@ class PrefetchedMeeting(db.Model):
     draft_description = db.Column(db.Text, nullable=True)
     draft_task_category = db.Column(db.Integer, nullable=True)
     draft_duration_minutes = db.Column(db.Integer, nullable=True)
+    enrichment_status = db.Column(db.String(20), nullable=True, index=True)
+    enrichment_summary = db.Column(db.Text, nullable=True)
+    enrichment_error = db.Column(db.Text, nullable=True)
+    enrichment_attempts = db.Column(db.Integer, default=0, nullable=False)
+    enriched_at = db.Column(db.DateTime, nullable=True)
+    suggested_milestone_id = db.Column(
+        db.Integer, db.ForeignKey('milestones.id'), nullable=True,
+    )
+    milestone_match_reason = db.Column(db.Text, nullable=True)
 
     attendees = db.relationship(
         'PrefetchedMeetingAttendee',
@@ -2349,6 +2358,9 @@ class PrefetchedMeeting(db.Model):
     customer = db.relationship('Customer', foreign_keys=[customer_id])
     note = db.relationship('Note', foreign_keys=[note_id])
     selected_milestone = db.relationship('Milestone', foreign_keys=[milestone_id])
+    suggested_milestone = db.relationship(
+        'Milestone', foreign_keys=[suggested_milestone_id],
+    )
     activity = db.relationship(
         'MsxTask',
         back_populates='meeting',

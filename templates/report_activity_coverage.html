@@ -50,6 +50,8 @@
     .filter-button.active { box-shadow: inset 0 -2px 0 currentColor; }
     #populationButton { min-width: 9.5rem; }
     #reconcileButton { min-width: 8.5rem; }
+    #matchMilestonesButton { min-width: 10.5rem; }
+    .enrichment-summary { white-space: pre-wrap; max-height: 12rem; overflow-y: auto; }
     @media (max-width: 991.98px) {
         .meeting-summary { grid-template-columns: 1.1rem 6.5rem minmax(10rem, 2fr) minmax(8rem, 1fr) 7rem auto; }
         .meeting-milestone { display: none; }
@@ -106,8 +108,18 @@
             <div class="btn-group btn-group-sm" id="coverageFilters" aria-label="Meeting filters">
                 <button class="btn btn-outline-secondary filter-button active" data-filter="all">All</button>
                 <button class="btn btn-outline-secondary filter-button" data-filter="open">Open</button>
+                <button class="btn btn-outline-secondary filter-button" data-filter="prepared">Prepared</button>
+                <button class="btn btn-outline-secondary filter-button" data-filter="failed">Failed</button>
                 <button class="btn btn-outline-secondary filter-button" data-filter="logged">Logged</button>
             </div>
+            <button class="btn btn-sm btn-outline-secondary" id="expandAllButton" title="Expand or collapse all visible meetings">
+                <i class="bi bi-arrows-expand"></i> Expand All
+            </button>
+            <button class="btn btn-sm btn-outline-primary" id="matchMilestonesButton" {% if enrichment.running_job or enrichment.remaining == 0 %}disabled{% endif %} title="Summarize open meetings, prepare task drafts, and suggest milestones">
+                <span class="spinner-border spinner-border-sm {% if not enrichment.running_job %}d-none{% endif %}" id="matchMilestonesSpinner" aria-hidden="true"></span>
+                <i class="bi bi-stars{% if enrichment.running_job %} d-none{% endif %}" id="matchMilestonesIcon"></i>
+                <span id="matchMilestonesLabel">{% if enrichment.running_job %}Preparing {{ enrichment.prepared }}/{{ enrichment.total }}{% elif enrichment.failed %}Retry {{ enrichment.failed }} Failed{% else %}Match Milestones{% endif %}</span>
+            </button>
             <button class="btn btn-sm btn-outline-secondary" id="reconcileButton" {% if reconciliation.running %}disabled{% endif %} title="Refresh activities from MSX and match them to meetings">
                 <span class="spinner-border spinner-border-sm {% if not reconciliation.running %}d-none{% endif %}" id="reconcileSpinner" aria-hidden="true"></span>
                 <i class="bi bi-link-45deg{% if reconciliation.running %} d-none{% endif %}" id="reconcileIcon"></i>
@@ -123,6 +135,9 @@
     <div id="reconcileResult" class="small mt-1 {% if reconciliation.error %}text-danger{% else %}text-muted{% endif %}{% if not reconciliation.error and not reconciliation.linked and not reconciliation.ambiguous %} d-none{% endif %}">
         {% if reconciliation.error %}{{ reconciliation.error }}{% elif reconciliation.linked or reconciliation.ambiguous %}{{ reconciliation.linked }} linked{% if reconciliation.ambiguous %} · {{ reconciliation.ambiguous }} need review{% endif %}{% endif %}
     </div>
+    <div id="matchMilestonesProgress" class="small mt-1 {% if enrichment.failed %}text-danger{% else %}text-muted{% endif %}{% if not enrichment.running_job and not enrichment.prepared and not enrichment.failed %} d-none{% endif %}">
+        {% if enrichment.running_job %}Preparing {{ enrichment.prepared }} of {{ enrichment.total }} meetings · {{ enrichment.running }} running · {{ enrichment.queued }} queued{% elif enrichment.failed %}{{ enrichment.prepared }} prepared · {{ enrichment.failed }} failed{% elif enrichment.prepared %}{{ enrichment.prepared }} meetings prepared for audit{% endif %}
+    </div>
     <div id="importProgress" class="mt-2 {% if not population.running and not population.error %}d-none{% endif %}">
         <div class="progress" role="progressbar" aria-label="Fiscal year population progress" style="height: 6px;">
             <div class="progress-bar progress-bar-striped progress-bar-animated" id="populationProgressBar" style="width: 0"></div>
@@ -133,7 +148,7 @@
 
 <div class="meeting-list" id="meetingList">
     {% for meeting in meetings %}
-    <section class="meeting-row" data-status="{{ meeting.status }}">
+    <section class="meeting-row" data-status="{{ meeting.status }}" data-enrichment="{{ meeting.enrichment_status or '' }}">
         <div class="meeting-summary" role="button" tabindex="0" aria-expanded="false" aria-controls="meeting-detail-{{ meeting.id }}">
             <i class="bi bi-chevron-right meeting-chevron text-muted small"></i>
             <div class="meeting-date">
@@ -156,6 +171,7 @@
                 {% elif meeting.status == 'ready' %}<span class="status-dot status-ready"></span> Ready
                 {% elif meeting.status == 'needs_customer' %}<span class="status-dot status-attention"></span> Customer
                 {% else %}<span class="status-dot status-attention"></span> Milestone{% endif %}
+                {% if meeting.enrichment_status == 'complete' %}<span class="badge bg-info text-dark ms-1">Prepared</span>{% elif meeting.enrichment_status == 'failed' %}<span class="badge bg-danger ms-1">Failed</span>{% endif %}
             </div>
             <div class="meeting-actions d-flex gap-1" onclick="event.stopPropagation();">
                         {% if meeting.activity and meeting.activity.msx_task_url %}
@@ -214,7 +230,7 @@
                             <select class="form-select milestone-select" id="milestone-{{ meeting.id }}" name="milestone_id">
                                 <option value="">Select milestone</option>
                                 {% for milestone in meeting.milestones %}
-                                <option value="{{ milestone.id }}" {% if milestone.id == meeting.milestone_id %}selected{% endif %}>{{ milestone.display_text }}{% if milestone.msx_status %} · {{ milestone.msx_status }}{% endif %}</option>
+                                <option value="{{ milestone.id }}" {% if milestone.id == meeting.milestone_id %}selected{% endif %}>{{ milestone.display_text }}{% if milestone.on_my_team %} · On team{% endif %}{% if milestone.msx_status %} · {{ milestone.msx_status }}{% endif %}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -239,6 +255,21 @@
                         <label class="form-label small" for="description-{{ meeting.id }}">Description</label>
                         <textarea class="form-control meeting-description" id="description-{{ meeting.id }}" name="description">{{ meeting.draft_description }}</textarea>
                     </div>
+                    {% if meeting.enrichment_summary or meeting.enrichment_error %}
+                    <div class="border-top pt-2 mb-3">
+                        {% if meeting.enrichment_error %}
+                        <div class="small text-danger"><i class="bi bi-exclamation-triangle"></i> {{ meeting.enrichment_error }}</div>
+                        {% else %}
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                            <span class="small fw-semibold">Stored WorkIQ summary</span>
+                            {% if meeting.suggested_milestone %}<span class="badge bg-info text-dark">Suggested: {{ meeting.suggested_milestone.display_text }}</span>{% endif %}
+                            {% if meeting.suggested_milestone and meeting.suggested_milestone.on_my_team %}<span class="badge bg-primary"><i class="bi bi-people-fill"></i> On team</span>{% endif %}
+                        </div>
+                        <div class="enrichment-summary small text-muted">{{ meeting.enrichment_summary }}</div>
+                        {% if meeting.milestone_match_reason %}<div class="small mt-2"><strong>Match reason:</strong> {{ meeting.milestone_match_reason }}</div>{% endif %}
+                        {% endif %}
+                    </div>
+                    {% endif %}
                     {% if meeting.candidate_tasks %}
                     <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
                         <div class="flex-grow-1">
@@ -379,7 +410,9 @@
                     data.milestones.forEach(function(milestone) {
                         var option = document.createElement('option');
                         option.value = milestone.id;
-                        option.textContent = milestone.label + (milestone.status ? ' · ' + milestone.status : '');
+                        option.textContent = milestone.label
+                            + (milestone.on_my_team ? ' · On team' : '')
+                            + (milestone.status ? ' · ' + milestone.status : '');
                         milestoneSelect.appendChild(option);
                     });
                 }).catch(function(error) { alert(error.message); });
@@ -422,13 +455,32 @@
             document.querySelectorAll('.meeting-row').forEach(function(row) {
                 var show = button.dataset.filter === 'all'
                     || (button.dataset.filter === 'logged' && row.dataset.status === 'logged')
-                    || (button.dataset.filter === 'open' && row.dataset.status !== 'logged');
+                    || (button.dataset.filter === 'open' && row.dataset.status !== 'logged')
+                    || (button.dataset.filter === 'prepared' && row.dataset.enrichment === 'complete')
+                    || (button.dataset.filter === 'failed' && row.dataset.enrichment === 'failed');
                 row.classList.toggle('d-none', !show);
             });
         });
     });
 
+    var allExpanded = false;
+    document.getElementById('expandAllButton').addEventListener('click', function() {
+        allExpanded = !allExpanded;
+        document.querySelectorAll('.meeting-row:not(.d-none)').forEach(function(row) {
+            row.classList.toggle('is-expanded', allExpanded);
+            row.querySelector('.meeting-summary').setAttribute('aria-expanded', String(allExpanded));
+        });
+        this.innerHTML = allExpanded
+            ? '<i class="bi bi-arrows-collapse"></i> Collapse All'
+            : '<i class="bi bi-arrows-expand"></i> Expand All';
+    });
+
     var importButton = document.getElementById('populationButton');
+    var matchMilestonesButton = document.getElementById('matchMilestonesButton');
+    var matchMilestonesSpinner = document.getElementById('matchMilestonesSpinner');
+    var matchMilestonesIcon = document.getElementById('matchMilestonesIcon');
+    var matchMilestonesLabel = document.getElementById('matchMilestonesLabel');
+    var matchMilestonesProgress = document.getElementById('matchMilestonesProgress');
     var reconcileButton = document.getElementById('reconcileButton');
     var reconcileSpinner = document.getElementById('reconcileSpinner');
     var reconcileIcon = document.getElementById('reconcileIcon');
@@ -443,6 +495,45 @@
     var pollTimer = null;
     var pollFailures = 0;
     var reconcileTimer = null;
+    var matchMilestonesTimer = null;
+
+    function showMatchMilestonesRunning(label) {
+        matchMilestonesButton.disabled = true;
+        matchMilestonesSpinner.classList.remove('d-none');
+        matchMilestonesIcon.classList.add('d-none');
+        matchMilestonesLabel.textContent = label;
+        matchMilestonesProgress.classList.remove('d-none', 'text-danger');
+        matchMilestonesProgress.classList.add('text-muted');
+    }
+
+    function pollMatchMilestones() {
+        requestJson('/api/reports/activity-coverage/match-status').then(function(state) {
+            showMatchMilestonesRunning('Preparing ' + state.prepared + '/' + state.total);
+            matchMilestonesProgress.textContent = state.prepared + ' of ' + state.total
+                + ' prepared · ' + state.running + ' running · ' + state.queued + ' queued';
+            if (!state.running_job) {
+                clearTimeout(matchMilestonesTimer);
+                window.location.reload();
+            } else {
+                matchMilestonesTimer = setTimeout(pollMatchMilestones, 2000);
+            }
+        }).catch(function() {
+            showMatchMilestonesRunning('Reconnecting...');
+            matchMilestonesProgress.textContent = 'Connection interrupted. Preparation continues; reconnecting...';
+            matchMilestonesTimer = setTimeout(pollMatchMilestones, 4000);
+        });
+    }
+
+    matchMilestonesButton.addEventListener('click', function() {
+        showMatchMilestonesRunning('Starting...');
+        matchMilestonesProgress.textContent = 'Queueing open meetings for preparation...';
+        requestJson('/api/reports/activity-coverage/match-milestones', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        }).then(pollMatchMilestones).catch(function() {
+            matchMilestonesTimer = setTimeout(pollMatchMilestones, 1000);
+        });
+    });
 
     function showReconciliationRunning(label) {
         reconcileButton.disabled = true;
@@ -542,6 +633,9 @@
     {% endif %}
     {% if reconciliation.running %}
     pollReconciliation();
+    {% endif %}
+    {% if enrichment.running_job %}
+    pollMatchMilestones();
     {% endif %}
 })();
 </script>

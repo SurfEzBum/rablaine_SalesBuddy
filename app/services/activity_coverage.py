@@ -324,7 +324,11 @@ def _serialize_meeting(meeting: PrefetchedMeeting) -> dict[str, Any]:
         milestones = (
             Milestone.query.filter_by(customer_id=meeting.customer_id)
             .filter(Milestone.msx_milestone_id.isnot(None))
-            .order_by(Milestone.due_date.desc(), Milestone.title.asc())
+            .order_by(
+                Milestone.on_my_team.desc(),
+                Milestone.due_date.desc(),
+                Milestone.title.asc(),
+            )
             .all()
         )
     return {
@@ -356,6 +360,12 @@ def _serialize_meeting(meeting: PrefetchedMeeting) -> dict[str, Any]:
         'activity': task,
         'candidate_tasks': [] if task else _candidate_tasks(meeting),
         'note_id': meeting.note_id,
+        'enrichment_status': meeting.enrichment_status,
+        'enrichment_summary': meeting.enrichment_summary,
+        'enrichment_error': meeting.enrichment_error,
+        'enriched_at': meeting.enriched_at,
+        'suggested_milestone': meeting.suggested_milestone,
+        'milestone_match_reason': meeting.milestone_match_reason,
     }
 
 

@@ -212,6 +212,8 @@ def report_activity_coverage():
     data = get_report_data(week_start)
     data['population'] = get_population_status()
     data['reconciliation'] = get_reconciliation_status()
+    from app.services.activity_enrichment import get_enrichment_status
+    data['enrichment'] = get_enrichment_status()
     return render_template('report_activity_coverage.html', **data)
 
 
@@ -256,19 +258,51 @@ def api_activity_coverage_reconcile_status():
     return jsonify({'success': True, **get_reconciliation_status()})
 
 
+@bp.route('/api/reports/activity-coverage/match-milestones', methods=['POST'])
+def api_activity_coverage_match_milestones():
+    """Queue durable WorkIQ enrichment and milestone matching."""
+    from app.services.activity_enrichment import start_enrichment
+
+    result = start_enrichment()
+    if not result['started'] and result['job_id']:
+        return jsonify({
+            'success': False,
+            'error': 'Milestone matching is already running',
+            **result,
+        }), 409
+    return jsonify({'success': True, **result})
+
+
+@bp.route('/api/reports/activity-coverage/match-status')
+def api_activity_coverage_match_status():
+    """Return durable milestone matching progress."""
+    from app.services.activity_enrichment import get_enrichment_status
+
+    return jsonify({'success': True, **get_enrichment_status()})
+
+
 @bp.route('/api/reports/activity-coverage/customers/<int:customer_id>/milestones')
 def api_activity_coverage_milestones(customer_id):
     """Return locally cached milestones for one customer."""
     milestones = (
         Milestone.query.filter_by(customer_id=customer_id)
         .filter(Milestone.msx_milestone_id.isnot(None))
-        .order_by(Milestone.due_date.desc(), Milestone.title.asc())
+        .order_by(
+            Milestone.on_my_team.desc(),
+            Milestone.due_date.desc(),
+            Milestone.title.asc(),
+        )
         .all()
     )
     return jsonify({
         'success': True,
         'milestones': [
-            {'id': item.id, 'label': item.display_text, 'status': item.msx_status}
+            {
+                'id': item.id,
+                'label': item.display_text,
+                'status': item.msx_status,
+                'on_my_team': item.on_my_team,
+            }
             for item in milestones
         ],
     })
