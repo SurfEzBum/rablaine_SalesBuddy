@@ -3,9 +3,9 @@
 This guide shows how to retrieve a customer's current seller and core solution
 engineers from the native MSX account access team.
 
-**Last verified:** August 24, 2026  
-**API:** `https://microsoftsales.crm.dynamics.com/api/data/v9.2`  
-**Tenant:** `72f988bf-86f1-41af-91ab-2d7cd011db47`  
+**Last verified:** August 24, 2026
+**API:** `https://microsoftsales.crm.dynamics.com/api/data/v9.2`
+**Tenant:** `72f988bf-86f1-41af-91ab-2d7cd011db47`
 **Account access team template:** `3fcc1cfc-3e43-e311-9405-00155db3ba1e`
 
 ## Source of Truth

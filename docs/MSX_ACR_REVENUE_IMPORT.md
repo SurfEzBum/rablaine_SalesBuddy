@@ -3,11 +3,11 @@
 This guide explains how Sales Buddy retrieves Azure Consumed Revenue (ACR)
 from the MSX Insights Power BI semantic model and imports it by customer TPID.
 
-**Last verified:** August 24, 2026  
-**Authentication tenant:** `72f988bf-86f1-41af-91ab-2d7cd011db47`  
-**Power BI resource:** `https://analysis.windows.net/powerbi/api`  
-**Report ID:** `4774bb5f-91a6-4e41-8c8a-0cee2142b765`  
-**Dataset ID:** `f7ecc250-c244-43a6-aea5-7a957f9e9d38`  
+**Last verified:** August 24, 2026
+**Authentication tenant:** `72f988bf-86f1-41af-91ab-2d7cd011db47`
+**Power BI resource:** `https://analysis.windows.net/powerbi/api`
+**Report ID:** `4774bb5f-91a6-4e41-8c8a-0cee2142b765`
+**Dataset ID:** `f7ecc250-c244-43a6-aea5-7a957f9e9d38`
 **Fallback model ID:** `6642435`
 
 ## Source of Truth
