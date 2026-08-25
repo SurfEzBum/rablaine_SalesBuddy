@@ -5,6 +5,41 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from app.routes.msx import _account_import_sort_key, _update_customer_tpid_url
+
+
+def test_account_import_prefers_top_account_for_duplicate_tpid():
+    """Top account must win regardless of MSX response order."""
+    accounts = [
+        {
+            'id': 'child-id',
+            'tpid': 3823914,
+            'parenting_level_code': 861980001,
+        },
+        {
+            'id': 'top-id',
+            'tpid': 3823914,
+            'parenting_level_code': 861980000,
+        },
+    ]
+
+    accounts.sort(key=_account_import_sort_key)
+
+    assert accounts[0]['id'] == 'top-id'
+
+
+def test_account_import_replaces_stale_account_url():
+    """Canonical account URL should replace an obsolete child-account URL."""
+    customer = MagicMock(tpid_url='https://msx/accounts/child-id')
+
+    changed = _update_customer_tpid_url(
+        customer,
+        {'url': 'https://msx/accounts/top-id'},
+    )
+
+    assert changed is True
+    assert customer.tpid_url == 'https://msx/accounts/top-id'
+
 
 class TestTpidLookup:
     """Tests for /api/customer/tpid-lookup endpoint."""

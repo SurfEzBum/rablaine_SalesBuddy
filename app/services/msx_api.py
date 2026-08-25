@@ -2767,6 +2767,7 @@ def create_task(
     duration_minutes: int = 60,
     description: str = None,
     due_date: str = None,
+    start_date: str = None,
 ) -> Dict[str, Any]:
     """
     Create a task in MSX linked to a milestone.
@@ -2777,6 +2778,8 @@ def create_task(
         task_category: Numeric task category code.
         duration_minutes: Task duration (default 60).
         description: Optional task description.
+        due_date: Optional scheduled end date/time.
+        start_date: Optional scheduled start date/time.
         
     Returns:
         Dict with:
@@ -2803,6 +2806,9 @@ def create_task(
         
         if description:
             task_data["description"] = description
+
+        if start_date:
+            task_data["scheduledstart"] = start_date
         
         if due_date:
             task_data["scheduledend"] = due_date

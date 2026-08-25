@@ -369,8 +369,11 @@ def _serialize_meeting(meeting: PrefetchedMeeting) -> dict[str, Any]:
     }
 
 
-def get_report_data(week_start: date | None = None) -> dict[str, Any]:
-    """Return selected-week meetings and fiscal-year coverage totals."""
+def get_report_data(
+    week_start: date | None = None,
+    view_all: bool = False,
+) -> dict[str, Any]:
+    """Return weekly or full-fiscal-year meetings plus coverage totals."""
     today = date.today()
     fiscal_start, fiscal_end = fiscal_year_bounds(today)
     first_week = normalize_week_start(fiscal_start)
@@ -379,10 +382,12 @@ def get_report_data(week_start: date | None = None) -> dict[str, Any]:
     selected_start = max(first_week, min(requested_week, current_week))
     selected_end = selected_start + timedelta(days=6)
 
-    week_rows = (
+    visible_start = fiscal_start if view_all else max(selected_start, fiscal_start)
+    visible_end = min(today, fiscal_end) if view_all else min(selected_end, today, fiscal_end)
+    visible_rows = (
         PrefetchedMeeting.query
-        .filter(PrefetchedMeeting.meeting_date >= max(selected_start, fiscal_start))
-        .filter(PrefetchedMeeting.meeting_date <= min(selected_end, today, fiscal_end))
+        .filter(PrefetchedMeeting.meeting_date >= visible_start)
+        .filter(PrefetchedMeeting.meeting_date <= visible_end)
         .filter(PrefetchedMeeting.dismissed.is_(False))
         .order_by(PrefetchedMeeting.start_time.asc())
         .all()
@@ -398,7 +403,8 @@ def get_report_data(week_start: date | None = None) -> dict[str, Any]:
     logged = statuses.count('logged')
     total = len(statuses)
     return {
-        'meetings': [_serialize_meeting(row) for row in week_rows],
+        'meetings': [_serialize_meeting(row) for row in visible_rows],
+        'view_all': view_all,
         'week_start': selected_start,
         'week_end': selected_end,
         'previous_week': selected_start - timedelta(days=7),
@@ -501,13 +507,18 @@ def create_meeting_activity(meeting_id: int) -> MsxTask:
         )
         category = meeting.draft_task_category or _default_category(meeting)
         duration = meeting.draft_duration_minutes or _default_duration(meeting)
+        scheduled_start = meeting.start_time
+        if scheduled_start.tzinfo is None:
+            scheduled_start = scheduled_start.replace(tzinfo=timezone.utc)
+        scheduled_end = scheduled_start + timedelta(minutes=duration)
         result = create_task(
             milestone_id=meeting.selected_milestone.msx_milestone_id,
             subject=subject,
             task_category=category,
             duration_minutes=duration,
             description=description or None,
-            due_date=meeting.meeting_date.isoformat(),
+            start_date=scheduled_start.isoformat(),
+            due_date=scheduled_end.isoformat(),
         )
         if not result.get('success'):
             raise RuntimeError(result.get('error') or 'MSX activity creation failed')
@@ -521,7 +532,7 @@ def create_meeting_activity(meeting_id: int) -> MsxTask:
             task_category_name=_CATEGORY_NAMES[category],
             duration_minutes=duration,
             is_hok=category in HOK_TASK_CATEGORIES,
-            due_date=datetime.combine(meeting.meeting_date, time.min),
+            due_date=scheduled_end,
             note_id=meeting.note_id,
             meeting_id=meeting.id,
             milestone_id=meeting.milestone_id,
@@ -582,10 +593,10 @@ def get_population_status(today: date | None = None) -> dict[str, Any]:
         label = 'Populating'
         detail = f"{live['completed_count']} of {live['total_dates']} days"
     elif populated_through is None:
-        label = f'Populate FY{fiscal_end.year % 100:02d}'
+        label = f'Import FY{fiscal_end.year % 100:02d} Calendar'
         detail = f'{len(pending)} weekdays through today'
     elif pending:
-        label = 'Retry catch up' if row and row.last_error else 'Catch up'
+        label = 'Retry Calendar Import' if row and row.last_error else 'Catch Up Calendar'
         detail = (
             row.last_error
             if row and row.last_error

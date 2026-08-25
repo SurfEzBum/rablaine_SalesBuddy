@@ -1,5 +1,6 @@
 """Tests for meeting-to-MSX activity coverage."""
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -8,6 +9,7 @@ from app.models import (
     ActivityCoveragePopulation,
     Customer,
     DailyMeetingCache,
+    Job,
     Milestone,
     MsxTask,
     Note,
@@ -38,8 +40,10 @@ def coverage_data(app):
         meeting = PrefetchedMeeting(
             workiq_id='coverage-meeting',
             subject='Fabric architecture workshop',
-            start_time=datetime.combine(date.today(), datetime.min.time()),
+            start_time=datetime.combine(date.today(), datetime.min.time())
+            + timedelta(hours=14, minutes=30),
             end_time=datetime.combine(date.today(), datetime.min.time())
+            + timedelta(hours=14, minutes=30)
             + timedelta(minutes=45),
             meeting_date=date.today(),
             customer_id=customer.id,
@@ -123,8 +127,12 @@ def test_create_activity_is_idempotent(app, coverage_data):
             task_category=861980000,
             duration_minutes=30,
             description='Customer call details',
-            due_date=date.today().isoformat(),
+            start_date=f'{date.today().isoformat()}T14:30:00+00:00',
+            due_date=f'{date.today().isoformat()}T15:00:00+00:00',
         )
+        assert first.due_date == datetime.combine(
+            date.today(), datetime.min.time(),
+        ) + timedelta(hours=15)
 
 
 def test_link_existing_activity(app, coverage_data):
@@ -310,6 +318,71 @@ def test_enrichment_allows_off_team_fallback():
     assert gateway.call_count == 2
 
 
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('Fabric architecture design session', 861980004),
+    ('Customer L300 demo', 606820009),
+    ('Resolve deployment blocker', 861980006),
+    ('Azure adoption planning', 861980007),
+    ('Build a rapid prototype', 606820006),
+])
+def test_enrichment_prefers_hok_task_categories(text, expected):
+    """Prepared activity types always prefer an HoK-credit category."""
+    category = activity_enrichment._category_for_text(text)
+
+    assert category == expected
+    assert category in activity_enrichment.HOK_TASK_CATEGORIES
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('Complete customer readiness assessment', 861980014),
+    ('Review RFP response', 861980009),
+    ('Routine customer conversation', 861980000),
+])
+def test_enrichment_uses_non_hok_fallback_when_needed(text, expected):
+    """Unmatched intent keeps an accurate non-HoK category."""
+    category = activity_enrichment._category_for_text(text)
+
+    assert category == expected
+    assert category not in activity_enrichment.HOK_TASK_CATEGORIES
+
+
+def test_enrichment_refreshes_local_milestones_before_matching():
+    """Preparation consumes the batched sync and requires its completion."""
+    events = iter([
+        'event: start\ndata: {"total": 2}\n\n',
+        'event: complete\ndata: {"success": true, "synced": 2}\n\n',
+    ])
+    with patch(
+        'app.services.milestone_sync.sync_all_customer_milestones_stream',
+        return_value=events,
+    ) as sync:
+        result = activity_enrichment._refresh_local_milestones()
+
+    sync.assert_called_once_with()
+    assert result == {'success': True, 'synced': 2}
+
+
+def test_enrichment_status_reports_msx_refresh_phase(app, coverage_data):
+    """Running job with meetings still queued reports MSX refresh feedback."""
+    with app.app_context():
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        meeting.enrichment_status = activity_enrichment.STATUS_QUEUED
+        job = Job(
+            job_type=activity_enrichment.JOB_TYPE,
+            status=Job.STATUS_RUNNING,
+            dedupe_key=activity_enrichment.JOB_DEDUPE_KEY,
+        )
+        db.session.add(job)
+        db.session.commit()
+
+        status = activity_enrichment.get_enrichment_status()
+
+        assert status['phase'] == 'refreshing_msx'
+        db.session.delete(job)
+        meeting.enrichment_status = None
+        db.session.commit()
+
+
 def test_enrichment_job_persists_result(app, coverage_data):
     """Completed enrichment fills drafts and suggested milestone durably."""
     with app.app_context():
@@ -329,6 +402,9 @@ def test_enrichment_job_persists_result(app, coverage_data):
         with patch(
             'app.services.activity_enrichment._enrich_external',
             return_value=enriched,
+        ), patch(
+            'app.services.activity_enrichment._refresh_local_milestones',
+            return_value={'success': True},
         ):
             result = activity_enrichment.process_enrichment_job({
                 'meeting_ids': [meeting.id],
@@ -375,6 +451,9 @@ def test_enrichment_preserves_manual_draft_choices(app, coverage_data):
         with patch(
             'app.services.activity_enrichment._enrich_external',
             return_value=enriched,
+        ), patch(
+            'app.services.activity_enrichment._refresh_local_milestones',
+            return_value={'success': True},
         ):
             activity_enrichment.process_enrichment_job({
                 'meeting_ids': [meeting.id],
@@ -414,6 +493,9 @@ def test_enrichment_job_resumes_interrupted_running_row(app, coverage_data):
         with patch(
             'app.services.activity_enrichment._enrich_external',
             return_value=enriched,
+        ), patch(
+            'app.services.activity_enrichment._refresh_local_milestones',
+            return_value={'success': True},
         ):
             result = activity_enrichment.process_enrichment_job({
                 'meeting_ids': [meeting.id],
@@ -527,7 +609,7 @@ def test_population_pauses_after_retries_and_resumes(app):
             row = db.session.get(ActivityCoveragePopulation, 1)
             assert row.populated_through == date(2026, 7, 1)
             status = activity_coverage.get_population_status(date(2026, 7, 3))
-            assert status['label'] == 'Retry catch up'
+            assert status['label'] == 'Retry Calendar Import'
             assert status['can_start'] is True
 
             with patch(
@@ -552,6 +634,22 @@ def test_report_week_is_clamped_to_current_fiscal_year(app):
         fiscal_start, _ = activity_coverage.fiscal_year_bounds()
         assert data['week_start'] == activity_coverage.normalize_week_start(fiscal_start)
         assert data['can_go_previous'] is False
+
+
+def test_full_fiscal_year_view_includes_other_weeks(app, coverage_data):
+    """Full FY mode returns meetings outside the selected week."""
+    with app.app_context():
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        meeting.meeting_date = date.today() - timedelta(days=14)
+        meeting.start_time = datetime.combine(meeting.meeting_date, datetime.min.time())
+        db.session.commit()
+
+        weekly = activity_coverage.get_report_data(date.today())
+        full_year = activity_coverage.get_report_data(date.today(), view_all=True)
+
+        assert all(row['id'] != meeting.id for row in weekly['meetings'])
+        assert any(row['id'] == meeting.id for row in full_year['meetings'])
+        assert full_year['view_all'] is True
 
 
 def test_calendar_resync_preserves_logged_meeting(app, coverage_data):
@@ -590,15 +688,39 @@ def test_report_page_and_hub_registration(client, coverage_data):
     response = client.get('/reports/activity-coverage')
     assert response.status_code == 200
     assert b'Activity Coverage' in response.data
+    assert b'customer-picker-input' in response.data
+    assert b'milestone-picker-input' in response.data
+    assert b'\xe2\x98\x85 Architecture Design Session' in response.data
     assert b'Fabric architecture workshop' in response.data
     assert b'Create Activity' in response.data
-    assert b'Reconcile MSX' in response.data
+    assert b'Find Existing Activities' in response.data
     assert b'Match Milestones' in response.data
+    assert b'Import calendar meetings from the last completed day through today' in response.data
     assert b'Expand All' in response.data
+    assert b'Weekly' in response.data
+    assert b'Full FY' in response.data
+
+    full_year = client.get('/reports/activity-coverage?view=all')
+    assert full_year.status_code == 200
+    assert b'coverage-view-toggle' in full_year.data
+    assert b'meeting-month-heading' in full_year.data
 
     hub = client.get('/reports')
     assert hub.status_code == 200
     assert b'/reports/activity-coverage' in hub.data
+
+
+def test_f1_help_explains_activity_coverage_workflow():
+    """Contextual help distinguishes imports, matching, reconciliation, and creation."""
+    help_script = Path('static/js/page-help.js').read_text(encoding='utf-8')
+
+    assert "title: 'Activity Coverage'" in help_script
+    assert '<strong>Re-run Matching</strong>' in help_script
+    assert '<strong>Find Existing Activities</strong>' in help_script
+    assert '<strong>Catch Up Calendar</strong>' in help_script
+    assert '<strong>Full FY</strong>' in help_script
+    assert 'qualifies for HoK credit' in help_script
+    assert 'Nothing is created until you click it' in help_script
 
 
 def test_reconciliation_routes(client):
@@ -623,8 +745,11 @@ def test_enrichment_routes(client):
     with patch(
         'app.services.activity_enrichment.start_enrichment',
         return_value={'started': True, 'job_id': 42, 'queued': 8},
-    ):
-        response = client.post('/api/reports/activity-coverage/match-milestones')
+    ) as start:
+        response = client.post(
+            '/api/reports/activity-coverage/match-milestones',
+            json={'force': True},
+        )
 
     assert response.status_code == 200
     assert response.get_json() == {
@@ -633,10 +758,45 @@ def test_enrichment_routes(client):
         'job_id': 42,
         'queued': 8,
     }
+    start.assert_called_once_with(force=True)
 
     status = client.get('/api/reports/activity-coverage/match-status')
     assert status.status_code == 200
     assert status.get_json()['success'] is True
+
+
+def test_force_enrichment_clears_prior_preparation(app, coverage_data):
+    """Re-running replaces generated drafts but preserves meeting identity and customer."""
+    with app.app_context(), patch(
+        'app.services.activity_enrichment.enqueue',
+    ) as enqueue:
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        meeting.milestone_id = coverage_data['milestone_id']
+        meeting.draft_subject = 'Old generated subject'
+        meeting.draft_description = 'Old generated description'
+        meeting.draft_task_category = 861980000
+        meeting.enrichment_status = activity_enrichment.STATUS_COMPLETE
+        meeting.enrichment_summary = 'Old summary'
+        meeting.suggested_milestone_id = coverage_data['milestone_id']
+        meeting.milestone_match_reason = 'Old reason'
+        meeting.enrichment_attempts = 2
+        db.session.commit()
+        enqueue.return_value.id = 99
+
+        result = activity_enrichment.start_enrichment(force=True)
+
+        assert result == {'started': True, 'job_id': 99, 'queued': 1}
+        assert meeting.customer_id == coverage_data['customer_id']
+        assert meeting.milestone_id is None
+        assert meeting.draft_subject is None
+        assert meeting.draft_description is None
+        assert meeting.draft_task_category is None
+        assert meeting.enrichment_summary is None
+        assert meeting.suggested_milestone_id is None
+        assert meeting.milestone_match_reason is None
+        assert meeting.enrichment_attempts == 0
+        assert meeting.enrichment_status == activity_enrichment.STATUS_QUEUED
+        enqueue.assert_called_once()
 
 
 def test_milestone_options_include_team_membership(client, coverage_data):

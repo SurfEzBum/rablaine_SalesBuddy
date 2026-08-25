@@ -209,7 +209,8 @@ def report_activity_coverage():
         )
     except ValueError:
         week_start = None
-    data = get_report_data(week_start)
+    view_all = request.args.get('view') == 'all'
+    data = get_report_data(week_start, view_all=view_all)
     data['population'] = get_population_status()
     data['reconciliation'] = get_reconciliation_status()
     from app.services.activity_enrichment import get_enrichment_status
@@ -263,7 +264,8 @@ def api_activity_coverage_match_milestones():
     """Queue durable WorkIQ enrichment and milestone matching."""
     from app.services.activity_enrichment import start_enrichment
 
-    result = start_enrichment()
+    data = request.get_json(silent=True) or {}
+    result = start_enrichment(force=data.get('force') is True)
     if not result['started'] and result['job_id']:
         return jsonify({
             'success': False,
@@ -300,8 +302,15 @@ def api_activity_coverage_milestones(customer_id):
             {
                 'id': item.id,
                 'label': item.display_text,
+                'number': item.milestone_number,
                 'status': item.msx_status,
                 'on_my_team': item.on_my_team,
+                'opportunity': (
+                    item.opportunity.name
+                    if item.opportunity
+                    else item.opportunity_name
+                ),
+                'workload': item.workload,
             }
             for item in milestones
         ],

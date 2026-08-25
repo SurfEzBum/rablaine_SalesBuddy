@@ -1,6 +1,7 @@
 """Durable WorkIQ enrichment and milestone matching for activity coverage."""
 from __future__ import annotations
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
@@ -10,6 +11,7 @@ from app.gateway_client import gateway_call
 from app.models import Job, Milestone, PrefetchedMeeting, UserPreference, db
 from app.services.activity_coverage import fiscal_year_bounds
 from app.services.job_queue import enqueue, job_handler
+from app.services.msx_api import HOK_TASK_CATEGORIES
 from app.services.workiq_service import get_meeting_summary
 
 logger = logging.getLogger(__name__)
@@ -24,22 +26,40 @@ STATUS_COMPLETE = 'complete'
 STATUS_FAILED = 'failed'
 
 _CATEGORY_KEYWORDS = (
-    ('architecture', 861980004),
-    ('whiteboard', 606820008),
-    ('workshop', 861980001),
-    ('demo', 861980002),
-    ('proof of concept', 861980005),
-    ('poc', 861980005),
-    ('briefing', 861980008),
+    (('technical close', 'win plan', 'close plan'), 606820005),
+    (('rapid prototype', 'prototype'), 606820006),
+    (('whiteboard', 'solution design'), 606820008),
+    (('architecture', 'design session'), 861980004),
+    (('l300', 'level 300'), 606820009),
+    (('technical workshop',), 606820007),
+    (('workshop', 'training', 'enablement'), 861980001),
+    (('proof of concept', 'poc', 'pilot'), 861980005),
+    (('demo',), 861980002),
+    (('escalat', 'blocker'), 861980006),
+    (('consumption', 'adoption'), 861980007),
+    (('briefing', 'discovery', 'overview', 'kickoff', 'update'), 861980008),
+)
+_FALLBACK_CATEGORY_KEYWORDS = (
+    (('assessment',), 861980014),
+    (('rfp', 'rfi'), 861980009),
+    (('pricing', 'negotiate'), 861980003),
+    (('support case', 'technical support', 'tech support'), 606820004),
+    (('partner request',), 861980011),
+    (('post sales', 'post-sales'), 606820003),
+    (('internal sync', 'internal meeting'), 861980012),
 )
 _DEFAULT_CATEGORY = 861980000
 
 
 def _category_for_text(text: str) -> int:
-    """Infer an MSX task category from enriched meeting text."""
+    """Prefer an HoK category, then use the closest non-HoK fallback."""
     lowered = text.lower()
-    for keyword, category in _CATEGORY_KEYWORDS:
-        if keyword in lowered:
+    for keywords, category in _CATEGORY_KEYWORDS:
+        if any(keyword in lowered for keyword in keywords):
+            assert category in HOK_TASK_CATEGORIES
+            return category
+    for keywords, category in _FALLBACK_CATEGORY_KEYWORDS:
+        if any(keyword in lowered for keyword in keywords):
             return category
     return _DEFAULT_CATEGORY
 
@@ -160,8 +180,36 @@ def _active_job() -> Job | None:
     )
 
 
-def start_enrichment() -> dict[str, Any]:
-    """Queue all unprepared, unlogged fiscal-year meetings for enrichment."""
+def _refresh_local_milestones() -> dict[str, Any]:
+    """Refresh the batched local MSX cache before building match candidates."""
+    from app.services.milestone_sync import sync_all_customer_milestones_stream
+
+    completed = None
+    for event in sync_all_customer_milestones_stream():
+        lines = event.splitlines()
+        event_type = next(
+            (line.removeprefix('event: ') for line in lines if line.startswith('event: ')),
+            '',
+        )
+        data_line = next(
+            (line.removeprefix('data: ') for line in lines if line.startswith('data: ')),
+            None,
+        )
+        data = json.loads(data_line) if data_line else {}
+        if event_type == 'vpn_blocked':
+            raise RuntimeError(data.get('message') or 'MSX milestone refresh was blocked')
+        if event_type == 'complete':
+            completed = data
+
+    if not completed:
+        raise RuntimeError('MSX milestone refresh did not complete')
+    if not completed.get('success'):
+        raise RuntimeError('MSX milestone refresh failed')
+    return completed
+
+
+def start_enrichment(force: bool = False) -> dict[str, Any]:
+    """Queue eligible fiscal-year meetings, optionally replacing prior preparation."""
     active = _active_job()
     if active:
         return {'started': False, 'job_id': active.id, 'queued': 0}
@@ -171,20 +219,31 @@ def start_enrichment() -> dict[str, Any]:
         PrefetchedMeeting.enrichment_error: 'Previous enrichment was interrupted',
     })
     fiscal_start, fiscal_end = fiscal_year_bounds()
-    meetings = (
+    query = (
         PrefetchedMeeting.query
         .filter(PrefetchedMeeting.meeting_date >= fiscal_start)
         .filter(PrefetchedMeeting.meeting_date <= min(date.today(), fiscal_end))
         .filter(PrefetchedMeeting.dismissed.is_(False))
         .filter(PrefetchedMeeting.customer_id.isnot(None))
         .filter(~PrefetchedMeeting.activity.has())
-        .filter(db.or_(
+    )
+    if not force:
+        query = query.filter(db.or_(
             PrefetchedMeeting.enrichment_status.is_(None),
             PrefetchedMeeting.enrichment_status == STATUS_FAILED,
         ))
-        .all()
-    )
+    meetings = query.all()
     for meeting in meetings:
+        if force:
+            meeting.milestone_id = None
+            meeting.draft_subject = None
+            meeting.draft_description = None
+            meeting.draft_task_category = None
+            meeting.enrichment_summary = None
+            meeting.suggested_milestone_id = None
+            meeting.milestone_match_reason = None
+            meeting.enrichment_attempts = 0
+            meeting.enriched_at = None
         meeting.enrichment_status = STATUS_QUEUED
         meeting.enrichment_error = None
     db.session.commit()
@@ -225,6 +284,14 @@ def get_enrichment_status() -> dict[str, Any]:
     }
     active = _active_job()
     prepared = counts[STATUS_COMPLETE]
+    phase = 'idle'
+    if active:
+        if active.status == Job.STATUS_PENDING:
+            phase = 'queued'
+        elif counts[STATUS_RUNNING] == 0 and prepared == 0:
+            phase = 'refreshing_msx'
+        else:
+            phase = 'preparing'
     return {
         **counts,
         'total': len(rows),
@@ -232,6 +299,7 @@ def get_enrichment_status() -> dict[str, Any]:
         'remaining': len(rows) - prepared,
         'running_job': bool(active),
         'job_id': active.id if active else None,
+        'phase': phase,
     }
 
 
@@ -247,6 +315,7 @@ def process_enrichment_job(payload: dict[str, Any]) -> dict[str, Any]:
         PrefetchedMeeting.enrichment_error: 'Resuming interrupted preparation',
     }, synchronize_session=False)
     db.session.commit()
+    _refresh_local_milestones()
     meetings = (
         PrefetchedMeeting.query
         .filter(PrefetchedMeeting.id.in_(meeting_ids))

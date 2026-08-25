@@ -1234,6 +1234,21 @@ def _drain(q: queue.Queue) -> list:
     return events
 
 
+def _account_import_sort_key(account: dict) -> tuple:
+    """Sort duplicate-TPID accounts with the canonical Top account first."""
+    is_top = account.get("parenting_level_code") == 861980000
+    return (str(account.get("tpid") or ""), not is_top, str(account.get("id") or ""))
+
+
+def _update_customer_tpid_url(customer: Customer, account: dict) -> bool:
+    """Update a customer's MSX URL from the canonical imported account."""
+    account_url = account.get("url")
+    if not account_url or customer.tpid_url == account_url:
+        return False
+    customer.tpid_url = account_url
+    return True
+
+
 def _par_query_accounts(account_ids, batch_size, progress_q, worker_id):
     """Worker: query account details for a chunk of IDs."""
     from app.services.msx_api import msx_retry_state
@@ -1611,6 +1626,7 @@ def sync_accounts():
                     "name": acct.get("name"),
                     "tpid": tpid_int,
                     "url": build_account_url(account_id),
+                    "parenting_level_code": acct.get("msp_parentinglevelcode"),
                     "website": tpid_website_map.get(acct.get("msp_mstopparentid")),
                     "vertical": vertical,
                     "vertical_category": vertical_category,
@@ -1636,6 +1652,8 @@ def sync_accounts():
                     verticals_seen.add(vertical)
                 if vertical_category and vertical_category.upper() != "N/A":
                     verticals_seen.add(vertical_category)
+
+            accounts_data.sort(key=_account_import_sort_key)
 
             yield _sse({
                 "message": (
@@ -2093,9 +2111,14 @@ def sync_accounts():
                             cust.name = customer_name
                             changed = True
 
-                        # Backfill tpid_url
-                        if ad.get("url") and not cust.tpid_url:
-                            cust.tpid_url = ad["url"]
+                        # MSX account sync is authoritative for the canonical
+                        # account represented by this TPID.
+                        old_tpid_url = cust.tpid_url
+                        if _update_customer_tpid_url(cust, ad):
+                            logger.info(
+                                "MSX account URL changed for TPID %s: '%s' -> '%s'",
+                                tpid, old_tpid_url, cust.tpid_url,
+                            )
                             changed = True
 
                         # Backfill website
