@@ -352,6 +352,23 @@ class TestDomainMap:
 # ---------------------------------------------------------------------------
 
 class TestPrefetchForDate:
+    def test_unavailable_outlook_falls_back_to_workiq(
+        self, app, clean_prefetch_tables,
+    ):
+        """Historical import stays seamless when guarded Outlook is unavailable."""
+        with app.app_context(), patch(
+            'app.services.outlook_calendar.fetch_outlook_meetings_for_date',
+            side_effect=RuntimeError('No corporate Outlook calendar'),
+        ), patch(
+            'app.services.workiq_service.query_workiq',
+            return_value=SAMPLE_RESPONSE,
+        ) as workiq_query:
+            stored, err = meeting_prefetch.prefetch_for_date('2026-04-22')
+
+        assert err is None
+        assert stored == 2
+        workiq_query.assert_called_once()
+
     def test_historical_date_uses_outlook_without_workiq(
         self, app, clean_prefetch_tables,
     ):
