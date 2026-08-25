@@ -1,9 +1,10 @@
 """Tests for meeting-to-MSX activity coverage."""
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from bs4 import BeautifulSoup
 
 from app.models import (
     ActivityCoveragePopulation,
@@ -11,10 +12,12 @@ from app.models import (
     DailyMeetingCache,
     Job,
     Milestone,
+    MilestoneCoverageDraft,
     MsxTask,
     Note,
     PrefetchedMeeting,
     PrefetchedMeetingAttendee,
+    SyncStatus,
     db,
 )
 from app.services import activity_coverage
@@ -33,6 +36,7 @@ def coverage_data(app):
             url='https://example.test/milestone',
             title='Deploy Fabric',
             msx_status='On Track',
+            on_my_team=True,
             customer_id=customer.id,
         )
         db.session.add(milestone)
@@ -63,12 +67,254 @@ def coverage_data(app):
             'meeting_id': meeting.id,
         }
         yield ids
-        MsxTask.query.filter_by(meeting_id=meeting.id).delete()
+        MilestoneCoverageDraft.query.filter_by(milestone_id=milestone.id).delete()
+        MsxTask.query.filter_by(milestone_id=milestone.id).delete()
         PrefetchedMeetingAttendee.query.filter_by(meeting_id=meeting.id).delete()
         db.session.delete(db.session.get(PrefetchedMeeting, meeting.id))
         db.session.delete(db.session.get(Milestone, milestone.id))
         db.session.delete(db.session.get(Customer, customer.id))
         db.session.commit()
+
+
+def test_milestone_coverage_surfaces_prior_hok_and_meeting_draft(app, coverage_data):
+    """Prior-year HoK remains uncovered while prepared meeting overlap is shown."""
+    with app.app_context():
+        fiscal_start, _ = activity_coverage.fiscal_year_bounds()
+        prior_task = MsxTask(
+            msx_task_id='prior-year-hok',
+            subject='Prior architecture session',
+            task_category=861980004,
+            task_category_name='Architecture Design Session',
+            duration_minutes=60,
+            is_hok=True,
+            due_date=datetime.combine(fiscal_start - timedelta(days=1), datetime.min.time()),
+            milestone_id=coverage_data['milestone_id'],
+        )
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        meeting.milestone_id = coverage_data['milestone_id']
+        meeting.enrichment_status = 'complete'
+        db.session.add(prior_task)
+        db.session.commit()
+
+        report = activity_coverage.get_milestone_coverage_data()
+        row = next(
+            item for item in report['milestone_rows']
+            if item['id'] == coverage_data['milestone_id']
+        )
+        assert row['covered'] is False
+        assert row['prior_task'].id == prior_task.id
+        assert row['meeting_draft_count'] == 1
+        assert row['prepared_meeting_count'] == 1
+        prepared = row['prepared_meetings'][0]
+        assert prepared['id'] == meeting.id
+        assert prepared['customer_id'] == coverage_data['customer_id']
+        assert prepared['milestone_id'] == coverage_data['milestone_id']
+        assert prepared['meeting_subject'] == 'Fabric architecture workshop'
+        assert prepared['activity_subject'] == 'Fabric architecture workshop'
+        assert prepared['task_category_name'] == 'Architecture Design Session'
+        assert prepared['is_hok'] is True
+        assert prepared['duration_minutes'] == 45
+
+
+def test_current_fy_hok_controls_covered_filter(app, coverage_data):
+    """Current-FY HoK hides milestone by default and appears with covered filter."""
+    with app.app_context():
+        task = MsxTask(
+            msx_task_id='current-year-hok',
+            subject='Current workshop',
+            task_category=861980001,
+            task_category_name='Workshop',
+            duration_minutes=60,
+            is_hok=True,
+            due_date=datetime.combine(date.today(), datetime.min.time()),
+            milestone_id=coverage_data['milestone_id'],
+        )
+        db.session.add(task)
+        db.session.commit()
+
+        default_ids = {
+            row['id'] for row in activity_coverage.get_milestone_coverage_data()[
+                'milestone_rows'
+            ]
+        }
+        assert coverage_data['milestone_id'] not in default_ids
+        report = activity_coverage.get_milestone_coverage_data(include_covered=True)
+        row = next(
+            item for item in report['milestone_rows']
+            if item['id'] == coverage_data['milestone_id']
+        )
+        assert row['covered'] is True
+        assert row['current_task'].id == task.id
+
+
+def test_create_standalone_milestone_hok_is_idempotent(app, coverage_data):
+    """Saved standalone draft creates one unlinked HoK task and retries return it."""
+    with app.app_context():
+        scheduled_start = datetime.now(timezone.utc).replace(microsecond=0)
+        draft = activity_coverage.update_milestone_coverage_draft(
+            coverage_data['milestone_id'],
+            {
+                'subject': 'Fabric solution whiteboarding',
+                'description': 'Built target architecture with customer engineering.',
+                'task_category': 606820008,
+                'duration_minutes': 90,
+                'scheduled_start': scheduled_start.isoformat(),
+            },
+        )
+        assert draft.id is not None
+        result = {
+            'success': True,
+            'task_id': 'standalone-hok-guid',
+            'task_url': 'https://example.test/standalone-task',
+        }
+        with patch('app.services.msx_api.create_task', return_value=result) as create:
+            first = activity_coverage.create_milestone_hok_activity(
+                coverage_data['milestone_id'],
+            )
+            second = activity_coverage.create_milestone_hok_activity(
+                coverage_data['milestone_id'],
+            )
+
+        assert first.id == second.id
+        assert first.is_hok is True
+        assert first.meeting_id is None
+        assert first.note_id is None
+        assert MilestoneCoverageDraft.query.filter_by(
+            milestone_id=coverage_data['milestone_id'],
+        ).first() is None
+        create.assert_called_once()
+
+
+def test_milestone_draft_rejects_non_hok_category(app, coverage_data):
+    """Standalone milestone coverage accepts HoK task categories only."""
+    with app.app_context(), pytest.raises(
+        ValueError,
+        match='Hands-on-Keyboard',
+    ):
+        activity_coverage.update_milestone_coverage_draft(
+            coverage_data['milestone_id'],
+            {
+                'subject': 'Customer follow-up',
+                'description': 'Followed up with customer.',
+                'task_category': 861980000,
+                'duration_minutes': 30,
+                'scheduled_start': datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+
+def test_milestone_coverage_lens_renders_filters_and_hok_form(
+    app,
+    client,
+    coverage_data,
+):
+    """Milestone lens defaults to active uncovered rows with HoK controls."""
+    with app.app_context():
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        meeting.milestone_id = coverage_data['milestone_id']
+        meeting.enrichment_status = 'complete'
+        db.session.commit()
+        response = client.get('/reports/activity-coverage?lens=milestones')
+
+    assert response.status_code == 200
+    html = response.data.decode('utf-8')
+    assert 'Show covered' in html
+    assert 'Show inactive' in html
+    assert 'No HoK activity' in html
+    assert 'Create HoK Task' in html
+    assert '1 prepared meeting' in html
+    assert '1 prepared / 1 linked' not in html
+    assert 'Prepared meeting activities' in html
+    assert 'Meeting' in html
+    assert 'Activity subject' in html
+    assert 'Activity type' in html
+    assert 'Description' in html
+    assert 'name="duration_minutes"' in html
+    assert 'save-prepared-meeting-draft' in html
+    assert 'Create Activity' in html
+    assert 'Or create a standalone HoK activity' in html
+    assert 'savePreparedMeeting' in html
+    assert "'/api/reports/activity-coverage/meetings/'" in html
+    assert 'Architecture Design Session' in html
+    soup = BeautifulSoup(response.data, 'html.parser')
+    standalone_category = soup.select_one('[id^="milestone-hok-category-"]')
+    standalone_options = [option.get_text(strip=True) for option in standalone_category.select('option')]
+    assert 'Customer Engagement' not in standalone_options
+
+
+def test_milestone_coverage_draft_api_rejects_non_hok(
+    app,
+    client,
+    coverage_data,
+):
+    """Milestone draft endpoint returns a user-facing validation error."""
+    payload = {
+        'subject': 'Customer follow-up',
+        'description': 'Followed up with customer.',
+        'task_category': 861980000,
+        'duration_minutes': 30,
+        'scheduled_start': datetime.now(timezone.utc).isoformat(),
+    }
+    response = client.patch(
+        f"/api/reports/activity-coverage/milestones/{coverage_data['milestone_id']}/draft",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert 'Hands-on-Keyboard' in response.get_json()['error']
+
+
+def test_milestone_coverage_create_api_creates_unlinked_hok(
+    app,
+    client,
+    coverage_data,
+):
+    """Create endpoint turns saved draft into an unlinked current-FY HoK task."""
+    with app.app_context():
+        activity_coverage.update_milestone_coverage_draft(
+            coverage_data['milestone_id'],
+            {
+                'subject': 'Technical workshop delivery',
+                'description': 'Led customer engineers through implementation.',
+                'task_category': 606820007,
+                'duration_minutes': 120,
+                'scheduled_start': datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    result = {
+        'success': True,
+        'task_id': 'route-standalone-hok-guid',
+        'task_url': 'https://example.test/route-hok',
+    }
+    with patch('app.services.msx_api.create_task', return_value=result):
+        response = client.post(
+            f"/api/reports/activity-coverage/milestones/{coverage_data['milestone_id']}/create"
+        )
+
+    assert response.status_code == 200
+    with app.app_context():
+        task = MsxTask.query.filter_by(msx_task_id='route-standalone-hok-guid').one()
+        assert task.is_hok is True
+        assert task.meeting_id is None
+
+
+def test_meeting_lens_can_filter_by_milestone(app, client, coverage_data):
+    """Milestone meeting handoff renders only meetings targeting that milestone."""
+    with app.app_context():
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        meeting.milestone_id = coverage_data['milestone_id']
+        db.session.commit()
+
+    response = client.get(
+        '/reports/activity-coverage?view=all'
+        f"&milestone={coverage_data['milestone_id']}"
+    )
+
+    assert response.status_code == 200
+    html = response.data.decode('utf-8')
+    assert 'Fabric architecture workshop' in html
+    assert '<i class="bi bi-funnel"></i> Deploy Fabric' in html
 
 
 def test_report_status_and_defaults(app, coverage_data):
@@ -362,8 +608,67 @@ def test_enrichment_refreshes_local_milestones_before_matching():
     assert result == {'success': True, 'synced': 2}
 
 
+def test_enrichment_detects_improved_account_sync(app):
+    """Only current-version successful account syncs satisfy prerequisite."""
+    with app.app_context():
+        SyncStatus.mark_started('accounts')
+        SyncStatus.mark_completed(
+            'accounts',
+            success=True,
+            details='{"sync_version": 2}',
+        )
+
+        assert activity_enrichment._account_sync_is_current() is True
+
+
+def test_enrichment_runs_improved_account_sync_once(app):
+    """Missing version marker triggers account sync before milestone refresh."""
+    with app.app_context(), patch(
+        'app.routes.msx.run_account_sync_headless',
+        side_effect=lambda: SyncStatus.mark_completed(
+            'accounts',
+            success=True,
+            details='{"sync_version": 2}',
+        ),
+    ) as account_sync:
+        SyncStatus.mark_started('accounts')
+        SyncStatus.mark_completed('accounts', success=True, details='legacy sync')
+
+        assert activity_enrichment._ensure_current_account_sync() is True
+        assert activity_enrichment._ensure_current_account_sync() is False
+
+    account_sync.assert_called_once_with()
+
+
 def test_enrichment_status_reports_msx_refresh_phase(app, coverage_data):
     """Running job with meetings still queued reports MSX refresh feedback."""
+    with app.app_context():
+        meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
+        meeting.enrichment_status = activity_enrichment.STATUS_QUEUED
+        job = Job(
+            job_type=activity_enrichment.JOB_TYPE,
+            status=Job.STATUS_RUNNING,
+            dedupe_key=activity_enrichment.JOB_DEDUPE_KEY,
+        )
+        db.session.add(job)
+        SyncStatus.mark_started('accounts')
+        SyncStatus.mark_completed(
+            'accounts',
+            success=True,
+            details='{"sync_version": 2}',
+        )
+        db.session.commit()
+
+        status = activity_enrichment.get_enrichment_status()
+
+        assert status['phase'] == 'refreshing_msx'
+        db.session.delete(job)
+        meeting.enrichment_status = None
+        db.session.commit()
+
+
+def test_enrichment_status_reports_account_sync_phase(app, coverage_data):
+    """Unversioned account data reports account priming before milestones."""
     with app.app_context():
         meeting = db.session.get(PrefetchedMeeting, coverage_data['meeting_id'])
         meeting.enrichment_status = activity_enrichment.STATUS_QUEUED
@@ -377,7 +682,7 @@ def test_enrichment_status_reports_msx_refresh_phase(app, coverage_data):
 
         status = activity_enrichment.get_enrichment_status()
 
-        assert status['phase'] == 'refreshing_msx'
+        assert status['phase'] == 'syncing_accounts'
         db.session.delete(job)
         meeting.enrichment_status = None
         db.session.commit()
@@ -402,6 +707,9 @@ def test_enrichment_job_persists_result(app, coverage_data):
         with patch(
             'app.services.activity_enrichment._enrich_external',
             return_value=enriched,
+        ), patch(
+            'app.services.activity_enrichment._ensure_current_account_sync',
+            return_value=False,
         ), patch(
             'app.services.activity_enrichment._refresh_local_milestones',
             return_value={'success': True},
@@ -452,6 +760,9 @@ def test_enrichment_preserves_manual_draft_choices(app, coverage_data):
             'app.services.activity_enrichment._enrich_external',
             return_value=enriched,
         ), patch(
+            'app.services.activity_enrichment._ensure_current_account_sync',
+            return_value=False,
+        ), patch(
             'app.services.activity_enrichment._refresh_local_milestones',
             return_value={'success': True},
         ):
@@ -493,6 +804,9 @@ def test_enrichment_job_resumes_interrupted_running_row(app, coverage_data):
         with patch(
             'app.services.activity_enrichment._enrich_external',
             return_value=enriched,
+        ), patch(
+            'app.services.activity_enrichment._ensure_current_account_sync',
+            return_value=False,
         ), patch(
             'app.services.activity_enrichment._refresh_local_milestones',
             return_value={'success': True},
@@ -699,6 +1013,7 @@ def test_report_page_and_hub_registration(client, coverage_data):
     assert b'Expand All' in response.data
     assert b'Weekly' in response.data
     assert b'Full FY' in response.data
+    assert b'event.persisted' in response.data
 
     full_year = client.get('/reports/activity-coverage?view=all')
     assert full_year.status_code == 200

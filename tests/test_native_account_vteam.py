@@ -162,3 +162,21 @@ class TestAccountSyncTransport:
         assert response.status_code == 200
         assert response.mimetype == "text/event-stream"
         response.close()
+
+    @patch("app.routes.msx.sync_accounts")
+    def test_internal_headless_sync_consumes_sse_stream(self, mock_sync, app):
+        consumed = []
+
+        def stream():
+            consumed.append('started')
+            yield 'data: {"progress": 100}\n\n'
+            consumed.append('finished')
+
+        with app.app_context():
+            from flask import Response
+            from app.routes.msx import run_account_sync_headless
+
+            mock_sync.return_value = Response(stream(), mimetype='text/event-stream')
+            run_account_sync_headless()
+
+        assert consumed == ['started', 'finished']

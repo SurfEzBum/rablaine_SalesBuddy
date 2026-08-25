@@ -1282,6 +1282,31 @@ class MsxTask(db.Model):
         return f'<MsxTask {self.id}: {self.subject[:50]}>'
 
 
+class MilestoneCoverageDraft(db.Model):
+    """Persist an editable standalone HoK activity draft for one milestone."""
+    __tablename__ = 'milestone_coverage_drafts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    milestone_id = db.Column(
+        db.Integer,
+        db.ForeignKey('milestones.id'),
+        nullable=False,
+        unique=True,
+    )
+    subject = db.Column(db.String(500), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    task_category = db.Column(db.Integer, nullable=False)
+    duration_minutes = db.Column(db.Integer, default=60, nullable=False)
+    scheduled_start = db.Column(db.DateTime, nullable=False)
+    created_at = db.Column(db.DateTime, default=utc_now, nullable=False)
+    updated_at = db.Column(db.DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    milestone = db.relationship(
+        'Milestone',
+        backref=db.backref('coverage_draft', uselist=False),
+    )
+
+
 class MilestoneComment(db.Model):
     """Comment on a milestone, either auto-generated from note/engagement updates or manual."""
     __tablename__ = 'milestone_comments'

@@ -8,12 +8,14 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
-## 8/24/2026
+## 8/25/2026
 
 - Add Activity Coverage to populate fiscal-year calendar history with resumable catch-up, refresh existing MSX activities, and create editable activities without leaving Sales Buddy.
 - Add durable five-worker meeting preparation that stores WorkIQ summaries, drafts task details, prefers on-team milestone matches, and supports expand-all auditing with manual milestone overrides.
 - Prefer HoK-credit activity types during meeting preparation, support safe preparation reruns, add Weekly and Full FY review modes, clarify calendar and MSX actions with contextual F1 guidance, and add searchable customer and milestone pickers with richer matching context.
 - Prefer canonical Top accounts when duplicate MSX accounts share a TPID, repair stale customer account links during account sync, and refresh the local opportunity and milestone cache before Activity Coverage matching.
+- Add milestone HoK coverage for active on-team milestones, with current-fiscal-year metrics, prior-year HoK context, covered/inactive filters, prepared-meeting handoff, and standalone HoK task creation.
+- Automatically run the improved account sync once before Activity Coverage milestone matching when needed, ensuring the milestone refresh starts from current account assignments.
 
 ## 8/21/2026 - b3ab7f4
 

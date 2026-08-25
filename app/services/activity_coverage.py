@@ -15,6 +15,7 @@ from app.models import (
     ActivityCoveragePopulation,
     Customer,
     Milestone,
+    MilestoneCoverageDraft,
     MsxTask,
     PrefetchedMeeting,
     db,
@@ -42,6 +43,7 @@ _import_state: dict[str, Any] = {
     'error': None,
 }
 _create_lock = threading.Lock()
+_milestone_create_lock = threading.Lock()
 _reconcile_lock = threading.Lock()
 _reconcile_state_lock = threading.Lock()
 _reconcile_state: dict[str, Any] = {
@@ -372,6 +374,7 @@ def _serialize_meeting(meeting: PrefetchedMeeting) -> dict[str, Any]:
 def get_report_data(
     week_start: date | None = None,
     view_all: bool = False,
+    milestone_id: int | None = None,
 ) -> dict[str, Any]:
     """Return weekly or full-fiscal-year meetings plus coverage totals."""
     today = date.today()
@@ -384,14 +387,15 @@ def get_report_data(
 
     visible_start = fiscal_start if view_all else max(selected_start, fiscal_start)
     visible_end = min(today, fiscal_end) if view_all else min(selected_end, today, fiscal_end)
-    visible_rows = (
+    visible_query = (
         PrefetchedMeeting.query
         .filter(PrefetchedMeeting.meeting_date >= visible_start)
         .filter(PrefetchedMeeting.meeting_date <= visible_end)
         .filter(PrefetchedMeeting.dismissed.is_(False))
-        .order_by(PrefetchedMeeting.start_time.asc())
-        .all()
     )
+    if milestone_id:
+        visible_query = visible_query.filter(PrefetchedMeeting.milestone_id == milestone_id)
+    visible_rows = visible_query.order_by(PrefetchedMeeting.start_time.asc()).all()
     fiscal_rows = (
         PrefetchedMeeting.query
         .filter(PrefetchedMeeting.meeting_date >= fiscal_start)
@@ -405,6 +409,7 @@ def get_report_data(
     return {
         'meetings': [_serialize_meeting(row) for row in visible_rows],
         'view_all': view_all,
+        'milestone_filter': db.session.get(Milestone, milestone_id) if milestone_id else None,
         'week_start': selected_start,
         'week_end': selected_end,
         'previous_week': selected_start - timedelta(days=7),
@@ -425,6 +430,270 @@ def get_report_data(
         'customers': Customer.query.order_by(Customer.name.asc()).all(),
         'task_categories': TASK_CATEGORIES,
     }
+
+
+def _task_coverage_date(task: MsxTask) -> date:
+    """Return activity date used for fiscal-year milestone coverage."""
+    value = task.due_date or task.created_at
+    return value.date()
+
+
+def _default_milestone_draft(milestone: Milestone) -> dict[str, Any]:
+    """Return editable defaults for a standalone milestone HoK activity."""
+    return {
+        'subject': f'{milestone.display_text} - HoK activity',
+        'description': '',
+        'task_category': 861980004,
+        'duration_minutes': 60,
+        'scheduled_start': datetime.now(timezone.utc),
+    }
+
+
+def _serialize_milestone_coverage(
+    milestone: Milestone,
+    fiscal_start: date,
+    fiscal_end: date,
+    tasks: list[MsxTask],
+    meeting_drafts: list[PrefetchedMeeting],
+    draft: MilestoneCoverageDraft | None,
+) -> dict[str, Any]:
+    """Serialize one on-team milestone with current and prior HoK evidence."""
+    hok_tasks = sorted(
+        (task for task in tasks if task.is_hok),
+        key=_task_coverage_date,
+        reverse=True,
+    )
+    current_tasks = [
+        task for task in hok_tasks
+        if fiscal_start <= _task_coverage_date(task) <= fiscal_end
+    ]
+    prior_task = next(
+        (task for task in hok_tasks if _task_coverage_date(task) < fiscal_start),
+        None,
+    )
+    draft_data = {
+        'subject': draft.subject,
+        'description': draft.description or '',
+        'task_category': draft.task_category,
+        'duration_minutes': draft.duration_minutes,
+        'scheduled_start': draft.scheduled_start,
+    } if draft else _default_milestone_draft(milestone)
+    prepared_meetings = [
+        {
+            'id': meeting.id,
+            'customer_id': meeting.customer_id,
+            'milestone_id': meeting.milestone_id,
+            'meeting_subject': meeting.subject,
+            'meeting_date': meeting.meeting_date,
+            'start_time': meeting.start_time,
+            'activity_subject': meeting.draft_subject or meeting.subject,
+            'description': (
+                meeting.draft_description
+                if meeting.draft_description is not None
+                else _default_description(meeting)
+            ),
+            'task_category': meeting.draft_task_category or _default_category(meeting),
+            'task_category_name': _CATEGORY_NAMES[
+                meeting.draft_task_category or _default_category(meeting)
+            ],
+            'is_hok': (
+                meeting.draft_task_category or _default_category(meeting)
+            ) in HOK_TASK_CATEGORIES,
+            'duration_minutes': (
+                meeting.draft_duration_minutes or _default_duration(meeting)
+            ),
+        }
+        for meeting in meeting_drafts
+        if meeting.enrichment_status == 'complete'
+    ]
+    return {
+        'id': milestone.id,
+        'milestone': milestone,
+        'covered': bool(current_tasks),
+        'current_task': current_tasks[0] if current_tasks else None,
+        'prior_task': prior_task,
+        'prior_fiscal_year': (
+            fiscal_year_bounds(_task_coverage_date(prior_task))[1].year % 100
+            if prior_task else None
+        ),
+        'meeting_draft_count': len(meeting_drafts),
+        'prepared_meeting_count': sum(
+            meeting.enrichment_status == 'complete' for meeting in meeting_drafts
+        ),
+        'prepared_meetings': prepared_meetings,
+        'draft': draft_data,
+    }
+
+
+def get_milestone_coverage_data(
+    include_covered: bool = False,
+    include_inactive: bool = False,
+) -> dict[str, Any]:
+    """Return current-FY HoK coverage for locally cached on-team milestones."""
+    today = date.today()
+    fiscal_start, fiscal_end = fiscal_year_bounds(today)
+    milestones = (
+        Milestone.query
+        .filter(Milestone.on_my_team.is_(True))
+        .filter(Milestone.msx_milestone_id.isnot(None))
+        .order_by(
+            Milestone.due_date.is_(None),
+            Milestone.due_date.asc(),
+            Milestone.title.asc(),
+        )
+        .all()
+    )
+    milestone_ids = [item.id for item in milestones]
+    tasks_by_milestone: dict[int, list[MsxTask]] = defaultdict(list)
+    for task in MsxTask.query.filter(MsxTask.milestone_id.in_(milestone_ids)).all():
+        tasks_by_milestone[task.milestone_id].append(task)
+    meetings_by_milestone: dict[int, list[PrefetchedMeeting]] = defaultdict(list)
+    meeting_rows = (
+        PrefetchedMeeting.query
+        .filter(PrefetchedMeeting.milestone_id.in_(milestone_ids))
+        .filter(~PrefetchedMeeting.activity.has())
+        .filter(PrefetchedMeeting.dismissed.is_(False))
+        .all()
+    )
+    for meeting in meeting_rows:
+        if _linked_task(meeting) is None:
+            meetings_by_milestone[meeting.milestone_id].append(meeting)
+    drafts_by_milestone = {
+        draft.milestone_id: draft
+        for draft in MilestoneCoverageDraft.query.filter(
+            MilestoneCoverageDraft.milestone_id.in_(milestone_ids)
+        ).all()
+    }
+    all_rows = [
+        _serialize_milestone_coverage(
+            item,
+            fiscal_start,
+            fiscal_end,
+            tasks_by_milestone[item.id],
+            meetings_by_milestone[item.id],
+            drafts_by_milestone.get(item.id),
+        )
+        for item in milestones
+    ]
+    active_rows = [row for row in all_rows if row['milestone'].is_active]
+    rows = all_rows if include_inactive else active_rows
+    if not include_covered:
+        rows = [row for row in rows if not row['covered']]
+    covered_active = sum(row['covered'] for row in active_rows)
+    return {
+        'milestone_rows': rows,
+        'include_covered': include_covered,
+        'include_inactive': include_inactive,
+        'milestone_summary': {
+            'active_total': len(active_rows),
+            'covered': covered_active,
+            'uncovered': len(active_rows) - covered_active,
+            'coverage_percent': (
+                round((covered_active / len(active_rows)) * 100)
+                if active_rows else 0
+            ),
+        },
+        'hok_task_categories': [
+            item for item in TASK_CATEGORIES if item['value'] in HOK_TASK_CATEGORIES
+        ],
+        'task_categories': TASK_CATEGORIES,
+        'fiscal_start': fiscal_start,
+        'fiscal_end': fiscal_end,
+        'fiscal_year_label': f'FY{fiscal_end.year % 100:02d}',
+        'today': today,
+    }
+
+
+def update_milestone_coverage_draft(
+    milestone_id: int,
+    data: dict[str, Any],
+) -> MilestoneCoverageDraft:
+    """Validate and persist one standalone milestone HoK draft."""
+    milestone = db.session.get(Milestone, milestone_id)
+    if milestone is None or not milestone.on_my_team:
+        raise ValueError('On-team milestone not found')
+    subject = (data.get('subject') or '').strip()
+    description = (data.get('description') or '').strip()
+    if not subject:
+        raise ValueError('Activity subject is required')
+    if not description:
+        raise ValueError('Describe the hands-on work performed')
+    category = int(data.get('task_category') or 0)
+    if category not in HOK_TASK_CATEGORIES:
+        raise ValueError('Select a Hands-on-Keyboard activity type')
+    duration = int(data.get('duration_minutes') or 0)
+    if duration < 1 or duration > 1440:
+        raise ValueError('Duration must be between 1 and 1440 minutes')
+    try:
+        scheduled_start = datetime.fromisoformat(data.get('scheduled_start') or '')
+    except ValueError as exc:
+        raise ValueError('Valid activity date and time is required') from exc
+    if scheduled_start.tzinfo is not None:
+        scheduled_start = scheduled_start.astimezone(timezone.utc).replace(tzinfo=None)
+    fiscal_start, fiscal_end = fiscal_year_bounds()
+    if not fiscal_start <= scheduled_start.date() <= min(fiscal_end, date.today()):
+        raise ValueError('Activity date must be within the current fiscal year through today')
+
+    draft = milestone.coverage_draft or MilestoneCoverageDraft(milestone=milestone)
+    draft.subject = subject
+    draft.description = description
+    draft.task_category = category
+    draft.duration_minutes = duration
+    draft.scheduled_start = scheduled_start
+    db.session.add(draft)
+    db.session.commit()
+    return draft
+
+
+def create_milestone_hok_activity(milestone_id: int) -> MsxTask:
+    """Create one standalone current-FY HoK activity for a milestone."""
+    from app.services.msx_api import create_task
+
+    with _milestone_create_lock:
+        milestone = db.session.get(Milestone, milestone_id)
+        if milestone is None or not milestone.on_my_team:
+            raise ValueError('On-team milestone not found')
+        fiscal_start, fiscal_end = fiscal_year_bounds()
+        existing = next((
+            task for task in milestone.tasks
+            if task.is_hok
+            and fiscal_start <= _task_coverage_date(task) <= fiscal_end
+        ), None)
+        if existing:
+            return existing
+        draft = milestone.coverage_draft
+        if draft is None:
+            raise ValueError('Save the HoK activity draft before creating it')
+
+        scheduled_start = draft.scheduled_start.replace(tzinfo=timezone.utc)
+        scheduled_end = scheduled_start + timedelta(minutes=draft.duration_minutes)
+        result = create_task(
+            milestone_id=milestone.msx_milestone_id,
+            subject=draft.subject,
+            task_category=draft.task_category,
+            duration_minutes=draft.duration_minutes,
+            description=draft.description,
+            start_date=scheduled_start.isoformat(),
+            due_date=scheduled_end.isoformat(),
+        )
+        if not result.get('success'):
+            raise RuntimeError(result.get('error') or 'MSX activity creation failed')
+        task = MsxTask(
+            msx_task_id=result['task_id'],
+            msx_task_url=result.get('task_url', ''),
+            subject=draft.subject,
+            description=draft.description,
+            task_category=draft.task_category,
+            task_category_name=_CATEGORY_NAMES[draft.task_category],
+            duration_minutes=draft.duration_minutes,
+            is_hok=True,
+            due_date=scheduled_end.replace(tzinfo=None),
+            milestone_id=milestone.id,
+        )
+        db.session.add(task)
+        db.session.delete(draft)
+        db.session.commit()
+        return task
 
 
 def update_meeting_draft(meeting_id: int, data: dict[str, Any]) -> PrefetchedMeeting:

@@ -231,11 +231,20 @@ const PageHelp = (function () {
     { pattern: /^\/reports\/activity-coverage/, title: 'Activity Coverage', content: `
       <p>Review every stored fiscal-year meeting, find activities already logged in MSX, and prepare missing activities without leaving Sales Buddy.</p>
 
+      <h6>Meetings and milestones</h6>
+      <p><strong>Meetings</strong> covers calendar activity one meeting at a time. <strong>Milestones</strong> finds active milestones where you are on team but have no HoK task during the current fiscal year. A prepared meeting draft does not count until its MSX activity is created.</p>
+      <ul>
+        <li><strong>Show covered</strong> adds milestones with a current-FY HoK task.</li>
+        <li><strong>Show inactive</strong> adds completed, cancelled, and other inactive milestones.</li>
+        <li><strong>HoK in FYxx</strong> preserves prior-year evidence while leaving the milestone uncovered for current-year reporting.</li>
+        <li><strong>Create HoK Task</strong> creates a standalone open MSX task and never links it to a meeting.</li>
+      </ul>
+
       <h6>Recommended workflow</h6>
       <ol>
         <li><strong>Catch Up Calendar</strong> imports calendar days after the last successful import through today. It adds meetings; it does not create MSX activities.</li>
         <li><strong>Find Existing Activities</strong> refreshes tasks from MSX and links high-confidence matches to calendar meetings. Run this before creating activities so work already logged in MSX is not duplicated.</li>
-        <li><strong>Match Milestones</strong> uses WorkIQ meeting context to prepare a subject, description, activity type, and suggested milestone for each unlogged customer meeting.</li>
+        <li><strong>Match Milestones</strong> first runs the improved account sync once when needed, refreshes milestones, then uses WorkIQ meeting context to prepare a subject, description, activity type, and suggested milestone for each unlogged customer meeting.</li>
         <li>Use <strong>Prepared</strong> and <strong>Expand All</strong> to audit suggestions. Correct the customer, milestone, activity type, duration, or draft text when needed.</li>
         <li><strong>Create Activity</strong> creates one open MSX task for that meeting. Nothing is created until you click it.</li>
       </ol>

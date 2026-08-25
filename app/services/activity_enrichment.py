@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from app.gateway_client import gateway_call
-from app.models import Job, Milestone, PrefetchedMeeting, UserPreference, db
+from app.models import Job, Milestone, PrefetchedMeeting, SyncStatus, UserPreference, db
 from app.services.activity_coverage import fiscal_year_bounds
 from app.services.job_queue import enqueue, job_handler
 from app.services.msx_api import HOK_TASK_CATEGORIES
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 JOB_TYPE = 'activity_coverage_enrichment'
 JOB_DEDUPE_KEY = 'activity-coverage-enrichment'
 MAX_WORKERS = 5
+ACCOUNT_SYNC_VERSION = 2
 
 STATUS_QUEUED = 'queued'
 STATUS_RUNNING = 'running'
@@ -180,6 +181,31 @@ def _active_job() -> Job | None:
     )
 
 
+def _account_sync_is_current() -> bool:
+    """Return whether improved account discovery completed successfully."""
+    status = SyncStatus.query.filter_by(sync_type='accounts').first()
+    if not status or not SyncStatus.is_complete('accounts') or not status.details:
+        return False
+    try:
+        details = json.loads(status.details)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return details.get('sync_version') == ACCOUNT_SYNC_VERSION
+
+
+def _ensure_current_account_sync() -> bool:
+    """Run improved account discovery once before refreshing milestones."""
+    if _account_sync_is_current():
+        return False
+
+    from app.routes.msx import run_account_sync_headless
+
+    run_account_sync_headless()
+    if not _account_sync_is_current():
+        raise RuntimeError('Improved MSX account sync did not complete')
+    return True
+
+
 def _refresh_local_milestones() -> dict[str, Any]:
     """Refresh the batched local MSX cache before building match candidates."""
     from app.services.milestone_sync import sync_all_customer_milestones_stream
@@ -288,6 +314,8 @@ def get_enrichment_status() -> dict[str, Any]:
     if active:
         if active.status == Job.STATUS_PENDING:
             phase = 'queued'
+        elif not _account_sync_is_current():
+            phase = 'syncing_accounts'
         elif counts[STATUS_RUNNING] == 0 and prepared == 0:
             phase = 'refreshing_msx'
         else:
@@ -315,6 +343,7 @@ def process_enrichment_job(payload: dict[str, Any]) -> dict[str, Any]:
         PrefetchedMeeting.enrichment_error: 'Resuming interrupted preparation',
     }, synchronize_session=False)
     db.session.commit()
+    _ensure_current_account_sync()
     _refresh_local_milestones()
     meetings = (
         PrefetchedMeeting.query

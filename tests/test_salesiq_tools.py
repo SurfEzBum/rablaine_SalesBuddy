@@ -334,6 +334,8 @@ class TestToolExecution:
             result = execute_tool('report_activity_coverage', {})
             assert 'summary' in result
             assert 'meetings' in result
+            assert 'milestone_summary' in result
+            assert 'milestones_needing_hok' in result
             assert '/reports/activity-coverage' in result['url']
 
     def test_report_workload(self, app):

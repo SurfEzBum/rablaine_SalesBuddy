@@ -74,6 +74,7 @@ from app.models import Customer, InternalContact, Milestone, MsxTask, Opportunit
 
 
 logger = logging.getLogger(__name__)
+ACCOUNT_SYNC_VERSION = 2
 
 
 def _extract_domain(url_or_domain: str) -> str:
@@ -1393,10 +1394,12 @@ def sync_accounts():
         _use_alignment = True
     else:
         _use_alignment = is_override_active()
+    _skip_post_import_aura = request.args.get('skip_aura') == '1'
 
     def generate():
         phase = "initializing"
         try:
+            SyncStatus.mark_started('accounts')
             import_start_time = time.time()
             progress_q: queue.Queue = queue.Queue()
             yield _sse({"message": "Starting parallel MSX import...", "progress": 0})
@@ -2049,7 +2052,6 @@ def sync_accounts():
             })
 
             # Customers
-            SyncStatus.mark_started('accounts')
             yield _sse({"message": "Syncing customers...", "progress": 97})
             customers_created = 0
             customers_skipped = 0
@@ -2288,7 +2290,14 @@ def sync_accounts():
             SyncStatus.mark_completed(
                 'accounts', success=True,
                 items_synced=customers_created,
-                details=f'{customers_created} created, {customers_updated} updated, {customers_unchanged} unchanged, {customers_skipped} skipped',
+                details=json.dumps({
+                    'sync_version': ACCOUNT_SYNC_VERSION,
+                    'source': 'alignment' if _use_alignment else 'accountteams',
+                    'created': customers_created,
+                    'updated': customers_updated,
+                    'unchanged': customers_unchanged,
+                    'skipped': customers_skipped,
+                }),
             )
 
             # Persist the list of TPIDs seen during this sync for FY finalization
@@ -2351,24 +2360,25 @@ def sync_accounts():
             # the account import completed. Fire-and-forget; aura manages
             # its own lock and idempotency so a concurrent scheduled run
             # is harmless.
-            try:
-                import threading
-                from app.services.meeting_sync import (
-                    _run_sync as _run_aura,
-                )
-                threading.Thread(
-                    target=_run_aura,
-                    args=(_app_for_aura,),
-                    daemon=True,
-                ).start()
-                logger.info(
-                    "Post-import: meeting aura kicked off in background"
-                )
-            except Exception:
-                # Non-fatal: scheduled aura will still pick this up at 7 AM.
-                logger.exception(
-                    "Post-import: failed to start background aura"
-                )
+            if not _skip_post_import_aura:
+                try:
+                    import threading
+                    from app.services.meeting_sync import (
+                        _run_sync as _run_aura,
+                    )
+                    threading.Thread(
+                        target=_run_aura,
+                        args=(_app_for_aura,),
+                        daemon=True,
+                    ).start()
+                    logger.info(
+                        "Post-import: meeting aura kicked off in background"
+                    )
+                except Exception:
+                    # Non-fatal: scheduled aura will still pick this up at 7 AM.
+                    logger.exception(
+                        "Post-import: failed to start background aura"
+                    )
 
             logger.info(
                 f"Parallel MSX Import complete in {duration}s: "
@@ -2421,6 +2431,25 @@ def sync_accounts():
         "message": "Account sync started in background.",
         "async": True,
     }), 202
+
+
+def run_account_sync_headless() -> None:
+    """Run the account sync generator to completion without an SSE client."""
+    app = current_app._get_current_object()
+    with app.test_request_context(
+        '/api/msx/accounts/sync?skip_aura=1',
+        method='POST',
+        headers={'Accept': 'text/event-stream'},
+    ):
+        response = app.make_response(sync_accounts())
+        if response.status_code != 200:
+            data = response.get_json(silent=True) or {}
+            raise RuntimeError(data.get('error') or 'MSX account sync could not start')
+        try:
+            for _ in response.response:
+                pass
+        finally:
+            response.close()
 
 
 @msx_bp.route('/sync-marketing', methods=['POST'])

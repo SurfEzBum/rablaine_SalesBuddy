@@ -194,8 +194,9 @@ def reports_hub():
 
 @bp.route('/reports/activity-coverage')
 def report_activity_coverage():
-    """Review calendar meetings and their MSX activity coverage."""
+    """Review meeting and milestone HoK activity coverage."""
     from app.services.activity_coverage import (
+        get_milestone_coverage_data,
         get_population_status,
         get_reconciliation_status,
         get_report_data,
@@ -209,13 +210,69 @@ def report_activity_coverage():
         )
     except ValueError:
         week_start = None
-    view_all = request.args.get('view') == 'all'
-    data = get_report_data(week_start, view_all=view_all)
+    lens = request.args.get('lens', 'meetings')
+    if lens == 'milestones':
+        data = get_milestone_coverage_data(
+            include_covered=request.args.get('covered') == '1',
+            include_inactive=request.args.get('inactive') == '1',
+        )
+    else:
+        lens = 'meetings'
+        view_all = request.args.get('view') == 'all'
+        try:
+            milestone_id = int(request.args.get('milestone') or 0) or None
+        except ValueError:
+            milestone_id = None
+        data = get_report_data(
+            week_start,
+            view_all=view_all,
+            milestone_id=milestone_id,
+        )
+    data['lens'] = lens
     data['population'] = get_population_status()
     data['reconciliation'] = get_reconciliation_status()
     from app.services.activity_enrichment import get_enrichment_status
     data['enrichment'] = get_enrichment_status()
     return render_template('report_activity_coverage.html', **data)
+
+
+@bp.route(
+    '/api/reports/activity-coverage/milestones/<int:milestone_id>/draft',
+    methods=['PATCH'],
+)
+def api_activity_coverage_update_milestone_draft(milestone_id):
+    """Save one standalone milestone HoK activity draft."""
+    from app.services.activity_coverage import update_milestone_coverage_draft
+
+    try:
+        draft = update_milestone_coverage_draft(
+            milestone_id,
+            request.get_json(silent=True) or {},
+        )
+    except (TypeError, ValueError) as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return jsonify({'success': True, 'draft_id': draft.id})
+
+
+@bp.route(
+    '/api/reports/activity-coverage/milestones/<int:milestone_id>/create',
+    methods=['POST'],
+)
+def api_activity_coverage_create_milestone_hok(milestone_id):
+    """Create one standalone current-FY HoK activity."""
+    from app.services.activity_coverage import create_milestone_hok_activity
+
+    try:
+        task = create_milestone_hok_activity(milestone_id)
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 502
+    return jsonify({
+        'success': True,
+        'task_id': task.id,
+        'task_url': task.msx_task_url,
+    })
 
 
 @bp.route('/api/reports/activity-coverage/populate', methods=['POST'])
