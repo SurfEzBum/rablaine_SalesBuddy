@@ -14,6 +14,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SHELL_PREFS = REPO_ROOT / 'data' / 'shell-prefs.json'
 REBUILD_SENTINEL = REPO_ROOT / 'data' / 'electron-rebuild.request'
+ELECTRON_MAIN = REPO_ROOT / 'electron' / 'main.js'
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +108,16 @@ class TestShellPrefsWriter:
         finally:
             if SHELL_PREFS.exists():
                 SHELL_PREFS.unlink()
+
+
+class TestUpdateRelaunch:
+    def test_update_relaunch_strips_hidden_startup_flags(self):
+        """User-initiated update restarts must restore the visible window."""
+        source = ELECTRON_MAIN.read_text(encoding='utf-8')
+
+        assert "arg !== '--startup' && arg !== '--minimized'" in source
+        assert 'app.relaunch({ args });' in source
+        assert 'app.relaunch();' not in source
 
 
 # ---------------------------------------------------------------------------

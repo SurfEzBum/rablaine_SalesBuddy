@@ -132,6 +132,16 @@ function shouldBootHidden() {
   return false;                                              // explicit launch / off
 }
 
+// Updates are user-initiated, so their restart must restore the window even if
+// this shell originally started at login. Electron otherwise preserves the
+// original --startup/--minimized args and boots the replacement into the tray.
+function relaunchVisible() {
+  const args = process.argv.slice(1).filter(
+    (arg) => arg !== '--startup' && arg !== '--minimized'
+  );
+  app.relaunch({ args });
+}
+
 // Build the environment for the spawned stack. Mirrors scripts/supervisor.ps1:
 // point the Azure CLI at the app's isolated per-environment config dir so MSX
 // token acquisition uses the same file-based cache as the web/server, and pass
@@ -411,7 +421,7 @@ async function runUpdate(trigger, rebuildAfter = false) {
     }
     log('Update complete; relaunching');
     isQuitting = true;
-    app.relaunch();
+    relaunchVisible();
     app.exit(0);
   } catch (e) {
     const msg = (e && e.message) || String(e);
@@ -450,7 +460,7 @@ async function runRebuild(trigger) {
   if (!fs.existsSync(BUILD_SCRIPT) || !fs.existsSync(MIGRATE_SCRIPT)) {
     log('Rebuild aborted: build.ps1 or migrate-to-electron.ps1 missing; relaunching');
     isQuitting = true;
-    app.relaunch();
+    relaunchVisible();
     app.exit(0);
     return;
   }
@@ -476,7 +486,7 @@ async function runRebuild(trigger) {
       'Sales Buddy will restart on the current version.'
     );
     isQuitting = true;
-    app.relaunch();
+    relaunchVisible();
     app.exit(0);
     return;
   }
@@ -518,7 +528,7 @@ async function runRebuild(trigger) {
     child.on('error', (e) => {
       log(`Restage launcher error: ${(e && e.message) || e}; relaunching current shell`);
       isQuitting = true;
-      app.relaunch();
+      relaunchVisible();
       app.exit(0);
     });
     setTimeout(finishExit, 5000);
@@ -531,7 +541,7 @@ async function runRebuild(trigger) {
       'the current version. You can retry from Admin > Danger Zone > Rebuild desktop app.'
     );
     isQuitting = true;
-    app.relaunch();
+    relaunchVisible();
     app.exit(0);
   }
 }
