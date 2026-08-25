@@ -103,6 +103,18 @@ def reset_sync_state():
     meeting_sync._clear_sync_state()
 
 
+@pytest.fixture(autouse=True)
+def force_workiq_fallback(monkeypatch):
+    """Keep historical fixture dates on the mocked WorkIQ code path."""
+    def fail_outlook_fetch(target_date):
+        raise RuntimeError(f'Outlook disabled for aura test: {target_date}')
+
+    monkeypatch.setattr(
+        'app.services.outlook_calendar.fetch_outlook_meetings_for_date',
+        fail_outlook_fetch,
+    )
+
+
 # ---------------------------------------------------------------------------
 # ensure_meeting_aura
 # ---------------------------------------------------------------------------
@@ -217,7 +229,7 @@ class TestEnsureMeetingAura:
                 end_time=start + timedelta(minutes=30),
                 meeting_date=anchor, organizer_email=organizer,
                 is_recurring=False, customer_id=None, dismissed=True,
-                expires_at=datetime.utcnow() + timedelta(days=2),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=2),
             ))
             db.session.add(PrefetchedMeeting(
                 workiq_id=wid_n, subject=subject_n,
@@ -226,7 +238,7 @@ class TestEnsureMeetingAura:
                 meeting_date=anchor, organizer_email=organizer,
                 is_recurring=False, customer_id=customer_id, note_id=note_id,
                 dismissed=False,
-                expires_at=datetime.utcnow() + timedelta(days=2),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=2),
             ))
             db.session.commit()
             seeded_ids = {

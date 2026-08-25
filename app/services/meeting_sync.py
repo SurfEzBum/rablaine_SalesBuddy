@@ -106,6 +106,7 @@ def sync_meetings_for_date(date_str: str) -> tuple[list, str | None]:
                 PrefetchedMeeting.query
                 .filter(PrefetchedMeeting.meeting_date == target_date)
                 .filter(PrefetchedMeeting.note_id.is_(None))
+                .filter(~PrefetchedMeeting.activity.has())
                 .filter(PrefetchedMeeting.dismissed.is_(False))
                 .all()
             )
@@ -128,6 +129,7 @@ def sync_meetings_for_date(date_str: str) -> tuple[list, str | None]:
                 PrefetchedMeeting.query
                 .filter(PrefetchedMeeting.workiq_id.in_(stale_workiq_ids))
                 .filter(PrefetchedMeeting.note_id.is_(None))
+                .filter(~PrefetchedMeeting.activity.has())
                 .filter(PrefetchedMeeting.dismissed.is_(False))
                 .all()
             )

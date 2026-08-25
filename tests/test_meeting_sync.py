@@ -105,6 +105,17 @@ class TestDailyMeetingCacheModel:
 class TestMeetingSyncService:
     """Tests for app.services.meeting_sync functions."""
 
+    @pytest.fixture(autouse=True)
+    def force_workiq_fallback(self, monkeypatch):
+        """Keep hardcoded dates on the WorkIQ path as calendar time advances."""
+        def fail_outlook_fetch(target_date):
+            raise RuntimeError(f'Outlook disabled for service test: {target_date}')
+
+        monkeypatch.setattr(
+            'app.services.outlook_calendar.fetch_outlook_meetings_for_date',
+            fail_outlook_fetch,
+        )
+
     @patch('app.services.workiq_service.query_workiq')
     def test_sync_meetings_for_date_caches_result(self, mock_query, app):
         """sync_meetings_for_date stores meetings in DailyMeetingCache."""

@@ -1,0 +1,474 @@
+<style>
+    .milestone-coverage-toolbar { border-block: 1px solid var(--bs-border-color); }
+    .milestone-coverage-list { border-top: 1px solid var(--bs-border-color); }
+    .milestone-coverage-columns {
+        display: grid;
+        grid-template-columns: 1.1rem minmax(9rem, 1fr) minmax(11rem, 1.25fr) minmax(14rem, 1.7fr) 7rem 9rem 10rem 3rem;
+        align-items: center;
+        gap: 0.7rem;
+        padding-inline: 0.6rem;
+    }
+    .milestone-coverage-heading {
+        min-height: 2.1rem;
+        border-bottom: 1px solid var(--bs-border-color);
+        color: var(--bs-secondary-color);
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    .milestone-coverage-row { border-bottom: 1px solid var(--bs-border-color); }
+    .milestone-coverage-summary { min-height: 3.25rem; padding-block: 0.45rem; cursor: pointer; }
+    .milestone-coverage-summary:hover { background: var(--bs-tertiary-bg); }
+    .milestone-coverage-chevron { transition: transform 160ms ease-out; }
+    .milestone-coverage-row.is-expanded .milestone-coverage-chevron { transform: rotate(90deg); }
+    .milestone-coverage-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; }
+    .milestone-coverage-title { font-size: 0.88rem; font-weight: 600; }
+    .milestone-coverage-detail {
+        display: none;
+        padding: 0.9rem 0.75rem 1rem 2.4rem;
+        background: color-mix(in srgb, var(--bs-tertiary-bg) 55%, transparent);
+    }
+    .milestone-coverage-row.is-expanded .milestone-coverage-detail { display: block; }
+    .milestone-coverage-fields {
+        display: grid;
+        grid-template-columns: minmax(16rem, 1fr) 13rem 8rem 13rem;
+        gap: 0.65rem;
+    }
+    .milestone-hok-description { min-height: 5rem; resize: vertical; }
+    .prepared-meeting-list { border-top: 1px solid var(--bs-border-color); }
+    .prepared-meeting-task {
+        display: grid;
+        grid-template-columns: 8rem minmax(12rem, 0.9fr) minmax(14rem, 1.3fr) 13rem 7rem 10.5rem;
+        gap: 0.75rem;
+        align-items: start;
+        padding: 0.7rem 0;
+        border-bottom: 1px solid var(--bs-border-color);
+    }
+    .prepared-meeting-context, .prepared-activity-draft { min-width: 0; }
+    .prepared-meeting-context strong {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .prepared-activity-description {
+        grid-column: 3 / 6;
+    }
+    .prepared-activity-description textarea { min-height: 4.25rem; resize: vertical; }
+    .prepared-task-actions { display: grid; gap: 0.4rem; }
+    .prepared-meeting-task .form-label { margin-bottom: 0.2rem; }
+    .prepared-meeting-task .form-control,
+    .prepared-meeting-task .form-select { font-size: 0.82rem; }
+</style>
+
+<div class="milestone-coverage-toolbar py-2 mb-2">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div class="d-flex align-items-center gap-3 small">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input milestone-view-filter" id="showCoveredMilestones" type="checkbox" data-param="covered" {% if include_covered %}checked{% endif %}>
+                <label class="form-check-label" for="showCoveredMilestones">Show covered</label>
+            </div>
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input milestone-view-filter" id="showInactiveMilestones" type="checkbox" data-param="inactive" {% if include_inactive %}checked{% endif %}>
+                <label class="form-check-label" for="showInactiveMilestones">Show inactive</label>
+            </div>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" id="milestoneRefreshButton" {% if reconciliation.running %}disabled{% endif %} title="Refresh MSX activities before recalculating milestone HoK coverage">
+            <span class="spinner-border spinner-border-sm{% if not reconciliation.running %} d-none{% endif %}" id="milestoneRefreshSpinner" aria-hidden="true"></span>
+            <i class="bi bi-arrow-repeat{% if reconciliation.running %} d-none{% endif %}" id="milestoneRefreshIcon"></i>
+            <span id="milestoneRefreshLabel">{% if reconciliation.running %}Refreshing MSX{% else %}Refresh MSX Activities{% endif %}</span>
+        </button>
+    </div>
+    <div class="small mt-1 {% if reconciliation.error %}text-danger{% else %}text-muted{% endif %}{% if not reconciliation.running and not reconciliation.error %} d-none{% endif %}" id="milestoneRefreshStatus">
+        {% if reconciliation.error %}{{ reconciliation.error }}{% elif reconciliation.running %}Syncing activities from MSX...{% endif %}
+    </div>
+</div>
+
+<div class="milestone-coverage-list" id="milestoneCoverageList">
+    <div class="milestone-coverage-heading milestone-coverage-columns" aria-hidden="true">
+        <span></span>
+        <span>Customer</span>
+        <span>Opportunity</span>
+        <span>Milestone</span>
+        <span>Due</span>
+        <span>Meeting overlap</span>
+        <span>HoK coverage</span>
+        <span></span>
+    </div>
+    {% for row in milestone_rows %}
+    {% set milestone = row.milestone %}
+    <section class="milestone-coverage-row" id="milestone-coverage-{{ milestone.id }}">
+        <div class="milestone-coverage-summary milestone-coverage-columns" role="button" tabindex="0" aria-expanded="false" aria-controls="milestone-coverage-detail-{{ milestone.id }}">
+            <i class="bi bi-chevron-right milestone-coverage-chevron text-muted small"></i>
+            <div class="milestone-coverage-cell" title="{{ milestone.customer.name if milestone.customer else 'No customer' }}">
+                {% if milestone.customer %}<i class="bi bi-building me-1"></i>{{ milestone.customer.name }}{% else %}<span class="text-warning">No customer</span>{% endif %}
+            </div>
+            <div class="milestone-coverage-cell text-muted" title="{{ milestone.opportunity.name if milestone.opportunity else (milestone.opportunity_name or '') }}">
+                {{ milestone.opportunity.name if milestone.opportunity else (milestone.opportunity_name or 'No opportunity') }}
+            </div>
+            <div class="milestone-coverage-cell milestone-coverage-title" title="{{ milestone.display_text }}">
+                {{ milestone.display_text }}
+                {% if not milestone.is_active %}<span class="badge bg-secondary ms-1">{{ milestone.msx_status or 'Inactive' }}</span>{% endif %}
+            </div>
+            <div class="milestone-coverage-cell text-muted">
+                {% if milestone.due_date %}{{ milestone.due_date.strftime('%b %d, %Y') }}{% else %}No date{% endif %}
+            </div>
+            <div class="milestone-coverage-cell">
+                {% if row.meeting_draft_count %}
+                <a href="{{ url_for('reports.report_activity_coverage', view='all', milestone=milestone.id) }}" class="text-decoration-none" onclick="event.stopPropagation();" title="Open unlogged meeting drafts targeting this milestone">
+                    {% if row.prepared_meeting_count == row.meeting_draft_count %}
+                    {{ row.meeting_draft_count }} prepared meeting{% if row.meeting_draft_count != 1 %}s{% endif %}
+                    {% elif row.prepared_meeting_count %}
+                    {{ row.meeting_draft_count }} meeting drafts · {{ row.prepared_meeting_count }} prepared
+                    {% else %}
+                    {{ row.meeting_draft_count }} meeting draft{% if row.meeting_draft_count != 1 %}s{% endif %}
+                    {% endif %}
+                </a>
+                {% else %}<span class="text-muted">None</span>{% endif %}
+            </div>
+            <div class="milestone-coverage-cell">
+                {% if row.covered %}
+                <span class="badge bg-success">Covered {{ fiscal_year_label }}</span>
+                {% elif row.prior_task %}
+                <span class="badge bg-warning text-dark">HoK in FY{{ '%02d'|format(row.prior_fiscal_year) }}</span>
+                {% else %}
+                <span class="text-warning"><i class="bi bi-exclamation-circle"></i> No HoK activity</span>
+                {% endif %}
+            </div>
+            <div class="d-flex justify-content-end" onclick="event.stopPropagation();">
+                {% if row.current_task and row.current_task.msx_task_url %}
+                <a class="btn btn-sm btn-outline-success" href="{{ row.current_task.msx_task_url }}" target="_blank" rel="noopener" title="Open HoK activity in MSX"><i class="bi bi-box-arrow-up-right"></i></a>
+                {% endif %}
+            </div>
+        </div>
+        <div class="milestone-coverage-detail" id="milestone-coverage-detail-{{ milestone.id }}">
+            {% if row.prepared_meetings %}
+            <div class="mb-4">
+                <div class="d-flex align-items-baseline gap-2 mb-1">
+                    <strong>Prepared meeting activities</strong>
+                    <span class="text-muted small">{{ row.prepared_meetings|length }}</span>
+                </div>
+                <div class="prepared-meeting-list">
+                    {% for prepared in row.prepared_meetings %}
+                    <form class="prepared-meeting-task prepared-meeting-form" data-meeting-id="{{ prepared.id }}">
+                        <input type="hidden" name="customer_id" value="{{ prepared.customer_id }}">
+                        <input type="hidden" name="milestone_id" value="{{ prepared.milestone_id }}">
+                        <div class="small">
+                            <div class="fw-semibold">{{ prepared.meeting_date.strftime('%a %b %d') }}</div>
+                            <div class="text-muted local-datetime" data-utc="{{ prepared.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-fmt="time"></div>
+                        </div>
+                        <div class="prepared-meeting-context">
+                            <span class="text-muted small">Meeting</span>
+                            <strong title="{{ prepared.meeting_subject }}">{{ prepared.meeting_subject }}</strong>
+                        </div>
+                        <div class="prepared-activity-draft">
+                            <label class="form-label small text-muted" for="prepared-subject-{{ prepared.id }}">Activity subject</label>
+                            <input class="form-control" id="prepared-subject-{{ prepared.id }}" name="subject" maxlength="500" value="{{ prepared.activity_subject }}" required>
+                        </div>
+                        <div>
+                            <label class="form-label small text-muted" for="prepared-category-{{ prepared.id }}">Activity type</label>
+                            <select class="form-select" id="prepared-category-{{ prepared.id }}" name="task_category">
+                                {% for category in task_categories %}
+                                <option value="{{ category.value }}" {% if category.value == prepared.task_category %}selected{% endif %}>{% if category.is_hok %}★ {% endif %}{{ category.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label small text-muted" for="prepared-duration-{{ prepared.id }}">Minutes</label>
+                            <input class="form-control" id="prepared-duration-{{ prepared.id }}" name="duration_minutes" type="number" min="1" max="1440" value="{{ prepared.duration_minutes }}" required>
+                        </div>
+                        <div class="prepared-task-actions">
+                            <button class="btn btn-sm btn-outline-secondary save-prepared-meeting-draft" type="button" title="Save edits without creating an MSX activity"><i class="bi bi-floppy"></i> Save Draft</button>
+                            <button class="btn btn-sm btn-success create-prepared-meeting-activity" type="button" title="Save edits and create this meeting activity in MSX">
+                                <i class="bi bi-plus-circle"></i> Create Activity
+                            </button>
+                        </div>
+                        <div class="prepared-activity-description">
+                            <label class="form-label small text-muted" for="prepared-description-{{ prepared.id }}">Description</label>
+                            <textarea class="form-control" id="prepared-description-{{ prepared.id }}" name="description">{{ prepared.description }}</textarea>
+                        </div>
+                    </form>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            {% if row.covered %}
+            <div class="d-flex flex-wrap align-items-center gap-2 py-1">
+                <i class="bi bi-check-circle-fill text-success"></i>
+                <strong>{{ row.current_task.subject }}</strong>
+                <span class="badge bg-secondary">{{ row.current_task.task_category_name }}</span>
+                <span class="text-muted small">{{ row.current_task.due_date.strftime('%b %d, %Y') if row.current_task.due_date else 'Date unavailable' }}</span>
+            </div>
+            {% else %}
+            {% if row.prepared_meetings %}
+            <div class="d-flex align-items-center gap-2 mb-3 text-muted small">
+                <span class="flex-grow-1 border-top"></span>
+                <span>Or create a standalone HoK activity</span>
+                <span class="flex-grow-1 border-top"></span>
+            </div>
+            {% endif %}
+            {% if row.prior_task %}
+            <div class="small text-muted mb-3">
+                <i class="bi bi-clock-history"></i> Prior HoK: <strong>{{ row.prior_task.subject }}</strong> · {{ row.prior_task.task_category_name }} · {{ row.prior_task.due_date.strftime('%b %d, %Y') if row.prior_task.due_date else 'date unavailable' }}
+            </div>
+            {% endif %}
+            <form class="milestone-hok-form" data-id="{{ milestone.id }}">
+                <div class="milestone-coverage-fields mb-3">
+                    <div>
+                        <label class="form-label small" for="milestone-hok-subject-{{ milestone.id }}">Activity subject</label>
+                        <input class="form-control" id="milestone-hok-subject-{{ milestone.id }}" name="subject" maxlength="500" value="{{ row.draft.subject }}" required>
+                    </div>
+                    <div>
+                        <label class="form-label small" for="milestone-hok-category-{{ milestone.id }}">HoK activity type</label>
+                        <select class="form-select" id="milestone-hok-category-{{ milestone.id }}" name="task_category">
+                            {% for category in hok_task_categories %}
+                            <option value="{{ category.value }}" {% if category.value == row.draft.task_category %}selected{% endif %}>★ {{ category.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label small" for="milestone-hok-duration-{{ milestone.id }}">Minutes</label>
+                        <input class="form-control" id="milestone-hok-duration-{{ milestone.id }}" name="duration_minutes" type="number" min="1" max="1440" value="{{ row.draft.duration_minutes }}" required>
+                    </div>
+                    <div>
+                        <label class="form-label small" for="milestone-hok-date-{{ milestone.id }}">Work date and time</label>
+                        <input class="form-control milestone-hok-date" id="milestone-hok-date-{{ milestone.id }}" name="scheduled_start" type="datetime-local" data-utc="{{ row.draft.scheduled_start.strftime('%Y-%m-%dT%H:%M:%SZ') }}" max="{{ today.isoformat() }}T23:59" required>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small" for="milestone-hok-description-{{ milestone.id }}">Hands-on work performed</label>
+                    <textarea class="form-control milestone-hok-description" id="milestone-hok-description-{{ milestone.id }}" name="description" placeholder="Describe the architecture, prototype, workshop, demo, or technical work completed." required>{{ row.draft.description }}</textarea>
+                </div>
+                <div class="d-flex justify-content-end gap-2">
+                    <button class="btn btn-outline-secondary save-milestone-hok" type="button"><i class="bi bi-floppy"></i> Save Draft</button>
+                    <button class="btn btn-success create-milestone-hok" type="button"><i class="bi bi-plus-circle"></i> Create HoK Task</button>
+                </div>
+            </form>
+            {% endif %}
+        </div>
+    </section>
+    {% else %}
+    <div class="text-center py-5">
+        <i class="bi bi-check2-circle fs-2 text-success"></i>
+        <div class="mt-2 text-muted">No milestones match these coverage filters.</div>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+(function() {
+    'use strict';
+
+    function requestJson(url, options) {
+        return fetch(url, options).then(function(response) {
+            return response.json().then(function(data) {
+                if (!response.ok || !data.success) throw new Error(data.error || 'Request failed');
+                return data;
+            });
+        });
+    }
+
+    document.querySelectorAll('.milestone-view-filter').forEach(function(input) {
+        input.addEventListener('change', function() {
+            var url = new URL(window.location.href);
+            if (input.checked) url.searchParams.set(input.dataset.param, '1');
+            else url.searchParams.delete(input.dataset.param);
+            window.location.href = url.toString();
+        });
+    });
+
+    document.querySelectorAll('.milestone-coverage-summary').forEach(function(summary) {
+        function toggle() {
+            var row = summary.closest('.milestone-coverage-row');
+            var expanded = !row.classList.contains('is-expanded');
+            document.querySelectorAll('.milestone-coverage-row.is-expanded').forEach(function(openRow) {
+                openRow.classList.remove('is-expanded');
+                openRow.querySelector('.milestone-coverage-summary').setAttribute('aria-expanded', 'false');
+            });
+            row.classList.toggle('is-expanded', expanded);
+            summary.setAttribute('aria-expanded', String(expanded));
+        }
+        summary.addEventListener('click', toggle);
+        summary.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggle();
+            }
+        });
+    });
+
+    document.querySelectorAll('.milestone-hok-date').forEach(function(input) {
+        var instant = new Date(input.dataset.utc);
+        if (Number.isNaN(instant.getTime())) return;
+        var local = new Date(instant.getTime() - instant.getTimezoneOffset() * 60000);
+        input.value = local.toISOString().slice(0, 16);
+    });
+
+    function formPayload(form) {
+        var data = new FormData(form);
+        var localDate = new Date(data.get('scheduled_start'));
+        return {
+            subject: data.get('subject'),
+            description: data.get('description'),
+            task_category: data.get('task_category'),
+            duration_minutes: data.get('duration_minutes'),
+            scheduled_start: localDate.toISOString(),
+        };
+    }
+
+    function saveMilestoneForm(form, createAfter) {
+        var buttons = form.querySelectorAll('button');
+        buttons.forEach(function(button) { button.disabled = true; });
+        var baseUrl = '/api/reports/activity-coverage/milestones/' + form.dataset.id;
+        return requestJson(baseUrl + '/draft', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formPayload(form)),
+        }).then(function() {
+            if (!createAfter) return null;
+            return requestJson(baseUrl + '/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }).then(function() {
+            window.location.reload();
+        }).catch(function(error) {
+            alert(error.message);
+            buttons.forEach(function(button) { button.disabled = false; });
+        });
+    }
+
+    document.querySelectorAll('.save-milestone-hok').forEach(function(button) {
+        button.addEventListener('click', function() {
+            saveMilestoneForm(button.closest('form'), false);
+        });
+    });
+    document.querySelectorAll('.create-milestone-hok').forEach(function(button) {
+        button.addEventListener('click', function() {
+            saveMilestoneForm(button.closest('form'), true);
+        });
+    });
+
+    function preparedMeetingPayload(form) {
+        var data = new FormData(form);
+        return {
+            customer_id: data.get('customer_id'),
+            milestone_id: data.get('milestone_id'),
+            subject: data.get('subject'),
+            description: data.get('description'),
+            task_category: data.get('task_category'),
+            duration_minutes: data.get('duration_minutes'),
+        };
+    }
+
+    function savePreparedMeeting(form, createAfter) {
+        var buttons = form.querySelectorAll('button');
+        var saveButton = form.querySelector('.save-prepared-meeting-draft');
+        var createButton = form.querySelector('.create-prepared-meeting-activity');
+        var meetingId = form.dataset.meetingId;
+        buttons.forEach(function(button) { button.disabled = true; });
+        if (createAfter) {
+            createButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Creating';
+        }
+        return requestJson('/api/reports/activity-coverage/meetings/' + meetingId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(preparedMeetingPayload(form)),
+        }).then(function() {
+            if (!createAfter) return null;
+            return requestJson(
+                '/api/reports/activity-coverage/meetings/' + meetingId + '/create',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                }
+            );
+        }).then(function() {
+            if (createAfter) {
+                window.location.reload();
+                return;
+            }
+            saveButton.innerHTML = '<i class="bi bi-check2"></i> Saved';
+            buttons.forEach(function(button) { button.disabled = false; });
+        }).catch(function(error) {
+            alert(error.message);
+            buttons.forEach(function(button) { button.disabled = false; });
+            createButton.innerHTML = '<i class="bi bi-plus-circle"></i> Create Activity';
+        });
+    }
+
+    document.querySelectorAll('.save-prepared-meeting-draft').forEach(function(button) {
+        button.addEventListener('click', function() {
+            savePreparedMeeting(button.closest('form'), false);
+        });
+    });
+    document.querySelectorAll('.create-prepared-meeting-activity').forEach(function(button) {
+        button.addEventListener('click', function() {
+            savePreparedMeeting(button.closest('form'), true);
+        });
+    });
+
+    var refreshButton = document.getElementById('milestoneRefreshButton');
+    var refreshSpinner = document.getElementById('milestoneRefreshSpinner');
+    var refreshIcon = document.getElementById('milestoneRefreshIcon');
+    var refreshLabel = document.getElementById('milestoneRefreshLabel');
+    var refreshStatus = document.getElementById('milestoneRefreshStatus');
+    var refreshTimer = null;
+
+    function pollRefresh() {
+        requestJson('/api/reports/activity-coverage/reconcile-status').then(function(data) {
+            if (data.running) {
+                refreshStatus.classList.remove('d-none', 'text-danger');
+                refreshStatus.classList.add('text-muted');
+                refreshStatus.textContent = data.phase === 'syncing'
+                    ? 'Syncing activities from MSX...'
+                    : 'Reconciling activities with meetings...';
+                return;
+            }
+            window.clearInterval(refreshTimer);
+            if (data.error) {
+                refreshButton.disabled = false;
+                refreshSpinner.classList.add('d-none');
+                refreshIcon.classList.remove('d-none');
+                refreshLabel.textContent = 'Retry MSX Refresh';
+                refreshStatus.classList.remove('d-none', 'text-muted');
+                refreshStatus.classList.add('text-danger');
+                refreshStatus.textContent = data.error;
+            } else {
+                window.location.reload();
+            }
+        }).catch(function(error) {
+            window.clearInterval(refreshTimer);
+            refreshStatus.classList.remove('d-none', 'text-muted');
+            refreshStatus.classList.add('text-danger');
+            refreshStatus.textContent = error.message;
+        });
+    }
+
+    refreshButton.addEventListener('click', function() {
+        refreshButton.disabled = true;
+        refreshSpinner.classList.remove('d-none');
+        refreshIcon.classList.add('d-none');
+        refreshLabel.textContent = 'Refreshing MSX';
+        requestJson('/api/reports/activity-coverage/reconcile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        }).then(function() {
+            refreshTimer = window.setInterval(pollRefresh, 1200);
+            pollRefresh();
+        }).catch(function(error) {
+            refreshButton.disabled = false;
+            refreshSpinner.classList.add('d-none');
+            refreshIcon.classList.remove('d-none');
+            refreshLabel.textContent = 'Retry MSX Refresh';
+            refreshStatus.classList.remove('d-none');
+            refreshStatus.textContent = error.message;
+        });
+    });
+
+    {% if reconciliation.running %}
+    refreshTimer = window.setInterval(pollRefresh, 1200);
+    pollRefresh();
+    {% endif %}
+})();
+</script>

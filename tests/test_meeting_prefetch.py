@@ -18,11 +18,22 @@ import pytest
 from app.models import (
     Customer,
     CustomerContact,
+    DismissedRecurringMeeting,
     PrefetchedMeeting,
     PrefetchedMeetingAttendee,
     db,
 )
 from app.services import meeting_prefetch
+
+
+@pytest.fixture(autouse=True)
+def disable_live_outlook_calendar():
+    """Keep prefetch tests isolated from user's desktop Outlook profile."""
+    with patch(
+        'app.services.outlook_calendar.fetch_outlook_meetings_for_date',
+        side_effect=RuntimeError('Outlook disabled in unit tests'),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +125,7 @@ class TestExtractJsonArray:
 
 
 # ---------------------------------------------------------------------------
-# Subject blacklist (SME&C internal-segment noise vs. "SME" customer)
+# Subject blacklist for known internal calendar noise
 # ---------------------------------------------------------------------------
 
 BLACKLIST_RESPONSE = """
@@ -147,11 +158,25 @@ BLACKLIST_RESPONSE = """
 
 class TestSubjectBlacklist:
     @pytest.mark.parametrize("subject", [
+        "Canceled: Valeris/MSFT - Azure Sync",
+        "  canceled : Customer meeting",
+        "Dan K. OOO 1pm-5pm",
+        "Josh OOO Texas",
+        "Alex - OOF",
+        "Dan Kraft out of office Aug 17th - Oct 15th",
+        "MCAPS Americas community call",
+        "FY27 MCAPS kickoff",
+        "IMPORTANT: FY27 CAIP Landing Show",
+        "FY27   CAIP Role Accelerator",
+        "FY27 Partner Strategy Kick Off",
+        "Briefing: FY27   Partner incentives",
         "SME&C Americas FY27 kickoff",
         "FY27 SME&C Corporate Kick Off (Option 1)",
         "Save the date: SME&C Co-Sell Connections (Internal)",
         "sme&c social",
         "SME & C leadership sync",
+        "Azure Office Hours",
+        "Weekly office   hours - Data & AI",
     ])
     def test_blacklisted_subjects_match(self, subject):
         assert meeting_prefetch._is_blacklisted_subject(subject) is True
@@ -159,6 +184,12 @@ class TestSubjectBlacklist:
     @pytest.mark.parametrize("subject", [
         "SME weekly sync",
         "SME quarterly review",
+        "BOOKOOO customer review",
+        "MCAPSTONE migration",
+        "Backoffice Hours LLC kickoff",
+        "Discussion marked Canceled: pending customer response",
+        "FY27 CAIPSTONE customer planning",
+        "FY27 Partnership customer planning",
         "Redsail - Fabric Cadence",
         "",
         None,
@@ -321,6 +352,69 @@ class TestDomainMap:
 # ---------------------------------------------------------------------------
 
 class TestPrefetchForDate:
+    def test_historical_date_uses_outlook_without_workiq(
+        self, app, clean_prefetch_tables,
+    ):
+        """Past meetings come from deterministic Outlook calendar data."""
+        outlook_meetings = [{
+            'subject': 'Historical Customer Sync',
+            'start_time': '2026-07-06T09:00:00-05:00',
+            'end_time': '2026-07-06T09:30:00-05:00',
+            'organizer_email': 'seller@microsoft.com',
+            'is_recurring': False,
+            'attendees': [],
+        }]
+        with app.app_context(), patch(
+            'app.services.outlook_calendar.fetch_outlook_meetings_for_date',
+            return_value=outlook_meetings,
+        ) as outlook_fetch, patch(
+            'app.services.workiq_service.query_workiq',
+        ) as workiq_query:
+            stored, err = meeting_prefetch.prefetch_for_date('2026-07-06')
+
+        assert err is None
+        assert stored == 1
+        outlook_fetch.assert_called_once_with(date(2026, 7, 6))
+        workiq_query.assert_not_called()
+
+    def test_markdown_fallback_stores_and_matches_meeting(
+        self, app, clean_prefetch_tables,
+    ):
+        """Historical imports recover when WorkIQ ignores JSON format."""
+        with app.app_context():
+            customer = Customer(name='Calder Race Course', tpid=910099)
+            db.session.add(customer)
+            db.session.commit()
+            legacy_meetings = [{
+                'title': 'Azure SQL ESU Touchpoint',
+                'start_time': datetime(2026, 7, 2, 9, 30),
+                'customer': 'Calder Race Course',
+            }]
+            try:
+                with patch(
+                    'app.services.workiq_service.query_workiq',
+                    return_value='I found several meetings, but cannot return JSON.',
+                ), patch(
+                    'app.services.workiq_service.get_meetings_for_date',
+                    return_value=(legacy_meetings, '| markdown table |'),
+                ) as markdown_fallback:
+                    stored, err = meeting_prefetch.prefetch_for_date('2026-07-02')
+
+                assert err is None
+                assert stored == 1
+                markdown_fallback.assert_called_once_with('2026-07-02')
+                meeting = PrefetchedMeeting.query.filter_by(
+                    subject='Azure SQL ESU Touchpoint',
+                ).one()
+                assert meeting.customer_id == customer.id
+                assert meeting.matched_via == 'subject_name'
+                assert meeting.end_time - meeting.start_time == timedelta(minutes=30)
+            finally:
+                PrefetchedMeetingAttendee.query.delete()
+                PrefetchedMeeting.query.delete()
+                db.session.delete(customer)
+                db.session.commit()
+
     def test_inserts_meetings_and_attendees(self, app, redsail_customer):
         with app.app_context():
             with patch('app.services.workiq_service.query_workiq',
@@ -361,6 +455,34 @@ class TestPrefetchForDate:
 
             assert PrefetchedMeeting.query.count() == 2
             assert PrefetchedMeetingAttendee.query.count() == 4  # 3 + 1
+
+    def test_future_occurrence_of_dismissed_series_stays_dismissed(
+        self, app, redsail_customer,
+    ):
+        """A series dismissal applies when a later week is imported."""
+        with app.app_context():
+            recurring_key = meeting_prefetch._recurring_key(
+                'Redsail - Fabric Cadence',
+                'martinez.reynaldo@microsoft.com',
+            )
+            db.session.add(DismissedRecurringMeeting(recurring_key=recurring_key))
+            db.session.commit()
+            try:
+                with patch(
+                    'app.services.workiq_service.query_workiq',
+                    return_value=SAMPLE_RESPONSE,
+                ):
+                    meeting_prefetch.prefetch_for_date('2026-04-22')
+
+                meeting = PrefetchedMeeting.query.filter_by(
+                    subject='Redsail - Fabric Cadence',
+                ).one()
+                assert meeting.dismissed is True
+            finally:
+                DismissedRecurringMeeting.query.filter_by(
+                    recurring_key=recurring_key,
+                ).delete()
+                db.session.commit()
 
     def test_workiq_failure_returns_error(self, app, clean_prefetch_tables):
         with app.app_context():
@@ -761,28 +883,38 @@ class TestSubjectMatching:
 # ---------------------------------------------------------------------------
 
 class TestPurgeExpired:
-    def test_drops_expired_keeps_fresh(self, app, clean_prefetch_tables):
+    def test_drops_prior_fiscal_year_keeps_current_year(self, app, clean_prefetch_tables):
         with app.app_context():
             now = datetime.now()
-            # Old: 14 calendar days back -- well outside the 5-business-day
-            # ghost-aura retention window regardless of weekday alignment.
+            today = date.today()
+            fiscal_start_year = today.year if today.month >= 7 else today.year - 1
+            fiscal_start = date(fiscal_start_year, 7, 1)
             old = PrefetchedMeeting(
-                workiq_id='old', subject='old', start_time=now - timedelta(days=14),
-                meeting_date=date.today() - timedelta(days=14),
+                workiq_id='old', subject='old',
+                start_time=datetime.combine(
+                    fiscal_start - timedelta(days=1), datetime.min.time(),
+                ),
+                meeting_date=fiscal_start - timedelta(days=1),
                 expires_at=now - timedelta(days=4),
             )
-            new = PrefetchedMeeting(
-                workiq_id='new', subject='new', start_time=now,
-                meeting_date=date.today(),
+            current_fy = PrefetchedMeeting(
+                workiq_id='current-fy', subject='current fy',
+                start_time=datetime.combine(fiscal_start, datetime.min.time()),
+                meeting_date=fiscal_start,
+                expires_at=now - timedelta(days=4),
+            )
+            today_row = PrefetchedMeeting(
+                workiq_id='today', subject='today', start_time=now,
+                meeting_date=today,
                 expires_at=now + timedelta(days=1),
             )
-            db.session.add_all([old, new])
+            db.session.add_all([old, current_fy, today_row])
             db.session.commit()
 
             purged = meeting_prefetch.purge_expired()
             assert purged == 1
             remaining = {m.workiq_id for m in PrefetchedMeeting.query.all()}
-            assert remaining == {'new'}
+            assert remaining == {'current-fy', 'today'}
 
     def test_keeps_meetings_inside_business_day_aura(self, app, clean_prefetch_tables):
         """Ghost-aura design: rows up to 5 business days back must survive

@@ -338,6 +338,43 @@ def run_migrations(db):
     _add_column_if_not_exists(db, inspector, 'user_preferences',
                               'bucket_taxonomy_notice', "TEXT")
 
+    # Migration: Add activity coverage fields to meetings and MSX tasks
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'milestone_id', 'INTEGER REFERENCES milestones(id)')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'draft_subject', 'VARCHAR(500)')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'draft_description', 'TEXT')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'draft_task_category', 'INTEGER')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'draft_duration_minutes', 'INTEGER')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'enrichment_status', 'VARCHAR(20)')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'enrichment_summary', 'TEXT')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'enrichment_error', 'TEXT')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'enrichment_attempts', 'INTEGER NOT NULL DEFAULT 0')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'enriched_at', 'DATETIME')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'suggested_milestone_id',
+                              'INTEGER REFERENCES milestones(id)')
+    _add_column_if_not_exists(db, inspector, 'prefetched_meetings',
+                              'milestone_match_reason', 'TEXT')
+    _add_column_if_not_exists(db, inspector, 'msx_tasks',
+                              'meeting_id',
+                              'INTEGER REFERENCES prefetched_meetings(id)')
+    if 'msx_tasks' in existing_tables:
+        with db.engine.connect() as conn:
+            conn.execute(text(
+                'CREATE UNIQUE INDEX IF NOT EXISTS ix_msx_tasks_meeting_id '
+                'ON msx_tasks(meeting_id) WHERE meeting_id IS NOT NULL'
+            ))
+            conn.commit()
+
     # =========================================================================
     # End migrations
     # =========================================================================

@@ -1,153 +1,107 @@
-"""
-Tests for MSX auth check banner on MSX-integrated pages.
-Verifies that the auth banner partial is included on all pages with MSX integration,
-and that the admin panel has the browser-based sign-in flow.
-"""
-import pytest
+"""Tests for the global reactive MSX authentication banner."""
 from bs4 import BeautifulSoup
 
 
-class TestMsxAuthBannerPresence:
-    """Tests that the MSX auth banner is present on all MSX-integrated pages."""
+def _dismiss_onboarding():
+    """Dismiss onboarding so it does not interfere with page parsing."""
+    from app.models import UserPreference, db
 
-    def _dismiss_onboarding(self, app):
-        """Dismiss onboarding modal so it doesn't interfere with page parsing."""
-        from app.models import db, UserPreference
-        pref = UserPreference.query.first()
-        pref.first_run_modal_dismissed = True
-        db.session.commit()
+    preference = UserPreference.query.first()
+    preference.first_run_modal_dismissed = True
+    db.session.commit()
+
+
+class TestMsxAuthBannerPresence:
+    """Tests that the global MSX auth banner is present on integrated pages."""
+
+    def _assert_banner(self, response):
+        assert response.status_code == 200
+        soup = BeautifulSoup(response.data, 'html.parser')
+        assert soup.find(id='authRequiredBanner') is not None
+        assert soup.find(id='authSignInBtn') is not None
 
     def test_note_form_has_auth_banner(self, app, client, sample_data):
-        """Test that the new note form includes the MSX auth banner."""
+        """Test that the new note form includes the global auth banner."""
         with app.app_context():
-            self._dismiss_onboarding(app)
+            _dismiss_onboarding()
             from app.models import Customer
+
             customer = Customer.query.first()
-            response = client.get(f'/note/new?customer_id={customer.id}')
-            assert response.status_code == 200
-            soup = BeautifulSoup(response.data, 'html.parser')
-            banner = soup.find(id='msxAuthBanner')
-            assert banner is not None, "MSX auth banner should be present on note form"
-            # Should have sign-in button
-            sign_in_btn = soup.find(id='msxBannerSignInBtn')
-            assert sign_in_btn is not None, "Should have sign-in button"
+            self._assert_banner(client.get(f'/note/new?customer_id={customer.id}'))
 
     def test_fill_my_day_has_auth_banner(self, app, client):
-        """Test that Fill My Day page includes the MSX auth banner."""
+        """Test that Fill My Day includes the global auth banner."""
         with app.app_context():
-            self._dismiss_onboarding(app)
-            response = client.get('/fill-my-day')
-            assert response.status_code == 200
-            soup = BeautifulSoup(response.data, 'html.parser')
-            banner = soup.find(id='msxAuthBanner')
-            assert banner is not None, "MSX auth banner should be present on Fill My Day"
+            _dismiss_onboarding()
+            self._assert_banner(client.get('/fill-my-day'))
 
     def test_milestone_tracker_has_auth_banner(self, app, client):
-        """Test that Milestone Tracker page includes the MSX auth banner."""
+        """Test that Milestone Tracker includes the global auth banner."""
         with app.app_context():
-            self._dismiss_onboarding(app)
-            response = client.get('/reports/milestone-tracker')
-            assert response.status_code == 200
-            soup = BeautifulSoup(response.data, 'html.parser')
-            banner = soup.find(id='msxAuthBanner')
-            assert banner is not None, "MSX auth banner should be present on Milestone Tracker"
+            _dismiss_onboarding()
+            self._assert_banner(client.get('/reports/milestone-tracker'))
 
     def test_milestone_view_has_auth_banner(self, app, client, sample_data):
-        """Test that Milestone View page includes the MSX auth banner."""
+        """Test that Milestone View includes the global auth banner."""
         with app.app_context():
-            self._dismiss_onboarding(app)
-            from app.models import db, Milestone, Customer, User
-            user = User.query.first()
+            _dismiss_onboarding()
+            from app.models import Customer, Milestone, db
+
             customer = Customer.query.first()
             milestone = Milestone(
                 title='Test Milestone',
                 customer_id=customer.id,
-                url='https://example.com'
+                url='https://example.com',
             )
             db.session.add(milestone)
             db.session.commit()
-            
-            response = client.get(f'/milestone/{milestone.id}')
-            assert response.status_code == 200
-            soup = BeautifulSoup(response.data, 'html.parser')
-            banner = soup.find(id='msxAuthBanner')
-            assert banner is not None, "MSX auth banner should be present on Milestone View"
+            self._assert_banner(client.get(f'/milestone/{milestone.id}'))
 
 
 class TestMsxAuthBannerStructure:
-    """Tests for the structure and content of the MSX auth banner."""
+    """Tests for the structure and behavior of the global auth banner."""
 
-    def _dismiss_onboarding(self, app):
-        from app.models import db, UserPreference
-        pref = UserPreference.query.first()
-        pref.first_run_modal_dismissed = True
-        db.session.commit()
-
-    def test_banner_has_all_states(self, app, client):
-        """Test that the auth banner has all required state elements."""
+    def _get_fill_my_day(self, app, client):
         with app.app_context():
-            self._dismiss_onboarding(app)
-            response = client.get('/fill-my-day')
-            assert response.status_code == 200
-            soup = BeautifulSoup(response.data, 'html.parser')
+            _dismiss_onboarding()
+            return client.get('/fill-my-day')
 
-            # Check all state divs exist
-            assert soup.find(id='msxAuthChecking') is not None
-            assert soup.find(id='msxAuthNeeded') is not None
-            assert soup.find(id='msxAuthWaiting') is not None
-            assert soup.find(id='msxAuthSuccess') is not None
-            assert soup.find(id='msxAuthError') is not None
-            assert soup.find(id='msxAuthNoCli') is not None
+    def test_banner_has_status_element(self, app, client):
+        """Test that the banner has a sign-in progress status element."""
+        soup = BeautifulSoup(self._get_fill_my_day(app, client).data, 'html.parser')
+        assert soup.find(id='authBannerStatus') is not None
 
     def test_banner_has_sign_in_button(self, app, client):
-        """Test that the auth banner has a Sign In to Azure button."""
-        with app.app_context():
-            self._dismiss_onboarding(app)
-            response = client.get('/fill-my-day')
-            soup = BeautifulSoup(response.data, 'html.parser')
-            btn = soup.find(id='msxBannerSignInBtn')
-            assert btn is not None
-            assert 'Sign In to Azure' in btn.get_text()
+        """Test that the banner has a Sign In to Azure button."""
+        soup = BeautifulSoup(self._get_fill_my_day(app, client).data, 'html.parser')
+        button = soup.find(id='authSignInBtn')
+        assert button is not None
+        assert 'Sign In to Azure' in button.get_text()
 
-    def test_banner_has_cancel_button(self, app, client):
-        """Test that the auth banner has a Cancel button for the waiting state."""
-        with app.app_context():
-            self._dismiss_onboarding(app)
-            response = client.get('/fill-my-day')
-            soup = BeautifulSoup(response.data, 'html.parser')
-            btn = soup.find(id='msxBannerCancelBtn')
-            assert btn is not None
-            assert 'Cancel' in btn.get_text()
+    def test_banner_uses_reactive_sign_in_flow(self, app, client):
+        """Test that JavaScript starts and completes browser sign-in."""
+        html = self._get_fill_my_day(app, client).data.decode('utf-8')
+        assert 'window.startAuthSignIn' in html
+        assert 'completeAuth' in html
 
-    def test_banner_has_retry_button(self, app, client):
-        """Test that the auth banner has a retry button for the error state."""
-        with app.app_context():
-            self._dismiss_onboarding(app)
-            response = client.get('/fill-my-day')
-            soup = BeautifulSoup(response.data, 'html.parser')
-            btn = soup.find(id='msxBannerRetryBtn')
-            assert btn is not None
-            assert 'Try Again' in btn.get_text()
+    def test_banner_detects_auth_failures_reactively(self, app, client):
+        """Test that failed MSX requests trigger the global banner."""
+        html = self._get_fill_my_day(app, client).data.decode('utf-8')
+        assert 'window.isAuthFailure' in html
+        assert 'window.showAuthBanner' in html
 
     def test_banner_starts_hidden(self, app, client):
-        """Test that the auth banner starts hidden (d-none class)."""
-        with app.app_context():
-            self._dismiss_onboarding(app)
-            response = client.get('/fill-my-day')
-            soup = BeautifulSoup(response.data, 'html.parser')
-            banner = soup.find(id='msxAuthBanner')
-            assert 'd-none' in banner.get('class', [])
+        """Test that the banner starts hidden."""
+        soup = BeautifulSoup(self._get_fill_my_day(app, client).data, 'html.parser')
+        banner = soup.find(id='authRequiredBanner')
+        assert 'd-none' in banner.get('class', [])
 
     def test_banner_has_js_endpoints(self, app, client):
-        """Test that the banner JS references the correct MSX auth endpoints."""
-        with app.app_context():
-            self._dismiss_onboarding(app)
-            response = client.get('/fill-my-day')
-            html = response.data.decode('utf-8')
-            assert '/api/msx/status' in html
-            assert '/api/msx/az-status' in html
-            assert '/api/msx/az-login/start' in html
-            assert '/api/msx/az-login/complete' in html
+        """Test that banner JavaScript references current auth endpoints."""
+        html = self._get_fill_my_day(app, client).data.decode('utf-8')
+        assert '/api/msx/az-status' in html
+        assert '/api/msx/az-login/start' in html
+        assert '/api/msx/az-login/complete' in html
 
 
 class TestAdminPanelAuthFlow:

@@ -228,6 +228,58 @@ const PageHelp = (function () {
         <li>Use the <strong>Milestone Tracker</strong> for a board view</li>
       </ul>
     `},
+    { pattern: /^\/reports\/activity-coverage/, title: 'Activity Coverage', content: `
+      <p>Review every stored fiscal-year meeting, find activities already logged in MSX, and prepare missing activities without leaving Sales Buddy.</p>
+
+      <h6>Meetings and milestones</h6>
+      <p><strong>Meetings</strong> covers calendar activity one meeting at a time. <strong>Milestones</strong> finds active milestones where you are on team but have no HoK task during the current fiscal year. A prepared meeting draft does not count until its MSX activity is created.</p>
+      <ul>
+        <li><strong>Show covered</strong> adds milestones with a current-FY HoK task.</li>
+        <li><strong>Show inactive</strong> adds completed, cancelled, and other inactive milestones.</li>
+        <li><strong>HoK in FYxx</strong> preserves prior-year evidence while leaving the milestone uncovered for current-year reporting.</li>
+        <li><strong>Create HoK Task</strong> creates a standalone open MSX task and never links it to a meeting.</li>
+      </ul>
+
+      <h6>Recommended workflow</h6>
+      <ol>
+        <li><strong>Catch Up Calendar</strong> imports calendar days after the last successful import through today. It adds meetings; it does not create MSX activities.</li>
+        <li><strong>Find Existing Activities</strong> refreshes tasks from MSX and links high-confidence matches to calendar meetings. Run this before creating activities so work already logged in MSX is not duplicated.</li>
+        <li><strong>Match Milestones</strong> first runs the improved account sync once when needed, refreshes milestones, then uses WorkIQ meeting context to prepare a subject, description, activity type, and suggested milestone for each unlogged customer meeting.</li>
+        <li>Use <strong>Prepared</strong> and <strong>Expand All</strong> to audit suggestions. Correct the customer, milestone, activity type, duration, or draft text when needed.</li>
+        <li><strong>Create Activity</strong> creates one open MSX task for that meeting. Nothing is created until you click it.</li>
+      </ol>
+
+      <h6>Weekly and Full FY views</h6>
+      <p><strong>Weekly</strong> keeps review batches small and provides week-by-week navigation. <strong>Full FY</strong> shows every fiscal-year meeting on one page, grouped by month. Matching, calendar import, and existing-activity reconciliation operate across the fiscal year in either view; the toggle only changes what is displayed.</p>
+
+      <h6>Toolbar actions</h6>
+      <table class="table table-sm mb-3">
+        <tbody>
+          <tr><td><strong>Match Milestones</strong></td><td>Prepares unlogged meetings with WorkIQ and suggests milestones. Does not create MSX tasks.</td></tr>
+          <tr><td><strong>Re-run Matching</strong></td><td>Replaces prior AI summaries, drafts, activity types, and milestone suggestions for all unlogged meetings. Customer matches, dismissals, notes, and linked MSX activities stay unchanged.</td></tr>
+          <tr><td><strong>Find Existing Activities</strong></td><td>Imports activities that already exist in MSX and links them to meetings. Does not create activities.</td></tr>
+          <tr><td><strong>Catch Up Calendar</strong></td><td>Imports calendar meetings since the last completed day. Use it after time away or when recent days are missing.</td></tr>
+        </tbody>
+      </table>
+
+      <h6>Reviewing a meeting</h6>
+      <ul>
+        <li><strong>Customer</strong> searches name, nickname, and TPID.</li>
+        <li><strong>Milestone</strong> searches milestone name/number, opportunity, and workload. <span class="badge bg-primary">On Team</span> identifies milestones where you are on the team.</li>
+        <li>A <strong>★</strong> beside an activity type means it qualifies for HoK credit. Preparation prefers a matching HoK type, then falls back to a more accurate non-HoK type when needed.</li>
+        <li><strong>Save</strong> stores your edits without creating anything in MSX.</li>
+        <li><strong>Enrich</strong> refreshes draft text for one meeting. Use <strong>Re-run Matching</strong> when you need to replace preparation across the fiscal year.</li>
+        <li><strong>Dismiss</strong> removes a meeting from coverage. Recurring meetings can be dismissed once or as a series.</li>
+      </ul>
+
+      <h6>Status and filters</h6>
+      <ul>
+        <li><strong>Logged</strong> has an existing linked MSX activity.</li>
+        <li><strong>Ready</strong> has a customer and selected milestone and can be created after review.</li>
+        <li><strong>Customer</strong> or <strong>Milestone</strong> needs manual matching.</li>
+        <li><strong>Prepared</strong> finished WorkIQ preparation; <strong>Failed</strong> needs a retry.</li>
+      </ul>
+    `},
     { pattern: /^\/reports\/milestone-tracker/, title: 'Milestone Tracker', content: `
       <p>Board view of all milestones across your customers, pulled from MSX.</p>
       <h6>Manual Sync</h6>
