@@ -4,6 +4,7 @@ Tests for the backup API endpoints.
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -488,7 +489,10 @@ class TestBackupRunAPI:
 
         # Create a fake DB file
         fake_db = tmp_path / 'salesbuddy.db'
-        fake_db.write_bytes(b'SQLite DB content' * 100)
+        with sqlite3.connect(fake_db) as connection:
+            connection.execute('CREATE TABLE customers (id INTEGER PRIMARY KEY)')
+            connection.execute('CREATE TABLE test_data (value TEXT)')
+            connection.execute('INSERT INTO test_data VALUES (?)', ('backup',))
 
         with app.app_context():
             from app.models import UserPreference, db
@@ -516,7 +520,9 @@ class TestBackupRunAPI:
         backup_dir.mkdir(parents=True)
 
         fake_db = tmp_path / 'salesbuddy.db'
-        fake_db.write_bytes(b'test database content')
+        with sqlite3.connect(fake_db) as connection:
+            connection.execute('CREATE TABLE customers (id INTEGER PRIMARY KEY)')
+            connection.execute('CREATE TABLE test_data (value TEXT)')
 
         with app.app_context():
             from app.models import UserPreference, db
@@ -530,7 +536,11 @@ class TestBackupRunAPI:
         assert response.status_code == 200
         backup_files = list(backup_dir.glob('salesbuddy_*.db'))
         assert len(backup_files) == 1
-        assert backup_files[0].read_bytes() == b'test database content'
+        with sqlite3.connect(backup_files[0]) as connection:
+            assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+            assert connection.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'test_data'"
+            ).fetchone() == ('test_data',)
 
         # Clean up
         with app.app_context():
