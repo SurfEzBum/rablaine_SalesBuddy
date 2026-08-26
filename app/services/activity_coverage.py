@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import logging
+import json
+import os
 import re
 import threading
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any
@@ -14,12 +17,14 @@ from flask import Flask
 from app.models import (
     ActivityCoveragePopulation,
     Customer,
+    Job,
     Milestone,
     MilestoneCoverageDraft,
     MsxTask,
     PrefetchedMeeting,
     db,
 )
+from app.services.job_queue import enqueue, job_handler
 from app.services.msx_api import HOK_TASK_CATEGORIES, TASK_CATEGORIES
 
 logger = logging.getLogger(__name__)
@@ -30,18 +35,10 @@ _CATEGORY_VALUES = {item['value'] for item in TASK_CATEGORIES}
 _CATEGORY_NAMES = {item['value']: item['label'] for item in TASK_CATEGORIES}
 _DATE_SYNC_ATTEMPTS = 3
 _DATE_RETRY_DELAYS = (2, 5)
+_POPULATION_JOB_TYPE = 'activity_coverage_population'
+_POPULATION_DEDUPE_KEY = 'activity-coverage-population'
+_WORKIQ_IMPORT_WORKERS = 5
 
-_import_lock = threading.Lock()
-_import_state_lock = threading.Lock()
-_import_state: dict[str, Any] = {
-    'running': False,
-    'current_date': None,
-    'completed_count': 0,
-    'total_dates': 0,
-    'attempt': 0,
-    'retrying': False,
-    'error': None,
-}
 _create_lock = threading.Lock()
 _milestone_create_lock = threading.Lock()
 _reconcile_lock = threading.Lock()
@@ -56,6 +53,26 @@ _reconcile_state: dict[str, Any] = {
     'tasks_updated': 0,
     'error': None,
 }
+
+
+def _force_workiq_in_development() -> bool:
+    """Return whether dev calendar imports should bypass Outlook."""
+    return (
+        os.environ.get('FLASK_ENV', '').strip().lower() == 'development'
+        and os.environ.get('SALESBUDDY_CALENDAR_SOURCE', '').strip().lower()
+        == 'workiq'
+    )
+
+
+def _recent_weekdays(today: date, count: int) -> list[date]:
+    """Return the latest weekdays through today in ascending order."""
+    dates = []
+    current = today
+    while len(dates) < count:
+        if current.weekday() < 5:
+            dates.append(current)
+        current -= timedelta(days=1)
+    return list(reversed(dates))
 
 
 def _normalized_subject(value: str) -> str:
@@ -855,12 +872,26 @@ def get_population_status(today: date | None = None) -> dict[str, Any]:
     populated_through = row.populated_through if row else None
     pending = _population_dates(populated_through, today)
     _, fiscal_end = fiscal_year_bounds(today)
-    with _import_state_lock:
-        live = dict(_import_state)
+    active_job = _active_population_job()
+    job_dates: list[date] = []
+    if active_job and active_job.payload:
+        try:
+            payload = json.loads(active_job.payload)
+            job_dates = [date.fromisoformat(value) for value in payload.get('dates', [])]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            logger.warning('Could not parse calendar import job %s payload', active_job.id)
+    completed_count = sum(
+        populated_through is not None and value <= populated_through
+        for value in job_dates
+    )
+    current_date = next(
+        (value for value in job_dates if populated_through is None or value > populated_through),
+        None,
+    )
 
-    if live['running']:
+    if active_job:
         label = 'Populating'
-        detail = f"{live['completed_count']} of {live['total_dates']} days"
+        detail = f'{completed_count} of {len(job_dates)} days'
     elif populated_through is None:
         label = f'Import FY{fiscal_end.year % 100:02d} Calendar'
         detail = f'{len(pending)} weekdays through today'
@@ -871,25 +902,41 @@ def get_population_status(today: date | None = None) -> dict[str, Any]:
             if row and row.last_error
             else f'Since {populated_through.strftime("%b %d")} · {len(pending)} weekdays'
         )
+    elif _force_workiq_in_development():
+        label = 'Test WorkIQ Import'
+        detail = f'Re-import latest {_WORKIQ_IMPORT_WORKERS} weekdays'
     else:
         label = 'Up to date'
         detail = f'Through {populated_through.strftime("%b %d")}'
 
     return {
-        **live,
+        'running': bool(active_job),
+        'current_date': current_date.isoformat() if current_date else None,
+        'completed_count': completed_count,
+        'total_dates': len(job_dates),
+        'attempt': active_job.attempts if active_job else 0,
+        'retrying': bool(active_job and active_job.attempts > 1),
         'label': label,
         'detail': detail,
-        'can_start': bool(pending) and not live['running'],
+        'can_start': (
+            bool(pending) or _force_workiq_in_development()
+        ) and not active_job,
         'populated_through': populated_through.isoformat() if populated_through else None,
         'last_completed_at': row.last_completed_at.isoformat() if row and row.last_completed_at else None,
         'pending_count': len(pending),
-        'error': live['error'] or (row.last_error if row else None),
+        'error': row.last_error if row else None,
     }
 
 
-def _set_import_state(**values: Any) -> None:
-    with _import_state_lock:
-        _import_state.update(values)
+def _active_population_job() -> Job | None:
+    """Return pending or running durable calendar population job."""
+    return (
+        Job.query
+        .filter(Job.job_type == _POPULATION_JOB_TYPE)
+        .filter(Job.status.in_([Job.STATUS_PENDING, Job.STATUS_RUNNING]))
+        .order_by(Job.id.desc())
+        .first()
+    )
 
 
 def _wait_before_retry(seconds: int) -> None:
@@ -903,7 +950,6 @@ def _sync_date_with_retries(target_str: str) -> str | None:
 
     last_error = None
     for attempt in range(1, _DATE_SYNC_ATTEMPTS + 1):
-        _set_import_state(attempt=attempt, retrying=attempt > 1)
         try:
             _, last_error = sync_meetings_for_date(target_str)
         except Exception as exc:  # noqa: BLE001
@@ -913,7 +959,6 @@ def _sync_date_with_retries(target_str: str) -> str | None:
             )
             last_error = str(exc) or exc.__class__.__name__
         if not last_error:
-            _set_import_state(attempt=0, retrying=False)
             return None
         logger.warning(
             'Activity coverage sync attempt %d/%d failed for %s: %s',
@@ -921,7 +966,6 @@ def _sync_date_with_retries(target_str: str) -> str | None:
         )
         if attempt < _DATE_SYNC_ATTEMPTS:
             _wait_before_retry(_DATE_RETRY_DELAYS[attempt - 1])
-    _set_import_state(attempt=0, retrying=False)
     return last_error
 
 
@@ -933,63 +977,128 @@ def populate_fiscal_year(today: date | None = None) -> dict[str, Any]:
     row.last_started_at = datetime.now(timezone.utc)
     row.last_error = None
     db.session.commit()
-    _set_import_state(
-        total_dates=len(dates), completed_count=0,
-        attempt=0, retrying=False, error=None,
-    )
 
-    for index, target in enumerate(dates, start=1):
+    for target in dates:
         target_str = target.isoformat()
-        _set_import_state(current_date=target_str)
         error = _sync_date_with_retries(target_str)
         if error:
             row.last_error = (
                 f'Paused at {target_str} after {_DATE_SYNC_ATTEMPTS} attempts: {error}'
             )
             db.session.commit()
-            _set_import_state(error=row.last_error)
-            return {'completed_count': index - 1, 'error': row.last_error}
+            return {
+                'completed_count': sum(value < target for value in dates),
+                'error': row.last_error,
+            }
         row.populated_through = target
         row.last_error = None
         db.session.commit()
-        _set_import_state(completed_count=index)
 
     row.last_completed_at = datetime.now(timezone.utc)
     db.session.commit()
     return {'completed_count': len(dates), 'error': None}
 
 
-def _population_worker(app: Flask) -> None:
-    with _import_lock:
-        try:
-            with app.app_context():
-                populate_fiscal_year()
-        except Exception as exc:  # noqa: BLE001
-            logger.exception('Activity coverage population failed')
-            _set_import_state(error=str(exc))
-        finally:
-            _set_import_state(running=False, current_date=None)
+def _fetch_workiq_date_with_retries(
+    target: date,
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    """Fetch one WorkIQ date with calendar-level transient retries."""
+    from app.services.meeting_prefetch import fetch_workiq_meetings_for_date
+
+    last_error = None
+    for attempt in range(1, _DATE_SYNC_ATTEMPTS + 1):
+        meetings, last_error = fetch_workiq_meetings_for_date(target.isoformat())
+        if not last_error:
+            return meetings, None
+        if attempt < _DATE_SYNC_ATTEMPTS:
+            _wait_before_retry(_DATE_RETRY_DELAYS[attempt - 1])
+    return None, last_error
+
+
+def _populate_fiscal_year_from_workiq(today: date) -> dict[str, Any]:
+    """Fetch WorkIQ dates five at a time and persist each batch serially."""
+    from app.services.meeting_sync import sync_meetings_for_date
+
+    row = _population_row(today, create=True)
+    dates = _population_dates(row.populated_through, today)
+    row.last_started_at = datetime.now(timezone.utc)
+    row.last_error = None
+    db.session.commit()
+    completed_count = 0
+
+    for offset in range(0, len(dates), _WORKIQ_IMPORT_WORKERS):
+        batch = dates[offset:offset + _WORKIQ_IMPORT_WORKERS]
+        with ThreadPoolExecutor(max_workers=_WORKIQ_IMPORT_WORKERS) as executor:
+            fetched = list(executor.map(_fetch_workiq_date_with_retries, batch))
+
+        for target, (meetings, fetch_error) in zip(batch, fetched):
+            if fetch_error or meetings is None:
+                row.last_error = (
+                    f'Paused at {target.isoformat()} after '
+                    f'{_DATE_SYNC_ATTEMPTS} attempts: {fetch_error}'
+                )
+                db.session.commit()
+                raise RuntimeError(row.last_error)
+
+            _, store_error = sync_meetings_for_date(
+                target.isoformat(),
+                prefetched_meetings=meetings,
+            )
+            if store_error:
+                row.last_error = f'Paused at {target.isoformat()}: {store_error}'
+                db.session.commit()
+                raise RuntimeError(row.last_error)
+
+            row.populated_through = target
+            row.last_error = None
+            db.session.commit()
+            completed_count += 1
+
+    row.last_completed_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return {'completed_count': completed_count, 'error': None, 'source': 'workiq'}
+
+
+@job_handler(_POPULATION_JOB_TYPE)
+def process_population_job(payload: dict[str, Any]) -> dict[str, Any]:
+    """Run durable calendar population using Outlook or parallel WorkIQ."""
+    through = date.fromisoformat(payload['through'])
+    from app.services.outlook_calendar import corporate_outlook_available
+
+    force_workiq = _force_workiq_in_development()
+    if force_workiq:
+        logger.info('Calendar population source forced to WorkIQ in development')
+    elif corporate_outlook_available():
+        result = populate_fiscal_year(through)
+        result['source'] = 'outlook'
+        return result
+    return _populate_fiscal_year_from_workiq(through)
 
 
 def start_population(app: Flask) -> bool:
-    """Start one resumable background fiscal-year population."""
+    """Queue one resumable durable fiscal-year population job."""
     status = get_population_status()
-    if _import_lock.locked() or status['running'] or not status['can_start']:
+    if status['running'] or not status['can_start']:
         return False
-    _set_import_state(
-        running=True,
-        current_date=None,
-        completed_count=0,
-        total_dates=0,
-        attempt=0,
-        retrying=False,
-        error=None,
+    today = date.today()
+    row = _population_row(today, create=_force_workiq_in_development())
+    if _force_workiq_in_development() and not _population_dates(
+        row.populated_through if row else None,
+        today,
+    ):
+        test_dates = _recent_weekdays(today, _WORKIQ_IMPORT_WORKERS)
+        row.populated_through = test_dates[0] - timedelta(days=1)
+        row.last_completed_at = None
+        row.last_error = None
+        db.session.commit()
+    dates = _population_dates(row.populated_through if row else None, today)
+    enqueue(
+        _POPULATION_JOB_TYPE,
+        {
+            'through': today.isoformat(),
+            'dates': [value.isoformat() for value in dates],
+        },
+        dedupe_key=_POPULATION_DEDUPE_KEY,
+        max_attempts=3,
     )
-    thread = threading.Thread(
-        target=_population_worker,
-        args=(app,),
-        daemon=True,
-        name='activity-coverage-import',
-    )
-    thread.start()
     return True

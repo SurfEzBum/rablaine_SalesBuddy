@@ -8,6 +8,11 @@ brought the change into `main`, so the admin Updates card can show
 Format: `## M/D/YYYY - <merge-short-sha>`. See
 `scripts/tag-changelog.ps1` for the helper that fills this in.
 
+## 8/25/2026
+
+- Make fiscal-year calendar imports durable across restarts and run WorkIQ meeting queries in reliable five-day parallel batches, reducing week import time while preserving fast Outlook imports and per-day checkpoints.
+- Treat empty WorkIQ process output as a retryable import failure instead of pausing with a `NoneType` error.
+
 ## 8/25/2026 - 701e2db
 
 - Use configured corporate Outlook calendars for fast, deterministic historical meeting imports, with safe WorkIQ fallback when classic Outlook is unavailable or belongs only to a personal account.

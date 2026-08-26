@@ -100,6 +100,33 @@ def reset_outlook_availability() -> None:
         _unavailable_until = 0.0
 
 
+def corporate_outlook_available() -> bool:
+    """Return whether a configured Microsoft Outlook calendar can be opened."""
+    try:
+        _raise_if_circuit_open()
+        if not _configured_profile_name():
+            raise OutlookCalendarUnavailable(
+                'Classic Outlook has no configured default profile',
+            )
+
+        import pythoncom
+        import win32com.client
+
+        pythoncom.CoInitialize()
+        try:
+            outlook = win32com.client.Dispatch('Outlook.Application')
+            namespace = outlook.GetNamespace('MAPI')
+            _corporate_calendar_items(namespace)
+            return True
+        finally:
+            pythoncom.CoUninitialize()
+    except Exception as exc:  # noqa: BLE001
+        reason = str(exc) or exc.__class__.__name__
+        _mark_unavailable(reason)
+        logger.info('Corporate Outlook calendar unavailable: %s', reason)
+        return False
+
+
 def _smtp_address(address_entry: Any) -> str | None:
     """Return an SMTP address from an Outlook address entry."""
     if address_entry is None:

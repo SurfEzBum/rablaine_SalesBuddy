@@ -462,35 +462,49 @@ def query_workiq(question: str, timeout: int = 120,
                 shell=False
             )
         
+        stdout = result.stdout or ''
+        stderr = result.stderr or ''
         if result.returncode != 0:
-            logger.error(f"WorkIQ error: {result.stderr}")
+            logger.error(f"WorkIQ error: {stderr}")
             _record_workiq_failure(operation, 'nonzero_exit',
                                    duration_ms=(time.perf_counter() - started) * 1000)
-            raise RuntimeError(f"WorkIQ query failed: {result.stderr}")
+            raise RuntimeError(f"WorkIQ query failed: {stderr}")
         
         # Auto-accept EULA if WorkIQ prompts for it, then retry the query
-        if 'accept-eula' in result.stdout.lower() or 'end user license' in result.stdout.lower():
+        if 'accept-eula' in stdout.lower() or 'end user license' in stdout.lower():
             logger.info("WorkIQ EULA not yet accepted — auto-accepting...")
             eula_cmd = [npx_path, "-y", "@microsoft/workiq", "accept-eula"]
             eula_result = subprocess.run(
                 eula_cmd, capture_output=True, text=True, timeout=30, shell=False
             )
-            logger.info(f"EULA acceptance result: {eula_result.stdout.strip()}")
+            eula_stdout = eula_result.stdout or ''
+            eula_stderr = eula_result.stderr or ''
+            logger.info(f"EULA acceptance result: {eula_stdout.strip()}")
             if eula_result.returncode != 0:
                 _record_workiq_failure(operation, 'eula_failed',
                                        duration_ms=(time.perf_counter() - started) * 1000)
-                raise RuntimeError(f"Failed to accept WorkIQ EULA: {eula_result.stderr}")
+                raise RuntimeError(f"Failed to accept WorkIQ EULA: {eula_stderr}")
             # Retry the original query
             logger.info("Retrying WorkIQ query after EULA acceptance...")
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=timeout, shell=False
             )
+            stdout = result.stdout or ''
+            stderr = result.stderr or ''
             if result.returncode != 0:
                 _record_workiq_failure(operation, 'nonzero_exit',
                                        duration_ms=(time.perf_counter() - started) * 1000)
-                raise RuntimeError(f"WorkIQ query failed after EULA acceptance: {result.stderr}")
+                raise RuntimeError(f"WorkIQ query failed after EULA acceptance: {stderr}")
         
-        logger.info(f"WorkIQ response received ({len(result.stdout)} chars)")
+        logger.info(f"WorkIQ response received ({len(stdout)} chars)")
+
+        if not stdout.strip():
+            _record_workiq_failure(
+                operation,
+                'server_error',
+                duration_ms=(time.perf_counter() - started) * 1000,
+            )
+            raise RuntimeError('WorkIQ returned an empty response')
 
         # Strip ANSI color escape sequences AND OSC 8 hyperlinks. WorkIQ
         # wraps every line of its output in `\x1b[90m...\x1b[0m` (gray)
@@ -500,7 +514,7 @@ def query_workiq(question: str, timeout: int = 120,
         # `powershell -Command`. These escapes are invisible in the
         # terminal but break every JSON parser downstream and bleed into
         # summary text as garbage like `]8;;https://...]8;;\`.
-        stdout = _strip_terminal_escapes(result.stdout)
+        stdout = _strip_terminal_escapes(stdout)
 
         # Detect WorkIQ server errors returned as stdout with exit code 0
         output = stdout.strip()

@@ -754,8 +754,6 @@ def prefetch_for_date_full(
     it here lets the legacy DailyMeetingCache be populated from the SAME
     WorkIQ call instead of making a second one.
     """
-    from app.services.workiq_service import query_workiq
-
     try:
         target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
     except ValueError as exc:
@@ -784,58 +782,72 @@ def prefetch_for_date_full(
                 exc_info=True,
             )
 
+    if raw_meetings is None:
+        raw_meetings, error = fetch_workiq_meetings_for_date(date_str)
+        if error:
+            return 0, [], error
+
+    return store_prefetched_meetings_for_date(date_str, raw_meetings)
+
+
+def fetch_workiq_meetings_for_date(
+    date_str: str,
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    """Fetch and parse one date from WorkIQ without touching the database."""
+    from app.services.workiq_service import query_workiq
+
     prompt = _build_prompt(date_str)
     # WorkIQ sometimes ignores the JSON contract and returns its legacy
     # markdown table. Parse that response in place, then make one explicit
     # markdown-table request if needed. Repeating the same JSON prompt three
     # times proved both slow and unreliable for historical dates.
     last_parse_error: Optional[str] = None
+    raw_meetings: Optional[List[Dict[str, Any]]] = None
+    logger.info("Prefetch: querying WorkIQ for %s", date_str)
+    try:
+        # Today JSON observed at 131s in Phase 0 probe; give 240s headroom.
+        response = query_workiq(prompt, timeout=240, operation='meeting_list')
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Prefetch: WorkIQ call failed for %s: %s", date_str, exc)
+        return None, str(exc)
+
+    try:
+        raw_meetings = _extract_json_array(response)
+    except ValueError as exc:
+        last_parse_error = str(exc)
+        logger.warning(
+            'Prefetch: JSON parse failed for %s; retrying once: %s',
+            date_str, exc,
+        )
+        try:
+            retry_response = query_workiq(
+                prompt,
+                timeout=240,
+                operation='meeting_list',
+            )
+            raw_meetings = _extract_json_array(retry_response)
+        except Exception as retry_exc:  # noqa: BLE001
+            last_parse_error = str(retry_exc)
+
     if raw_meetings is None:
-        logger.info("Prefetch: querying WorkIQ for %s", date_str)
-        try:
-            # Today JSON observed at 131s in Phase 0 probe; give 240s headroom.
-            response = query_workiq(prompt, timeout=240, operation='meeting_list')
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Prefetch: WorkIQ call failed for %s: %s", date_str, exc)
-            return 0, [], str(exc)
-
-        try:
-            raw_meetings = _extract_json_array(response)
-        except ValueError as exc:
-            last_parse_error = str(exc)
-            logger.warning(
-                'Prefetch: JSON parse failed for %s; retrying once: %s',
-                date_str, exc,
-            )
-            try:
-                retry_response = query_workiq(
-                    prompt,
-                    timeout=240,
-                    operation='meeting_list',
-                )
-                raw_meetings = _extract_json_array(retry_response)
-            except Exception as retry_exc:  # noqa: BLE001
-                last_parse_error = str(retry_exc)
-
+        from app.services.workiq_service import (
+            _parse_meetings_response,
+            get_meetings_for_date,
+        )
+        raw_meetings = _legacy_meetings_to_raw(
+            _parse_meetings_response(response, date_str),
+        ) or None
         if raw_meetings is None:
-            from app.services.workiq_service import (
-                _parse_meetings_response,
-                get_meetings_for_date,
+            logger.warning(
+                "Prefetch: JSON parsing failed for %s; trying markdown fallback: %s",
+                date_str, last_parse_error,
             )
-            raw_meetings = _legacy_meetings_to_raw(
-                _parse_meetings_response(response, date_str),
-            ) or None
+            legacy_meetings, _ = get_meetings_for_date(date_str)
+            raw_meetings = _legacy_meetings_to_raw(legacy_meetings) or None
             if raw_meetings is None:
-                logger.warning(
-                    "Prefetch: JSON parsing failed for %s; trying markdown fallback: %s",
-                    date_str, last_parse_error,
+                last_parse_error = (
+                    f'{last_parse_error}; markdown fallback returned no meetings'
                 )
-                legacy_meetings, _ = get_meetings_for_date(date_str)
-                raw_meetings = _legacy_meetings_to_raw(legacy_meetings) or None
-                if raw_meetings is None:
-                    last_parse_error = (
-                        f'{last_parse_error}; markdown fallback returned no meetings'
-                    )
 
     if raw_meetings is None:
         # Both formats returned unusable data. Preserve existing rows
@@ -850,7 +862,20 @@ def prefetch_for_date_full(
             "Prefetch: JSON and markdown parsing failed for %s: %s",
             date_str, last_parse_error,
         )
-        return 0, [], f"JSON and markdown parsing failed: {last_parse_error}"
+        return None, f"JSON and markdown parsing failed: {last_parse_error}"
+
+    return raw_meetings, None
+
+
+def store_prefetched_meetings_for_date(
+    date_str: str,
+    raw_meetings: List[Dict[str, Any]],
+) -> Tuple[int, List[Dict[str, Any]], Optional[str]]:
+    """Upsert already-fetched meetings for one date into local caches."""
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError as exc:
+        return 0, [], f"Bad date: {exc}"
 
     if not raw_meetings:
         logger.warning("Prefetch: empty meeting list for %s", date_str)

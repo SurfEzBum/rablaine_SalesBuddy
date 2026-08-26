@@ -1,4 +1,6 @@
 """Tests for meeting-to-MSX activity coverage."""
+import json
+import threading
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -150,7 +152,11 @@ def test_current_fy_hok_controls_covered_filter(app, coverage_data):
 def test_create_standalone_milestone_hok_is_idempotent(app, coverage_data):
     """Saved standalone draft creates one unlinked HoK task and retries return it."""
     with app.app_context():
-        scheduled_start = datetime.now(timezone.utc).replace(microsecond=0)
+        scheduled_start = datetime.combine(
+            date.today(),
+            datetime.min.time(),
+            tzinfo=timezone.utc,
+        )
         draft = activity_coverage.update_milestone_coverage_draft(
             coverage_data['milestone_id'],
             {
@@ -198,7 +204,11 @@ def test_milestone_draft_rejects_non_hok_category(app, coverage_data):
                 'description': 'Followed up with customer.',
                 'task_category': 861980000,
                 'duration_minutes': 30,
-                'scheduled_start': datetime.now(timezone.utc).isoformat(),
+                'scheduled_start': datetime.combine(
+                    date.today(),
+                    datetime.min.time(),
+                    tzinfo=timezone.utc,
+                ).isoformat(),
             },
         )
 
@@ -253,7 +263,11 @@ def test_milestone_coverage_draft_api_rejects_non_hok(
         'description': 'Followed up with customer.',
         'task_category': 861980000,
         'duration_minutes': 30,
-        'scheduled_start': datetime.now(timezone.utc).isoformat(),
+        'scheduled_start': datetime.combine(
+            date.today(),
+            datetime.min.time(),
+            tzinfo=timezone.utc,
+        ).isoformat(),
     }
     response = client.patch(
         f"/api/reports/activity-coverage/milestones/{coverage_data['milestone_id']}/draft",
@@ -278,7 +292,11 @@ def test_milestone_coverage_create_api_creates_unlinked_hok(
                 'description': 'Led customer engineers through implementation.',
                 'task_category': 606820007,
                 'duration_minutes': 120,
-                'scheduled_start': datetime.now(timezone.utc).isoformat(),
+                'scheduled_start': datetime.combine(
+                    date.today(),
+                    datetime.min.time(),
+                    tzinfo=timezone.utc,
+                ).isoformat(),
             },
         )
 
@@ -937,6 +955,277 @@ def test_population_pauses_after_retries_and_resumes(app):
             ]
             assert row.populated_through == date(2026, 7, 3)
         finally:
+            ActivityCoveragePopulation.query.delete()
+            db.session.commit()
+
+
+def test_workiq_population_fetches_five_days_concurrently(app):
+    """WorkIQ network calls overlap while database writes remain date ordered."""
+    with app.app_context():
+        ActivityCoveragePopulation.query.delete()
+        db.session.commit()
+        barrier = threading.Barrier(5)
+        state_lock = threading.Lock()
+        active = 0
+        max_active = 0
+
+        def fetch_day(date_str):
+            nonlocal active, max_active
+            with state_lock:
+                active += 1
+                max_active = max(max_active, active)
+            barrier.wait(timeout=5)
+            with state_lock:
+                active -= 1
+            return [{'subject': date_str}], None
+
+        try:
+            with patch(
+                'app.services.meeting_prefetch.fetch_workiq_meetings_for_date',
+                side_effect=fetch_day,
+            ), patch(
+                'app.services.meeting_sync.sync_meetings_for_date',
+                return_value=([], None),
+            ) as store:
+                result = activity_coverage._populate_fiscal_year_from_workiq(
+                    date(2026, 7, 7),
+                )
+
+            assert result == {
+                'completed_count': 5,
+                'error': None,
+                'source': 'workiq',
+            }
+            assert max_active == 5
+            assert [call.args[0] for call in store.call_args_list] == [
+                '2026-07-01',
+                '2026-07-02',
+                '2026-07-03',
+                '2026-07-06',
+                '2026-07-07',
+            ]
+            assert all('prefetched_meetings' in call.kwargs for call in store.call_args_list)
+            row = db.session.get(ActivityCoveragePopulation, 1)
+            assert row.populated_through == date(2026, 7, 7)
+        finally:
+            ActivityCoveragePopulation.query.delete()
+            db.session.commit()
+
+
+def test_workiq_population_retry_resumes_from_failed_date(app):
+    """A failed parallel batch retains earlier serial checkpoints for retry."""
+    with app.app_context():
+        ActivityCoveragePopulation.query.delete()
+        db.session.commit()
+
+        def fetch_day(date_str):
+            if date_str == '2026-07-03':
+                return None, 'WorkIQ timeout'
+            return [{'subject': date_str}], None
+
+        try:
+            with patch(
+                'app.services.meeting_prefetch.fetch_workiq_meetings_for_date',
+                side_effect=fetch_day,
+            ), patch(
+                'app.services.activity_coverage._wait_before_retry',
+            ), patch(
+                'app.services.meeting_sync.sync_meetings_for_date',
+                return_value=([], None),
+            ) as store:
+                with pytest.raises(RuntimeError, match='Paused at 2026-07-03'):
+                    activity_coverage._populate_fiscal_year_from_workiq(
+                        date(2026, 7, 7),
+                    )
+
+            assert [call.args[0] for call in store.call_args_list] == [
+                '2026-07-01',
+                '2026-07-02',
+            ]
+            row = db.session.get(ActivityCoveragePopulation, 1)
+            assert row.populated_through == date(2026, 7, 2)
+
+            with patch(
+                'app.services.meeting_prefetch.fetch_workiq_meetings_for_date',
+                side_effect=lambda date_str: ([{'subject': date_str}], None),
+            ) as fetch, patch(
+                'app.services.meeting_sync.sync_meetings_for_date',
+                return_value=([], None),
+            ):
+                result = activity_coverage._populate_fiscal_year_from_workiq(
+                    date(2026, 7, 7),
+                )
+
+            assert result['completed_count'] == 3
+            assert [call.args[0] for call in fetch.call_args_list] == [
+                '2026-07-03',
+                '2026-07-06',
+                '2026-07-07',
+            ]
+            assert row.populated_through == date(2026, 7, 7)
+        finally:
+            ActivityCoveragePopulation.query.delete()
+            db.session.commit()
+
+
+def test_population_status_reads_durable_pending_job(app):
+    """Progress survives web navigation and process restart through SQLite."""
+    with app.app_context():
+        ActivityCoveragePopulation.query.delete()
+        Job.query.filter_by(job_type='activity_coverage_population').delete()
+        row = ActivityCoveragePopulation(
+            id=1,
+            fiscal_year_end=2027,
+            populated_through=date(2026, 7, 2),
+        )
+        job = Job(
+            job_type='activity_coverage_population',
+            status=Job.STATUS_PENDING,
+            payload=(
+                '{"through":"2026-07-07","dates":['
+                '"2026-07-01","2026-07-02","2026-07-03",'
+                '"2026-07-06","2026-07-07"]}'
+            ),
+        )
+        db.session.add_all([row, job])
+        db.session.commit()
+        try:
+            status = activity_coverage.get_population_status(date(2026, 7, 7))
+
+            assert status['running'] is True
+            assert status['completed_count'] == 2
+            assert status['total_dates'] == 5
+            assert status['current_date'] == '2026-07-03'
+            assert status['can_start'] is False
+        finally:
+            Job.query.filter_by(job_type='activity_coverage_population').delete()
+            ActivityCoveragePopulation.query.delete()
+            db.session.commit()
+
+
+def test_start_population_enqueues_one_durable_job(app):
+    """Calendar start uses queue dedupe instead of a web-process thread."""
+    from app.services.job_queue import get_handler
+
+    with app.app_context():
+        ActivityCoveragePopulation.query.delete()
+        Job.query.filter_by(job_type='activity_coverage_population').delete()
+        db.session.commit()
+        try:
+            assert activity_coverage.start_population(app) is True
+            assert activity_coverage.start_population(app) is False
+
+            jobs = Job.query.filter_by(
+                job_type='activity_coverage_population',
+            ).all()
+            assert len(jobs) == 1
+            assert jobs[0].status == Job.STATUS_PENDING
+            assert jobs[0].dedupe_key == 'activity-coverage-population'
+            assert get_handler('activity_coverage_population') is (
+                activity_coverage.process_population_job
+            )
+        finally:
+            Job.query.filter_by(job_type='activity_coverage_population').delete()
+            ActivityCoveragePopulation.query.delete()
+            db.session.commit()
+
+
+def test_population_job_uses_outlook_when_corporate_calendar_is_available(app):
+    """Fast Outlook imports remain sequential inside durable job handler."""
+    with app.app_context(), patch(
+        'app.services.outlook_calendar.corporate_outlook_available',
+        return_value=True,
+    ), patch(
+        'app.services.activity_coverage.populate_fiscal_year',
+        return_value={'completed_count': 5, 'error': None},
+    ) as populate:
+        result = activity_coverage.process_population_job({
+            'through': '2026-07-07',
+        })
+
+    assert result == {
+        'completed_count': 5,
+        'error': None,
+        'source': 'outlook',
+    }
+    populate.assert_called_once_with(date(2026, 7, 7))
+
+
+def test_population_job_can_force_workiq_in_development(app, monkeypatch):
+    """Development override exercises WorkIQ even when Outlook is available."""
+    monkeypatch.setenv('FLASK_ENV', 'development')
+    monkeypatch.setenv('SALESBUDDY_CALENDAR_SOURCE', 'workiq')
+    with app.app_context(), patch(
+        'app.services.outlook_calendar.corporate_outlook_available',
+    ) as outlook_available, patch(
+        'app.services.activity_coverage._populate_fiscal_year_from_workiq',
+        return_value={'completed_count': 5, 'error': None, 'source': 'workiq'},
+    ) as populate:
+        result = activity_coverage.process_population_job({
+            'through': '2026-07-07',
+        })
+
+    assert result['source'] == 'workiq'
+    outlook_available.assert_not_called()
+    populate.assert_called_once_with(date(2026, 7, 7))
+
+
+def test_population_job_ignores_workiq_override_outside_development(
+    app,
+    monkeypatch,
+):
+    """Production keeps automatic Outlook-first source selection."""
+    monkeypatch.setenv('FLASK_ENV', 'production')
+    monkeypatch.setenv('SALESBUDDY_CALENDAR_SOURCE', 'workiq')
+    with app.app_context(), patch(
+        'app.services.outlook_calendar.corporate_outlook_available',
+        return_value=True,
+    ) as outlook_available, patch(
+        'app.services.activity_coverage.populate_fiscal_year',
+        return_value={'completed_count': 5, 'error': None},
+    ) as populate:
+        result = activity_coverage.process_population_job({
+            'through': '2026-07-07',
+        })
+
+    assert result['source'] == 'outlook'
+    outlook_available.assert_called_once_with()
+    populate.assert_called_once_with(date(2026, 7, 7))
+
+
+def test_workiq_development_override_enables_five_day_reimport(
+    app,
+    monkeypatch,
+):
+    """Up-to-date dev databases expose a repeatable five-worker test run."""
+    monkeypatch.setenv('FLASK_ENV', 'development')
+    monkeypatch.setenv('SALESBUDDY_CALENDAR_SOURCE', 'workiq')
+    with app.app_context():
+        ActivityCoveragePopulation.query.delete()
+        Job.query.filter_by(job_type='activity_coverage_population').delete()
+        db.session.add(ActivityCoveragePopulation(
+            id=1,
+            fiscal_year_end=2027,
+            populated_through=date.today(),
+        ))
+        db.session.commit()
+        try:
+            status = activity_coverage.get_population_status()
+            assert status['can_start'] is True
+            assert status['label'] == 'Test WorkIQ Import'
+            assert status['detail'] == 'Re-import latest 5 weekdays'
+
+            assert activity_coverage.start_population(app) is True
+            job = Job.query.filter_by(
+                job_type='activity_coverage_population',
+            ).one()
+            payload = json.loads(job.payload)
+            expected_dates = activity_coverage._recent_weekdays(date.today(), 5)
+            assert payload['dates'] == [value.isoformat() for value in expected_dates]
+            row = db.session.get(ActivityCoveragePopulation, 1)
+            assert row.populated_through == expected_dates[0] - timedelta(days=1)
+        finally:
+            Job.query.filter_by(job_type='activity_coverage_population').delete()
             ActivityCoveragePopulation.query.delete()
             db.session.commit()
 

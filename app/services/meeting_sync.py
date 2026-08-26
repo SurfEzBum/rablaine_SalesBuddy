@@ -63,7 +63,10 @@ def _clear_sync_state() -> None:
         })
 
 
-def sync_meetings_for_date(date_str: str) -> tuple[list, str | None]:
+def sync_meetings_for_date(
+    date_str: str,
+    prefetched_meetings: list[dict[str, Any]] | None = None,
+) -> tuple[list, str | None]:
     """Fetch meetings + attendees from WorkIQ and update both caches.
 
     Single WorkIQ call (JSON shape per Phase 0 of
@@ -82,11 +85,16 @@ def sync_meetings_for_date(date_str: str) -> tuple[list, str | None]:
 
     Args:
         date_str: Date in YYYY-MM-DD format.
+        prefetched_meetings: Optional raw source payload already fetched by a
+            parallel calendar-import worker. Database writes remain serialized.
 
     Returns:
         Tuple of (meetings list in picker shape, error message or None).
     """
-    from app.services.meeting_prefetch import prefetch_for_date_full
+    from app.services.meeting_prefetch import (
+        prefetch_for_date_full,
+        store_prefetched_meetings_for_date,
+    )
     from app.models import PrefetchedMeeting, PrefetchedMeetingAttendee
 
     logger.info("Syncing meetings for %s", date_str)
@@ -112,7 +120,13 @@ def sync_meetings_for_date(date_str: str) -> tuple[list, str | None]:
             )
         }
 
-    _, picker_meetings, err = prefetch_for_date_full(date_str)
+    if prefetched_meetings is None:
+        _, picker_meetings, err = prefetch_for_date_full(date_str)
+    else:
+        _, picker_meetings, err = store_prefetched_meetings_for_date(
+            date_str,
+            prefetched_meetings,
+        )
     if err:
         # WorkIQ call failed -- leave existing ghosts alone.
         return [], err

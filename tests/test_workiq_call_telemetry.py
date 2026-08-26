@@ -150,6 +150,22 @@ class TestQueryWorkiqFailures:
             assert rec.call_args.args[0] == 'meeting_summary'
             assert rec.call_args.args[1] == 'server_error'
 
+    def test_none_stdout_returns_clear_empty_response_error(self):
+        """Successful subprocesses with no stdout never leak AttributeError."""
+        from app.services import workiq_service
+
+        fake_result = MagicMock(returncode=0, stderr=None, stdout=None)
+        with patch('shutil.which', return_value='/usr/bin/npx'), \
+             patch('platform.system', return_value='Linux'), \
+             patch('subprocess.run', return_value=fake_result), \
+             patch.object(workiq_service, '_record_workiq_failure') as rec:
+            with pytest.raises(RuntimeError, match='empty response'):
+                workiq_service.query_workiq('hi', operation='meeting_list')
+
+            rec.assert_called_once()
+            assert rec.call_args.args[0] == 'meeting_list'
+            assert rec.call_args.args[1] == 'server_error'
+
     def test_subprocess_timeout_records_failure(self):
         from app.services import workiq_service
 
