@@ -34,6 +34,41 @@ def test_missing_profile_fails_before_outlook_launch():
     dispatch.assert_not_called()
 
 
+def test_availability_probe_skips_com_without_profile():
+    """Source selection must choose WorkIQ without launching Outlook setup."""
+    with patch.object(
+        outlook_calendar,
+        '_configured_profile_name',
+        return_value=None,
+    ), patch('win32com.client.Dispatch') as dispatch:
+        assert outlook_calendar.corporate_outlook_available() is False
+
+    dispatch.assert_not_called()
+
+
+def test_availability_probe_accepts_corporate_store():
+    """Configured corporate DeliveryStore selects deterministic Outlook path."""
+    namespace = Mock()
+    outlook = Mock()
+    outlook.GetNamespace.return_value = namespace
+    with patch.object(
+        outlook_calendar,
+        '_configured_profile_name',
+        return_value='Outlook',
+    ), patch.object(
+        outlook_calendar,
+        '_corporate_calendar_items',
+        return_value=Mock(),
+    ) as corporate_items, patch(
+        'win32com.client.Dispatch',
+        return_value=outlook,
+    ):
+        assert outlook_calendar.corporate_outlook_available() is True
+
+    outlook.GetNamespace.assert_called_once_with('MAPI')
+    corporate_items.assert_called_once_with(namespace)
+
+
 def test_unavailable_outlook_is_not_retried_during_import():
     """One eligibility failure must keep remaining import dates on WorkIQ."""
     with patch.object(

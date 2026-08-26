@@ -54,7 +54,7 @@ def main() -> None:
     os.environ["SALESBUDDY_ROLE"] = "worker"
 
     from app import create_app
-    from app.services import activity_enrichment  # noqa: F401
+    from app.services import activity_coverage, activity_enrichment  # noqa: F401
     from app.services.job_queue import run_worker_loop
 
     app = create_app()
